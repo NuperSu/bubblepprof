@@ -109,6 +109,10 @@ func run(out io.Writer, o options) error {
 		MaxStructFields:    128,
 	}
 
+	// FIX: Instantiate the walker ONCE here so 'visited' map is shared globally.
+	// This prevents re-printing the same heap objects for every stack frame.
+	w := newObjWalker(out, o.objDepth, o.maxObjects)
+
 	for _, g := range gs {
 		printGoroutineHeader(out, g)
 
@@ -126,8 +130,6 @@ func run(out io.Writer, o options) error {
 				fmt.Fprintf(out, "     locals error: %v\n", err)
 				continue
 			}
-
-			w := newObjWalker(out, o.objDepth, o.maxObjects)
 
 			// Start the traversal from *all* locals on the frame stack.
 			// - pointer-typed locals are roots
