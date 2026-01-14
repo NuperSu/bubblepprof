@@ -1,0 +1,36 @@
+; -*- mode: org -*-
+
+
+** TODO Split into packages: goheap and cmd.
+** TODO No o.objDepth, no o.maxObjects. Walk the whole heap.
+** TODO Testcases to ensure 100% branch coverage. There may be no
+   "But Value can also hold the raw pointer value as an integer constant"
+   without a test.
+** TODO Pointer values are not uint64, but uintptr.
+** TODO Do not mix walking the graph of live objects and printing them.
+** TODO Walk objects referenced by channels and finalizers.
+** TODO walkValue(path): path grows quadratically when walking a linked list.
+   The CPU and RAM complexity must be linear in the number of live objects.
+** TODO enterObject(isStackLocal) is broken. Only GC roots are reported as
+   stack-allocated. It's not true.
+
+
+# API of goheap
+
+type LiveObjects struct {
+	??? pointers to a Delve service
+
+	visited map[uintptr]*LiveObject
+}
+
+type LiveObject struct {
+	typeInfo ??? debug info pointer for this object
+
+	// pointer-typed fields of a struct, or array elements
+	children []*LiveObject
+}
+
+func (o *LiveObjects) Add(??? a variable in a goroutine stack)
+
+// For debug dumps
+func (o *LiveObjects) All() iter.Seq2[uintptr, *LiveObject]
