@@ -88,7 +88,7 @@ func run(out io.Writer, o options) error {
 	if err != nil {
 		return fmt.Errorf("list goroutines: %w", err)
 	}
-	fmt.Fprintf(out, "goroutines: %d\n", len(gs))
+	fmt.Fprintf(out, "goroutines: %d\n\n", len(gs))
 
 	// FollowPointers=true so proc.Variable.Children includes dereferenced pointees.
 	loadCfg := proc.LoadConfig{
@@ -102,12 +102,39 @@ func run(out io.Writer, o options) error {
 	// Traversal-only object graph builder (no printing inside it).
 	live := goheap.New(d)
 
+	// Choose a stable evaluation context for best-effort global roots.
+	// (Package variables and runtime globals are process-wide; we only need to add them once.)
+	var ctxGID int64
+	if len(gs) > 0 {
+		ctxGID = gs[0].ID
+	}
+
+	// Best-effort: add package-scope variables once.
+	// Do this outside the per-frame loop to avoid repeated huge allocations.
+	if ctxGID != 0 {
+		if pkgVars, err := callVarsMethod(d, "PackageVariables", ctxGID, 0, loadCfg); err == nil {
+			for _, v := range pkgVars {
+				live.Add(v)
+			}
+		}
+	}
+
+	// Best-effort: attempt to pull in runtime finalizer structures by name once.
+	// Failures are ignored.
+	if ctxGID != 0 {
+		for _, expr := range []string{"runtime.finq", "runtime.allfin", "runtime.allfins", "runtime.fing"} {
+			if v, err := callEvalMethod(d, ctxGID, 0, expr, loadCfg); err == nil && v != nil {
+				live.Add(v)
+			}
+		}
+	}
+
 	for _, g := range gs {
 		printGoroutineHeader(out, g)
 
 		frames, err := d.Stacktrace(g.ID, o.depth, api.StacktraceOptions(0))
 		if err != nil {
-			fmt.Fprintf(out, "  stacktrace error: %v\n", err)
+			fmt.Fprintf(out, "  stacktrace error: %v\n\n", err)
 			continue
 		}
 
@@ -123,28 +150,10 @@ func run(out io.Writer, o options) error {
 				live.Add(v)
 			}
 
-			// Best-effort: include package-scope variables (helps pull in globals such
-			// as channels, and potentially runtime/global structures).
-			if pkgVars, err := callVarsMethod(d, "PackageVariables", g.ID, i, loadCfg); err == nil {
-				for _, v := range pkgVars {
-					live.Add(v)
-				}
-			}
-
-			// Best-effort: attempt to pull in runtime finalizer structures by name.
-			// This is intentionally conservative: failures are ignored.
-			for _, expr := range []string{"runtime.finq", "runtime.allfin", "runtime.allfins", "runtime.fing"} {
-				if v, err := callEvalMethod(d, g.ID, i, expr, loadCfg); err == nil && v != nil {
-					live.Add(v)
-				}
-			}
-
-			n := 0
-			for range live.All() {
-				n++
-			}
-			fmt.Fprintf(out, "     (live objects so far: %d)\n", n)
+			fmt.Fprintf(out, "     (live objects so far: %d)\n", live.Count())
 		}
+
+		fmt.Fprintln(out)
 	}
 
 	return nil
@@ -152,67 +161,62 @@ func run(out io.Writer, o options) error {
 
 // callVarsMethod uses reflection so this binary can build against Delve versions
 // that may not expose every helper (e.g., PackageVariables).
-func callVarsMethod(d *debugger.Debugger, method string, gid, frame int, cfg proc.LoadConfig) ([]*proc.Variable, error) {
+func callVarsMethod(d *debugger.Debugger, method string, gid int64, frame int, cfg proc.LoadConfig) ([]*proc.Variable, error) {
 	m := reflect.ValueOf(d).MethodByName(method)
 	if !m.IsValid() {
 		return nil, fmt.Errorf("%s not supported", method)
 	}
 
-	vals := m.Call([]reflect.Value{
-		reflect.ValueOf(gid),
-		reflect.ValueOf(frame),
-		reflect.ValueOf(0),
-		reflect.ValueOf(cfg),
-	})
+	args, err := buildReflectArgs(m.Type(), gid, frame, "", cfg)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", method, err)
+	}
+
+	vals := m.Call(args)
 	if len(vals) != 2 {
 		return nil, fmt.Errorf("unexpected %s signature", method)
 	}
 
 	if !vals[1].IsNil() {
-		err, _ := vals[1].Interface().(error)
-		if err == nil {
-			err = fmt.Errorf("%s returned non-nil error", method)
+		if e, _ := vals[1].Interface().(error); e != nil {
+			return nil, e
 		}
-		return nil, err
+		return nil, fmt.Errorf("%s returned non-nil error", method)
 	}
 
 	if vals[0].IsNil() {
 		return nil, nil
 	}
 
-	out := make([]*proc.Variable, 0)
-	s, ok := vals[0].Interface().([]*proc.Variable)
-	if ok {
-		out = append(out, s...)
-		return out, nil
+	if s, ok := vals[0].Interface().([]*proc.Variable); ok {
+		return s, nil
 	}
-
 	return nil, fmt.Errorf("unexpected %s return type", method)
 }
 
-func callEvalMethod(d *debugger.Debugger, gid, frame int, expr string, cfg proc.LoadConfig) (*proc.Variable, error) {
+func callEvalMethod(d *debugger.Debugger, gid int64, frame int, expr string, cfg proc.LoadConfig) (*proc.Variable, error) {
 	m := reflect.ValueOf(d).MethodByName("EvalVariable")
 	if !m.IsValid() {
 		return nil, fmt.Errorf("EvalVariable not supported")
 	}
 
-	vals := m.Call([]reflect.Value{
-		reflect.ValueOf(gid),
-		reflect.ValueOf(frame),
-		reflect.ValueOf(expr),
-		reflect.ValueOf(cfg),
-	})
+	args, err := buildReflectArgs(m.Type(), gid, frame, expr, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("EvalVariable: %w", err)
+	}
+
+	vals := m.Call(args)
 	if len(vals) != 2 {
 		return nil, fmt.Errorf("unexpected EvalVariable signature")
 	}
 
 	if !vals[1].IsNil() {
-		err, _ := vals[1].Interface().(error)
-		if err == nil {
-			err = fmt.Errorf("EvalVariable returned non-nil error")
+		if e, _ := vals[1].Interface().(error); e != nil {
+			return nil, e
 		}
-		return nil, err
+		return nil, fmt.Errorf("EvalVariable returned non-nil error")
 	}
+
 	if vals[0].IsNil() {
 		return nil, nil
 	}
@@ -221,4 +225,59 @@ func callEvalMethod(d *debugger.Debugger, gid, frame int, expr string, cfg proc.
 		return nil, fmt.Errorf("unexpected EvalVariable return type")
 	}
 	return v, nil
+}
+
+// buildReflectArgs matches parameters by type and order.
+// Supported parameter kinds:
+//   - int64: goroutine id
+//   - int: frame index and/or extra int args (defaults to 0)
+//   - string: expression (EvalVariable)
+//   - proc.LoadConfig: load config
+func buildReflectArgs(fn reflect.Type, gid int64, frame int, expr string, cfg proc.LoadConfig) ([]reflect.Value, error) {
+	int64T := reflect.TypeOf(int64(0))
+	intT := reflect.TypeOf(int(0))
+	stringT := reflect.TypeOf("")
+	loadCfgT := reflect.TypeOf(proc.LoadConfig{})
+
+	usedFrame := false
+	usedExpr := false
+
+	args := make([]reflect.Value, 0, fn.NumIn())
+	for i := 0; i < fn.NumIn(); i++ {
+		t := fn.In(i)
+
+		switch {
+		case t == int64T:
+			args = append(args, reflect.ValueOf(gid).Convert(t))
+
+		case t == intT:
+			if !usedFrame {
+				args = append(args, reflect.ValueOf(frame).Convert(t))
+				usedFrame = true
+			} else {
+				args = append(args, reflect.ValueOf(0).Convert(t))
+			}
+
+		case t == stringT:
+			if usedExpr {
+				return nil, fmt.Errorf("multiple string params not supported")
+			}
+			args = append(args, reflect.ValueOf(expr).Convert(t))
+			usedExpr = true
+
+		case t == loadCfgT:
+			args = append(args, reflect.ValueOf(cfg).Convert(t))
+
+		default:
+			// Allow compatible LoadConfig aliases if any.
+			v := reflect.ValueOf(cfg)
+			if v.Type().ConvertibleTo(t) {
+				args = append(args, v.Convert(t))
+				continue
+			}
+			return nil, fmt.Errorf("unsupported param %d type %s", i, t.String())
+		}
+	}
+
+	return args, nil
 }

@@ -30,15 +30,11 @@ type LiveObjects struct {
 type LiveObject struct {
 	Addr uintptr
 
-	// Var holds Delve's debug variable representing the object (type/kind/children).
-	Var *proc.Variable
+	Kind reflect.Kind
+	Type string
 
-	// Children are outgoing edges to other objects (pointer-typed fields, array/slice
-	// elements, map buckets/entries, chan internals, etc., depending on what Delve
-	// loaded for Var.Children).
 	Children []*LiveObject
 
-	// internal: whether we already expanded Var.Children.
 	scanned bool
 }
 
@@ -88,20 +84,20 @@ func (o *LiveObjects) Add(v *proc.Variable) {
 			if wi.parent != nil {
 				wi.parent.Children = append(wi.parent.Children, childObj)
 			}
-
 			if childObj.scanned {
 				continue
 			}
 			childObj.scanned = true
 
-			// Expand children of the referenced object.
-			for i := range childObj.Var.Children {
-				c := &childObj.Var.Children[i]
-				if isSliceLenCap(childObj.Var, c) {
+			pv := pointeeOrSelf(wi.v)
+			for i := range pv.Children {
+				c := &pv.Children[i]
+				if isSliceLenCap(pv, c) {
 					continue
 				}
 				stack = append(stack, workItem{parent: childObj, v: c})
 			}
+
 			continue
 		}
 
@@ -166,7 +162,11 @@ func (o *LiveObjects) enterObject(addr uintptr, v *proc.Variable) *LiveObject {
 		return existing
 	}
 
-	obj := &LiveObject{Addr: addr, Var: v}
+	obj := &LiveObject{
+		Addr: addr,
+		Kind: v.Kind,
+		Type: v.TypeString(),
+	}
 	o.visited[addr] = obj
 	return obj
 }
