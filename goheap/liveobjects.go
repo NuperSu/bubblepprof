@@ -5,23 +5,23 @@ import (
 	"iter"
 	"reflect"
 	"strings"
+	"unsafe"
 
 	"github.com/go-delve/delve/pkg/proc"
 	"github.com/go-delve/delve/service/debugger"
 )
 
-// LiveObjects builds an in-memory graph of live objects reachable from a set of roots
-// (typically stack locals, but can be any proc.Variable).
+// LiveObjects builds a graph of heap objects reachable from a set of roots
+// (typically locals on goroutine stacks).
 //
-// Design goals:
-//   - No recursion depth limits in the walker (it visits until it reaches a fixpoint).
-//   - Linear time/space in the number of discovered objects/edges (no path copies).
-//   - Traversal is side-effect free: it never prints.
+// Traversal is separated from any printing or formatting.
 //
-// NOTE: The completeness of the traversal is constrained by the amount of debug
-// information Delve loads into proc.Variable.Children (controlled by proc.LoadConfig).
+// Important limitation:
+// Delve only materializes children up to the limits of the proc.LoadConfig used
+// to fetch variables (locals/globals/evals). If MaxVariableRecurse is too small,
+// pointee sub-structure may be truncated and the reachable graph will be partial.
 type LiveObjects struct {
-	// Delve debugger handle (used as a context / for future extension).
+	// pointer(s) to Delve service(s)
 	dbg *debugger.Debugger
 
 	visited map[uintptr]*LiveObject
@@ -30,120 +30,34 @@ type LiveObjects struct {
 type LiveObject struct {
 	Addr uintptr
 
-	Kind reflect.Kind
-	Type string
+	// debug info pointer for this object (keep the variable for type/kind/children)
+	Var *proc.Variable
 
+	// pointer-typed fields of a struct, or array/slice/map elements, etc.
 	Children []*LiveObject
 
+	// internal: to avoid rescanning already-expanded nodes
 	scanned bool
 }
 
 func New(dbg *debugger.Debugger) *LiveObjects {
 	return &LiveObjects{
 		dbg:     dbg,
-		visited: make(map[uintptr]*LiveObject, 4096),
+		visited: make(map[uintptr]*LiveObject, 256),
 	}
 }
 
-// Add adds a root value and walks all objects reachable from it (subject to what
-// Delve loaded into proc.Variable.Children).
+// Add adds a “root” value (typically a local on a goroutine stack frame).
+// Traversal populates visited + edges; it does not print.
 func (o *LiveObjects) Add(v *proc.Variable) {
 	if v == nil {
 		return
 	}
-
-	// Explicit worklist to avoid recursion and to keep traversal linear.
-	type workItem struct {
-		parent *LiveObject
-		v      *proc.Variable
-	}
-
-	stack := make([]workItem, 0, 256)
-	stack = append(stack, workItem{parent: nil, v: v})
-
-	for len(stack) > 0 {
-		// pop
-		wi := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-
-		if wi.v == nil {
-			continue
-		}
-
-		// Pointer-like values represent references to heap objects.
-		if isPointerLike(wi.v) {
-			addr, ok := pointerValue(wi.v)
-			if !ok || addr == 0 {
-				continue
-			}
-
-			childObj := o.enterObject(addr, pointeeOrSelf(wi.v))
-			if childObj == nil {
-				continue
-			}
-			if wi.parent != nil {
-				wi.parent.Children = append(wi.parent.Children, childObj)
-			}
-			if childObj.scanned {
-				continue
-			}
-			childObj.scanned = true
-
-			pv := pointeeOrSelf(wi.v)
-			for i := range pv.Children {
-				c := &pv.Children[i]
-				if isSliceLenCap(pv, c) {
-					continue
-				}
-				stack = append(stack, workItem{parent: childObj, v: c})
-			}
-
-			continue
-		}
-
-		// Addressable structs are also treated as nodes to dedupe linked-list style graphs.
-		if wi.v.Kind == reflect.Struct && wi.v.Addr != 0 {
-			addr := uintptr(wi.v.Addr)
-			obj := o.enterObject(addr, wi.v)
-			if obj == nil {
-				continue
-			}
-			if wi.parent != nil {
-				wi.parent.Children = append(wi.parent.Children, obj)
-			}
-
-			if obj.scanned {
-				continue
-			}
-			obj.scanned = true
-
-			for i := range wi.v.Children {
-				c := &wi.v.Children[i]
-				if isSliceLenCap(wi.v, c) {
-					continue
-				}
-				stack = append(stack, workItem{parent: obj, v: c})
-			}
-			continue
-		}
-
-		// Inline composites: traverse their children without creating a node.
-		switch wi.v.Kind {
-		case reflect.Struct, reflect.Array, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan, reflect.Func:
-			for i := range wi.v.Children {
-				c := &wi.v.Children[i]
-				if isSliceLenCap(wi.v, c) {
-					continue
-				}
-				stack = append(stack, workItem{parent: wi.parent, v: c})
-			}
-		default:
-			// primitives: nothing to do
-		}
-	}
+	// No pre-scan/heuristics: just walk; primitives will be ignored quickly.
+	o.walkFromRoots([]root{{parent: nil, v: v}})
 }
 
-// All returns the visited object set.
+// All returns all unique objects discovered so far.
 func (o *LiveObjects) All() iter.Seq2[uintptr, *LiveObject] {
 	return func(yield func(uintptr, *LiveObject) bool) {
 		for addr, obj := range o.visited {
@@ -151,6 +65,96 @@ func (o *LiveObjects) All() iter.Seq2[uintptr, *LiveObject] {
 				return
 			}
 		}
+	}
+}
+
+// ---- traversal internals (no printing) ----
+
+type root struct {
+	parent *LiveObject
+	v      *proc.Variable
+}
+
+// walkFromRoots performs an unbounded traversal (bounded only by what Delve
+// materialized into proc.Variable.Children) using an explicit stack to avoid
+// recursion blow-ups on long linked lists.
+func (o *LiveObjects) walkFromRoots(roots []root) {
+	stack := make([]root, 0, len(roots)+64)
+	stack = append(stack, roots...)
+
+	for len(stack) > 0 {
+		n := len(stack) - 1
+		cur := stack[n]
+		stack = stack[:n]
+
+		v := cur.v
+		if v == nil {
+			continue
+		}
+
+		// Pointer-like values: create/lookup the pointee node and expand it once.
+		if isPointerLike(v) {
+			ptr, ok := pointerValue(v)
+			if !ok || ptr == 0 {
+				continue
+			}
+
+			childObj := o.enterObject(ptr, pointeeOrSelf(v))
+			if childObj == nil {
+				continue
+			}
+			if cur.parent != nil {
+				cur.parent.Children = append(cur.parent.Children, childObj)
+			}
+
+			if childObj.scanned {
+				continue
+			}
+			childObj.scanned = true
+			pushChildren(&stack, childObj, childObj.Var)
+			continue
+		}
+
+		switch v.Kind {
+		case reflect.Struct:
+			// If addressable, treat it as a node too (dedupe by address).
+			if v.Addr != 0 {
+				obj := o.enterObject(uintptr(v.Addr), v)
+				if obj == nil {
+					continue
+				}
+				if cur.parent != nil {
+					cur.parent.Children = append(cur.parent.Children, obj)
+				}
+				if obj.scanned {
+					continue
+				}
+				obj.scanned = true
+				pushChildren(&stack, obj, v)
+				continue
+			}
+			// Not addressable: scan inline.
+			pushChildren(&stack, cur.parent, v)
+
+		case reflect.Array, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan:
+			pushChildren(&stack, cur.parent, v)
+		default:
+			// primitives: nothing to do
+		}
+	}
+}
+
+func pushChildren(stack *[]root, parent *LiveObject, v *proc.Variable) {
+	if v == nil {
+		return
+	}
+	// Push in reverse so the natural order is preserved with a LIFO stack.
+	for i := len(v.Children) - 1; i >= 0; i-- {
+		c := &v.Children[i]
+		if v.Kind == reflect.Slice && (c.Name == "len" || c.Name == "cap") {
+			continue
+		}
+		*stack = append(*stack, root{parent: parent, v: c})
 	}
 }
 
@@ -163,9 +167,9 @@ func (o *LiveObjects) enterObject(addr uintptr, v *proc.Variable) *LiveObject {
 	}
 
 	obj := &LiveObject{
-		Addr: addr,
-		Kind: v.Kind,
-		Type: v.TypeString(),
+		Addr:    addr,
+		Var:     v,
+		scanned: false,
 	}
 	o.visited[addr] = obj
 	return obj
@@ -177,49 +181,50 @@ func isPointerLike(v *proc.Variable) bool {
 	if v == nil {
 		return false
 	}
-
-	// In the Delve API, several Go kinds are represented as "values" that are in
-	// practice pointers to runtime objects.
-	switch v.Kind {
-	case reflect.Ptr, reflect.UnsafePointer, reflect.Map, reflect.Chan, reflect.Func:
+	// Real pointer kinds.
+	if v.Kind == reflect.Ptr || v.Kind == reflect.UnsafePointer {
+		return true
+	}
+	// Chan/map/func values are runtime pointers too (hchan/hmap/funcval).
+	if v.Kind == reflect.Chan || v.Kind == reflect.Map || v.Kind == reflect.Func {
 		return true
 	}
 
-	// Fallback: TypeString often carries the leading '*' for pointers.
 	ts := v.TypeString()
-	return strings.HasPrefix(ts, "*") || ts == "unsafe.Pointer"
+	if strings.HasPrefix(ts, "*") || ts == "unsafe.Pointer" {
+		return true
+	}
+	return false
 }
 
-func isSliceLenCap(parent, child *proc.Variable) bool {
-	return parent != nil && parent.Kind == reflect.Slice && child != nil && (child.Name == "len" || child.Name == "cap")
-}
-
-// Best-effort pointer extraction:
-// - v.Value can hold the raw pointer value as an integer constant
-// - v.Base sometimes holds it
+// Best-effort pointer extraction.
+//
+// Note: proc.Variable.Value can hold the raw pointer value as an integer
+// constant; if it overflows uintptr we ignore it.
 func pointerValue(v *proc.Variable) (uintptr, bool) {
 	if v == nil {
 		return 0, false
 	}
 
-	max := ^uintptr(0)
 	if v.Value != nil {
 		if u, ok := constant.Uint64Val(v.Value); ok {
-			if u <= uint64(max) {
+			if u <= uint64(^uintptr(0)) {
 				return uintptr(u), true
 			}
 			return 0, false
 		}
-		if i, ok := constant.Int64Val(v.Value); ok {
-			if i >= 0 && uint64(i) <= uint64(max) {
-				return uintptr(i), true
+		if i, ok := constant.Int64Val(v.Value); ok && i >= 0 {
+			ui := uint64(i)
+			if ui <= uint64(^uintptr(0)) {
+				return uintptr(ui), true
 			}
 			return 0, false
 		}
 	}
 
 	if v.Base != 0 {
-		if v.Base <= uint64(max) {
+		// v.Base is uint64 in Delve, but represents an address.
+		if v.Base <= uint64(^uintptr(0)) {
 			return uintptr(v.Base), true
 		}
 		return 0, false
@@ -238,3 +243,6 @@ func pointeeOrSelf(p *proc.Variable) *proc.Variable {
 	}
 	return p
 }
+
+// Make sure uintptr size matches our assumptions at build time.
+var _ = unsafe.Sizeof(uintptr(0))
