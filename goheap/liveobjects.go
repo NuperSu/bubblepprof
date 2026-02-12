@@ -26,6 +26,8 @@ type LiveObjects struct {
 
 	visited map[uintptr]*LiveObject
 
+	runtimeRootsAdded bool
+
 	// Scope for lazy EvalVariableInScope calls.
 	// Updated by Add; any valid goroutine+frame works for memory reads.
 	scopeGID   int64
@@ -62,6 +64,7 @@ func (o *LiveObjects) Add(v *proc.Variable, gid int64, frame int) {
 	}
 	o.scopeGID = gid
 	o.scopeFrame = frame
+	o.addRuntimeRoots()
 	o.walkFromRoots([]root{{parent: nil, v: v}})
 }
 
@@ -170,6 +173,32 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			// primitives: nothing to do
 		}
 	}
+}
+
+// addRuntimeRoots best-effort adds runtime finalizer queues as roots.
+// If symbols are not available in scope, this is a no-op.
+func (o *LiveObjects) addRuntimeRoots() {
+	if o.runtimeRootsAdded {
+		return
+	}
+	o.runtimeRootsAdded = true
+
+	exprs := []string{
+		"runtime.allfin",
+		"runtime.finq",
+	}
+	roots := make([]root, 0, len(exprs))
+	for _, expr := range exprs {
+		v, err := o.dbg.EvalVariableInScope(o.scopeGID, o.scopeFrame, 0, expr, o.loadCfg)
+		if err != nil || v == nil {
+			continue
+		}
+		roots = append(roots, root{v: v})
+	}
+	if len(roots) == 0 {
+		return
+	}
+	o.walkFromRoots(roots)
 }
 
 // loadPointee loads the object that ptrVar points to, using EvalVariableInScope.
@@ -288,8 +317,18 @@ func pointeeOrSelf(p *proc.Variable) *proc.Variable {
 	if p == nil {
 		return nil
 	}
-	if len(p.Children) > 0 {
+	if isTypedPointer(p) && len(p.Children) > 0 {
 		return &p.Children[0]
 	}
 	return p
+}
+
+func isTypedPointer(v *proc.Variable) bool {
+	if v == nil {
+		return false
+	}
+	if v.Kind == reflect.Ptr {
+		return true
+	}
+	return strings.HasPrefix(v.TypeString(), "*")
 }
