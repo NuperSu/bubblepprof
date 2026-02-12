@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 
 	"github.com/go-delve/delve/pkg/proc"
@@ -115,10 +114,15 @@ func run(out io.Writer, o options) error {
 	for _, g := range gs {
 		printGoroutineHeader(out, g)
 
-		frames, err := d.Stacktrace(g.ID, math.MaxInt, api.StacktraceOptions(0))
+		const maxDepth = 8192
+		frames, err := d.Stacktrace(g.ID, maxDepth, api.StacktraceOptions(0)) // temporary limit, later will read it all in chunks
 		if err != nil {
 			fmt.Fprintf(out, "  stacktrace error: %v\n", err)
 			continue
+		}
+
+		if len(frames) == maxDepth {
+			fmt.Fprintf(out, "  note: stacktrace truncated at %d frames\n", maxDepth)
 		}
 
 		for i, fr := range frames {

@@ -261,15 +261,21 @@ func pointerValue(v *proc.Variable) (uintptr, bool) {
 		return 0, false
 	}
 
+	// Prefer Value if it's a concrete integer constant.
 	if v.Value != nil {
-		if u, ok := constant.Uint64Val(v.Value); ok {
-			return uintptr(u), true
+		if v.Value.Kind() == constant.Int {
+			// Uint64Val / Int64Val are only safe after Kind == Int.
+			if u, ok := constant.Uint64Val(v.Value); ok {
+				return uintptr(u), true
+			}
+			if i, ok := constant.Int64Val(v.Value); ok && i >= 0 {
+				return uintptr(i), true
+			}
 		}
-		if i, ok := constant.Int64Val(v.Value); ok && i >= 0 {
-			return uintptr(i), true
-		}
+		// Non-int constants (unknown/string/bool/etc.) -> ignore.
 	}
 
+	// Delve often stores the pointee address here for pointer-like values.
 	if v.Base != 0 {
 		return uintptr(v.Base), true
 	}
