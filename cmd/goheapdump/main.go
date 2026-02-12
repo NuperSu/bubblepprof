@@ -6,11 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/go-delve/delve/pkg/proc"
-	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/debugger"
-
-	"delve_first_project/goheap"
 )
 
 type options struct {
@@ -91,60 +87,11 @@ func run(out io.Writer, o options) error {
 	}
 	defer func() { _ = d.Detach(false) }()
 
-	gs, err := listAllGoroutines(d, o.pageSize)
+	result, err := buildHeapGraph(d, o)
 	if err != nil {
-		return fmt.Errorf("list goroutines: %w", err)
-	}
-	fmt.Fprintf(out, "goroutines: %d\n", len(gs))
-
-	// MaxVariableRecurse is kept at 1 so that a single LocalVariables call
-	// never explodes into an exponential tree (cyclic/fan-out structures).
-	// goheap lazily re-evaluates pointers it discovers, with deduplication,
-	// so the full graph is still traversed.
-	loadCfg := proc.LoadConfig{
-		FollowPointers:     true,
-		MaxVariableRecurse: 1,
-		MaxStringLen:       o.maxStringLen,
-		MaxArrayValues:     o.maxArrayValues,
-		MaxStructFields:    o.maxStructFields,
+		return err
 	}
 
-	live := goheap.New(d, loadCfg)
-
-	for _, g := range gs {
-		printGoroutineHeader(out, g)
-
-		const maxDepth = 8192
-		frames, err := d.Stacktrace(g.ID, maxDepth, api.StacktraceOptions(0)) // temporary limit, later will read it all in chunks
-		if err != nil {
-			fmt.Fprintf(out, "  stacktrace error: %v\n", err)
-			continue
-		}
-
-		if len(frames) == maxDepth {
-			fmt.Fprintf(out, "  note: stacktrace truncated at %d frames\n", maxDepth)
-		}
-
-		for i, fr := range frames {
-			printFrameHeader(out, i, fr)
-
-			locals, err := d.LocalVariables(g.ID, i, 0, loadCfg)
-			if err != nil {
-				fmt.Fprintf(out, "     locals error: %v\n", err)
-				continue
-			}
-
-			for _, v := range locals {
-				live.Add(v, g.ID, i)
-			}
-
-			n := 0
-			for range live.All() {
-				n++
-			}
-			fmt.Fprintf(out, "     (live objects so far: %d)\n", n)
-		}
-	}
-
+	printAnalysisReport(out, result)
 	return nil
 }
