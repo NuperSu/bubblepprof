@@ -6,7 +6,6 @@ import (
 	"iter"
 	"reflect"
 	"strings"
-	"unsafe"
 
 	"github.com/go-delve/delve/pkg/proc"
 	"github.com/go-delve/delve/service/debugger"
@@ -36,13 +35,13 @@ type LiveObjects struct {
 type LiveObject struct {
 	Addr uintptr
 
-	// debug info pointer for this object (keep the variable for type/kind/children)
+	// Debug info for this object (type/kind/children).
 	Var *proc.Variable
 
-	// pointer-typed fields of a struct, or array/slice/map elements, etc.
+	// Pointer-typed fields of a struct, or array/slice/map elements, etc.
 	Children []*LiveObject
 
-	// internal: to avoid rescanning already-expanded nodes
+	// Internal: to avoid rescanning already-expanded nodes.
 	scanned bool
 }
 
@@ -201,7 +200,7 @@ func (o *LiveObjects) ensureExpanded(v *proc.Variable) *proc.Variable {
 // loadAt evaluates *(*typeName)(unsafe.Pointer(uintptr(addr))) to load a
 // variable from the core dump. Returns nil on any error.
 func (o *LiveObjects) loadAt(typeName string, addr uintptr) *proc.Variable {
-	expr := fmt.Sprintf("*(*%s)(unsafe.Pointer(uintptr(%d)))", typeName, uint64(addr))
+	expr := fmt.Sprintf("*(*%s)(unsafe.Pointer(uintptr(%d)))", typeName, addr)
 	v, err := o.dbg.EvalVariableInScope(o.scopeGID, o.scopeFrame, 0, expr, o.loadCfg)
 	if err != nil {
 		return nil
@@ -232,9 +231,8 @@ func (o *LiveObjects) enterObject(addr uintptr, v *proc.Variable) *LiveObject {
 	}
 
 	obj := &LiveObject{
-		Addr:    addr,
-		Var:     v,
-		scanned: false,
+		Addr: addr,
+		Var:  v,
 	}
 	o.visited[addr] = obj
 	return obj
@@ -246,26 +244,18 @@ func isPointerLike(v *proc.Variable) bool {
 	if v == nil {
 		return false
 	}
-	// Real pointer kinds.
-	if v.Kind == reflect.Ptr || v.Kind == reflect.UnsafePointer {
-		return true
-	}
-	// Chan/map/func values are runtime pointers too (hchan/hmap/funcval).
-	if v.Kind == reflect.Chan || v.Kind == reflect.Map || v.Kind == reflect.Func {
+	switch v.Kind {
+	case reflect.Ptr, reflect.UnsafePointer,
+		reflect.Chan, reflect.Map, reflect.Func:
 		return true
 	}
 
 	ts := v.TypeString()
-	if strings.HasPrefix(ts, "*") || ts == "unsafe.Pointer" {
-		return true
-	}
-	return false
+	return strings.HasPrefix(ts, "*") || ts == "unsafe.Pointer"
 }
 
-// Best-effort pointer extraction.
-//
-// Note: proc.Variable.Value can hold the raw pointer value as an integer
-// constant; if it overflows uintptr we ignore it.
+// pointerValue extracts the address a pointer-like variable points to.
+// Delve stores addresses as uint64; we convert to uintptr.
 func pointerValue(v *proc.Variable) (uintptr, bool) {
 	if v == nil {
 		return 0, false
@@ -273,32 +263,21 @@ func pointerValue(v *proc.Variable) (uintptr, bool) {
 
 	if v.Value != nil {
 		if u, ok := constant.Uint64Val(v.Value); ok {
-			if u <= uint64(^uintptr(0)) {
-				return uintptr(u), true
-			}
-			return 0, false
+			return uintptr(u), true
 		}
 		if i, ok := constant.Int64Val(v.Value); ok && i >= 0 {
-			ui := uint64(i)
-			if ui <= uint64(^uintptr(0)) {
-				return uintptr(ui), true
-			}
-			return 0, false
+			return uintptr(i), true
 		}
 	}
 
 	if v.Base != 0 {
-		// v.Base is uint64 in Delve, but represents an address.
-		if v.Base <= uint64(^uintptr(0)) {
-			return uintptr(v.Base), true
-		}
-		return 0, false
+		return uintptr(v.Base), true
 	}
 
 	return 0, false
 }
 
-// If FollowPointers is enabled, p.Children[0] is usually the dereferenced value.
+// pointeeOrSelf returns the dereferenced value if FollowPointers materialized it.
 func pointeeOrSelf(p *proc.Variable) *proc.Variable {
 	if p == nil {
 		return nil
@@ -308,6 +287,3 @@ func pointeeOrSelf(p *proc.Variable) *proc.Variable {
 	}
 	return p
 }
-
-// Make sure uintptr size matches our assumptions at build time.
-var _ = unsafe.Sizeof(uintptr(0))

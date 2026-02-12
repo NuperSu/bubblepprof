@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	"github.com/go-delve/delve/pkg/proc"
@@ -16,10 +17,9 @@ import (
 type options struct {
 	exePath  string
 	corePath string
-	depth    int // stack depth per goroutine
 	pageSize int // goroutine page size for debugger.Goroutines(start,count)
 
-	// These are Delve materialization limits per single fetch.
+	// Delve materialization limits per single fetch.
 	// Graph traversal in goheap is unbounded (it re-evaluates lazily).
 	maxStringLen    int
 	maxArrayValues  int
@@ -45,7 +45,6 @@ func parseFlags(errOut io.Writer) options {
 
 	flag.StringVar(&o.exePath, "exe", "", "path to the executable that produced the core (must match)")
 	flag.StringVar(&o.corePath, "core", "", "path to the core dump")
-	flag.IntVar(&o.depth, "depth", 64, "stack depth per goroutine")
 	flag.IntVar(&o.pageSize, "page", 256, "goroutine page size for debugger.Goroutines(start,count)")
 
 	// Delve variable materialization limits.
@@ -62,9 +61,6 @@ func parseFlags(errOut io.Writer) options {
 	if o.exePath == "" || o.corePath == "" {
 		flag.Usage()
 		os.Exit(2)
-	}
-	if o.depth <= 0 {
-		o.depth = 64
 	}
 	if o.pageSize <= 0 {
 		o.pageSize = 256
@@ -114,13 +110,12 @@ func run(out io.Writer, o options) error {
 		MaxStructFields:    o.maxStructFields,
 	}
 
-	// Traversal-only object graph builder (no printing inside it).
 	live := goheap.New(d, loadCfg)
 
 	for _, g := range gs {
 		printGoroutineHeader(out, g)
 
-		frames, err := d.Stacktrace(g.ID, o.depth, api.StacktraceOptions(0))
+		frames, err := d.Stacktrace(g.ID, math.MaxInt, api.StacktraceOptions(0))
 		if err != nil {
 			fmt.Fprintf(out, "  stacktrace error: %v\n", err)
 			continue
@@ -135,12 +130,10 @@ func run(out io.Writer, o options) error {
 				continue
 			}
 
-			// Roots: add every local; traversal decides what is reachable.
 			for _, v := range locals {
 				live.Add(v, g.ID, i)
 			}
 
-			// Debug dump count lives HERE (printing layer), not inside traversal.
 			n := 0
 			for range live.All() {
 				n++
