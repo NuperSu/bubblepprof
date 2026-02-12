@@ -16,12 +16,18 @@ import (
 const maxWarnings = 500
 
 type analysisResult struct {
+	goroutines []*goroutineAnalysis
+}
+
+type goroutineAnalysis struct {
+	id int64
+
+	readable bool
+
 	live *goheap.LiveObjects
 
-	goroutinesTotal int
-	goroutinesRead  int
-	framesTotal     int
-	localsTotal     int
+	framesTotal int
+	localsTotal int
 
 	warnings []string
 }
@@ -29,6 +35,11 @@ type analysisResult struct {
 type typeCount struct {
 	typeName string
 	count    int
+}
+
+type objectEntry struct {
+	addr uintptr
+	obj  *goheap.LiveObject
 }
 
 func buildHeapGraph(d *debugger.Debugger, o options) (*analysisResult, error) {
@@ -50,72 +61,131 @@ func buildHeapGraph(d *debugger.Debugger, o options) (*analysisResult, error) {
 	}
 
 	res := &analysisResult{
-		live:            goheap.New(d, loadCfg),
-		goroutinesTotal: len(gs),
+		goroutines: make([]*goroutineAnalysis, 0, len(gs)),
 	}
 
 	for _, g := range gs {
-		if g.Unreadable != nil {
-			res.addWarning("goroutine %d unreadable: %v", g.ID, g.Unreadable)
+		ga := &goroutineAnalysis{
+			id:       g.ID,
+			readable: g.Unreadable == nil,
+		}
+		if ga.readable {
+			ga.live = goheap.New(d, loadCfg)
+		} else {
+			ga.addWarning("unreadable: %v", g.Unreadable)
+			res.goroutines = append(res.goroutines, ga)
 			continue
 		}
-		res.goroutinesRead++
 
 		const maxDepth = 8192
 		frames, err := d.Stacktrace(g.ID, maxDepth, api.StacktraceOptions(0))
 		if err != nil {
-			res.addWarning("goroutine %d stacktrace error: %v", g.ID, err)
+			ga.addWarning("stacktrace error: %v", err)
+			res.goroutines = append(res.goroutines, ga)
 			continue
 		}
 		if len(frames) == maxDepth {
-			res.addWarning("goroutine %d stacktrace truncated at %d frames", g.ID, maxDepth)
+			ga.addWarning("stacktrace truncated at %d frames", maxDepth)
 		}
 
 		for i, fr := range frames {
-			res.framesTotal++
+			ga.framesTotal++
 			if fr.Err != nil {
-				res.addWarning("goroutine %d frame %d error: %v", g.ID, i, fr.Err)
+				ga.addWarning("frame %d error: %v", i, fr.Err)
 			}
 
 			locals, err := d.LocalVariables(g.ID, i, 0, loadCfg)
 			if err != nil {
-				res.addWarning("goroutine %d frame %d locals error: %v", g.ID, i, err)
+				ga.addWarning("frame %d locals error: %v", i, err)
 				continue
 			}
 
 			for _, v := range locals {
-				res.localsTotal++
-				res.live.Add(v, g.ID, i)
+				ga.localsTotal++
+				ga.live.Add(v, g.ID, i)
 			}
 		}
+
+		res.goroutines = append(res.goroutines, ga)
 	}
+
+	sort.Slice(res.goroutines, func(i, j int) bool {
+		return res.goroutines[i].id < res.goroutines[j].id
+	})
 
 	return res, nil
 }
 
-func (r *analysisResult) addWarning(format string, args ...any) {
-	if len(r.warnings) >= maxWarnings {
+func (g *goroutineAnalysis) addWarning(format string, args ...any) {
+	if len(g.warnings) >= maxWarnings {
 		return
 	}
-	r.warnings = append(r.warnings, fmt.Sprintf(format, args...))
+	g.warnings = append(g.warnings, fmt.Sprintf(format, args...))
 }
 
 func printAnalysisReport(w io.Writer, r *analysisResult) {
+	readable := 0
+	for _, g := range r.goroutines {
+		if g.readable {
+			readable++
+		}
+	}
+
+	fmt.Fprintf(w, "goroutines: total=%d readable=%d\n", len(r.goroutines), readable)
+
+	for _, g := range r.goroutines {
+		fmt.Fprintf(w, "\n== goroutine %d ==\n", g.id)
+		if !g.readable {
+			fmt.Fprintln(w, "state: unreadable")
+			printWarnings(w, g.warnings)
+			continue
+		}
+
+		objectCount, edgeCount, typeCounts, objects := collectGraphStats(g.live)
+
+		fmt.Fprintf(w, "frames scanned: %d\n", g.framesTotal)
+		fmt.Fprintf(w, "root locals traversed: %d\n", g.localsTotal)
+		fmt.Fprintf(w, "graph: objects=%d edges=%d\n", objectCount, edgeCount)
+
+		if len(typeCounts) > 0 {
+			fmt.Fprintln(w, "top object types:")
+			limit := 10
+			if len(typeCounts) < limit {
+				limit = len(typeCounts)
+			}
+			for i := 0; i < limit; i++ {
+				fmt.Fprintf(w, "  %2d. %s (%d)\n", i+1, typeCounts[i].typeName, typeCounts[i].count)
+			}
+		}
+
+		if len(objects) > 0 {
+			fmt.Fprintln(w, "objects:")
+			for i, entry := range objects {
+				typeName := normalizeTypeName(entry.obj.Var)
+				fmt.Fprintf(w, "  %5d. 0x%x %s (children=%d)\n", i+1, entry.addr, typeName, len(entry.obj.Children))
+			}
+		}
+
+		printWarnings(w, g.warnings)
+	}
+}
+
+func collectGraphStats(live *goheap.LiveObjects) (int, int, []typeCount, []objectEntry) {
+	if live == nil {
+		return 0, 0, nil, nil
+	}
+
 	objectCount := 0
 	edgeCount := 0
 	byType := make(map[string]int, 128)
+	objects := make([]objectEntry, 0, 256)
 
-	for _, obj := range r.live.All() {
+	for addr, obj := range live.All() {
 		objectCount++
 		edgeCount += len(obj.Children)
+		objects = append(objects, objectEntry{addr: addr, obj: obj})
 
-		t := "<unknown>"
-		if obj.Var != nil {
-			t = obj.Var.TypeString()
-			if t == "" {
-				t = obj.Var.Kind.String()
-			}
-		}
+		t := normalizeTypeName(obj.Var)
 		byType[t]++
 	}
 
@@ -129,31 +199,23 @@ func printAnalysisReport(w io.Writer, r *analysisResult) {
 		}
 		return typeCounts[i].count > typeCounts[j].count
 	})
+	sort.Slice(objects, func(i, j int) bool {
+		return objects[i].addr < objects[j].addr
+	})
 
-	fmt.Fprintf(w, "goroutines: total=%d readable=%d\n", r.goroutinesTotal, r.goroutinesRead)
-	fmt.Fprintf(w, "frames scanned: %d\n", r.framesTotal)
-	fmt.Fprintf(w, "root locals traversed: %d\n", r.localsTotal)
-	fmt.Fprintf(w, "graph: objects=%d edges=%d\n", objectCount, edgeCount)
+	return objectCount, edgeCount, typeCounts, objects
+}
 
-	if len(typeCounts) > 0 {
-		fmt.Fprintln(w, "top object types:")
-		limit := 10
-		if len(typeCounts) < limit {
-			limit = len(typeCounts)
-		}
-		for i := 0; i < limit; i++ {
-			fmt.Fprintf(w, "  %2d. %s (%d)\n", i+1, typeCounts[i].typeName, typeCounts[i].count)
-		}
+func printWarnings(w io.Writer, warnings []string) {
+	if len(warnings) == 0 {
+		return
 	}
-
-	if len(r.warnings) > 0 {
-		fmt.Fprintln(w, "warnings:")
-		for _, warning := range r.warnings {
-			fmt.Fprintf(w, "  - %s\n", warning)
-		}
-		if len(r.warnings) == maxWarnings {
-			fmt.Fprintf(w, "  - warning limit reached (%d)\n", maxWarnings)
-		}
+	fmt.Fprintln(w, "warnings:")
+	for _, warning := range warnings {
+		fmt.Fprintf(w, "  - %s\n", warning)
+	}
+	if len(warnings) == maxWarnings {
+		fmt.Fprintf(w, "  - warning limit reached (%d)\n", maxWarnings)
 	}
 }
 
