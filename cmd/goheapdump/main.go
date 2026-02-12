@@ -19,9 +19,8 @@ type options struct {
 	depth    int // stack depth per goroutine
 	pageSize int // goroutine page size for debugger.Goroutines(start,count)
 
-	// These are Delve materialization limits.
-	// They are not "object graph" limits; traversal in goheap is unbounded.
-	varRecurse      int
+	// These are Delve materialization limits per single fetch.
+	// Graph traversal in goheap is unbounded (it re-evaluates lazily).
 	maxStringLen    int
 	maxArrayValues  int
 	maxStructFields int
@@ -49,8 +48,7 @@ func parseFlags(errOut io.Writer) options {
 	flag.IntVar(&o.depth, "depth", 64, "stack depth per goroutine")
 	flag.IntVar(&o.pageSize, "page", 256, "goroutine page size for debugger.Goroutines(start,count)")
 
-	// Delve variable materialization limits. Set high by default.
-	flag.IntVar(&o.varRecurse, "varrecurse", 256, "Delve MaxVariableRecurse (children depth materialized per variable fetch)")
+	// Delve variable materialization limits.
 	flag.IntVar(&o.maxStringLen, "maxstr", 256, "Delve MaxStringLen")
 	flag.IntVar(&o.maxArrayValues, "maxarr", 1024, "Delve MaxArrayValues")
 	flag.IntVar(&o.maxStructFields, "maxfields", 1024, "Delve MaxStructFields")
@@ -70,9 +68,6 @@ func parseFlags(errOut io.Writer) options {
 	}
 	if o.pageSize <= 0 {
 		o.pageSize = 256
-	}
-	if o.varRecurse <= 0 {
-		o.varRecurse = 256
 	}
 	if o.maxStringLen <= 0 {
 		o.maxStringLen = 256
@@ -107,16 +102,20 @@ func run(out io.Writer, o options) error {
 	}
 	fmt.Fprintf(out, "goroutines: %d\n", len(gs))
 
+	// MaxVariableRecurse is kept at 1 so that a single LocalVariables call
+	// never explodes into an exponential tree (cyclic/fan-out structures).
+	// goheap lazily re-evaluates pointers it discovers, with deduplication,
+	// so the full graph is still traversed.
 	loadCfg := proc.LoadConfig{
 		FollowPointers:     true,
-		MaxVariableRecurse: o.varRecurse,
+		MaxVariableRecurse: 1,
 		MaxStringLen:       o.maxStringLen,
 		MaxArrayValues:     o.maxArrayValues,
 		MaxStructFields:    o.maxStructFields,
 	}
 
 	// Traversal-only object graph builder (no printing inside it).
-	live := goheap.New(d)
+	live := goheap.New(d, loadCfg)
 
 	for _, g := range gs {
 		printGoroutineHeader(out, g)
@@ -138,7 +137,7 @@ func run(out io.Writer, o options) error {
 
 			// Roots: add every local; traversal decides what is reachable.
 			for _, v := range locals {
-				live.Add(v)
+				live.Add(v, g.ID, i)
 			}
 
 			// Debug dump count lives HERE (printing layer), not inside traversal.
