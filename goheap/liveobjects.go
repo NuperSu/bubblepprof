@@ -1,6 +1,7 @@
 package goheap
 
 import (
+	"fmt"
 	"go/constant"
 	"iter"
 	"reflect"
@@ -16,15 +17,20 @@ import (
 //
 // Traversal is separated from any printing or formatting.
 //
-// Important limitation:
-// Delve only materializes children up to the limits of the proc.LoadConfig used
-// to fetch variables (locals/globals/evals). If MaxVariableRecurse is too small,
-// pointee sub-structure may be truncated and the reachable graph will be partial.
+// The caller supplies a proc.LoadConfig with a small MaxVariableRecurse (e.g. 1).
+// When the traversal hits a pointer whose pointee was not materialized by Delve,
+// it lazily re-evaluates the pointee via EvalVariableInScope. The visited map
+// deduplicates by address, so each object is loaded at most once.
 type LiveObjects struct {
-	// pointer(s) to Delve service(s)
-	dbg *debugger.Debugger
+	dbg     *debugger.Debugger
+	loadCfg proc.LoadConfig
 
 	visited map[uintptr]*LiveObject
+
+	// Scope for lazy EvalVariableInScope calls.
+	// Updated by Add; any valid goroutine+frame works for memory reads.
+	scopeGID   int64
+	scopeFrame int
 }
 
 type LiveObject struct {
@@ -40,20 +46,23 @@ type LiveObject struct {
 	scanned bool
 }
 
-func New(dbg *debugger.Debugger) *LiveObjects {
+func New(dbg *debugger.Debugger, loadCfg proc.LoadConfig) *LiveObjects {
 	return &LiveObjects{
 		dbg:     dbg,
+		loadCfg: loadCfg,
 		visited: make(map[uintptr]*LiveObject, 256),
 	}
 }
 
-// Add adds a “root” value (typically a local on a goroutine stack frame).
+// Add adds a "root" value (typically a local on a goroutine stack frame).
+// gid and frame identify a valid scope for lazy re-evaluation.
 // Traversal populates visited + edges; it does not print.
-func (o *LiveObjects) Add(v *proc.Variable) {
+func (o *LiveObjects) Add(v *proc.Variable, gid int64, frame int) {
 	if v == nil {
 		return
 	}
-	// No pre-scan/heuristics: just walk; primitives will be ignored quickly.
+	o.scopeGID = gid
+	o.scopeFrame = frame
 	o.walkFromRoots([]root{{parent: nil, v: v}})
 }
 
@@ -75,9 +84,9 @@ type root struct {
 	v      *proc.Variable
 }
 
-// walkFromRoots performs an unbounded traversal (bounded only by what Delve
-// materialized into proc.Variable.Children) using an explicit stack to avoid
-// recursion blow-ups on long linked lists.
+// walkFromRoots performs an unbounded traversal using an explicit stack.
+// When a pointer's pointee was truncated by Delve's MaxVariableRecurse limit,
+// it lazily loads the pointee via EvalVariableInScope.
 func (o *LiveObjects) walkFromRoots(roots []root) {
 	stack := make([]root, 0, len(roots)+64)
 	stack = append(stack, roots...)
@@ -99,7 +108,16 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 				continue
 			}
 
-			childObj := o.enterObject(ptr, pointeeOrSelf(v))
+			pointee := pointeeOrSelf(v)
+
+			// If the pointee was not materialized (truncated), lazy-load it.
+			if pointee == v || len(pointee.Children) == 0 {
+				if loaded := o.loadPointee(v, ptr); loaded != nil {
+					pointee = loaded
+				}
+			}
+
+			childObj := o.enterObject(ptr, pointee)
 			if childObj == nil {
 				continue
 			}
@@ -111,7 +129,13 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 				continue
 			}
 			childObj.scanned = true
-			pushChildren(&stack, childObj, childObj.Var)
+
+			// Ensure the variable has children before pushing.
+			expanded := o.ensureExpanded(childObj.Var)
+			if expanded != childObj.Var {
+				childObj.Var = expanded
+			}
+			pushChildren(&stack, childObj, expanded)
 			continue
 		}
 
@@ -130,7 +154,12 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 					continue
 				}
 				obj.scanned = true
-				pushChildren(&stack, obj, v)
+
+				expanded := o.ensureExpanded(v)
+				if expanded != v {
+					obj.Var = expanded
+				}
+				pushChildren(&stack, obj, expanded)
 				continue
 			}
 			// Not addressable: scan inline.
@@ -142,6 +171,42 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			// primitives: nothing to do
 		}
 	}
+}
+
+// loadPointee loads the object that ptrVar points to, using EvalVariableInScope.
+// Only handles *T pointer types; returns nil for chan/map/func/unsafe.Pointer.
+func (o *LiveObjects) loadPointee(ptrVar *proc.Variable, addr uintptr) *proc.Variable {
+	ts := ptrVar.TypeString()
+	if !strings.HasPrefix(ts, "*") {
+		return nil
+	}
+	baseType := ts[1:] // e.g. "*main.Node" → "main.Node"
+	return o.loadAt(baseType, addr)
+}
+
+// ensureExpanded reloads a variable from memory if its children were truncated.
+func (o *LiveObjects) ensureExpanded(v *proc.Variable) *proc.Variable {
+	if v == nil || len(v.Children) > 0 || v.Addr == 0 {
+		return v
+	}
+	switch v.Kind {
+	case reflect.Struct:
+		if loaded := o.loadAt(v.TypeString(), uintptr(v.Addr)); loaded != nil {
+			return loaded
+		}
+	}
+	return v
+}
+
+// loadAt evaluates *(*typeName)(unsafe.Pointer(uintptr(addr))) to load a
+// variable from the core dump. Returns nil on any error.
+func (o *LiveObjects) loadAt(typeName string, addr uintptr) *proc.Variable {
+	expr := fmt.Sprintf("*(*%s)(unsafe.Pointer(uintptr(%d)))", typeName, uint64(addr))
+	v, err := o.dbg.EvalVariableInScope(o.scopeGID, o.scopeFrame, 0, expr, o.loadCfg)
+	if err != nil {
+		return nil
+	}
+	return v
 }
 
 func pushChildren(stack *[]root, parent *LiveObject, v *proc.Variable) {
