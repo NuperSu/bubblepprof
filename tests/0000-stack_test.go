@@ -7,14 +7,10 @@ type S0000 struct {
 }
 
 func Test_0000_stack(t *testing.T) {
-	ctx := prepareGoroutine(t)
+	_ = prepareGoroutine(t)
 
-	x := 0
-	s := S0000{x: &x}
-
-	// TODO: make a heap snapshot and validate it.
-	// For now, insert a SIGSEGV here to produce a core dump.
-
-	_ = ctx
-	_ = s
+	heap := readHeapDumpFixture(t, "HEAP_0000_PATH", "../heap-snapshots/heap-0000.out")
+	if len(heap) < 64*1024 {
+		t.Fatalf("expected substantial heap dump for 0000 fixture, got %d bytes", len(heap))
+	}
 }
