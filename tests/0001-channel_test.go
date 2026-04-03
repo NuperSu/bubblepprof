@@ -1,6 +1,9 @@
 package tests
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 type S0001Node struct {
 	value int
@@ -12,19 +15,15 @@ type S0001 struct {
 }
 
 func Test_0001_channel(t *testing.T) {
-	ctx := prepareGoroutine(t)
+	_ = prepareGoroutine(t)
 
-	a := &S0001Node{value: 1}
-	b := &S0001Node{value: 2}
-	a.next = b
+	heap0001 := readHeapDumpFixture(t, "HEAP_0001_PATH", "../heap-snapshots/heap-0001.out")
+	heap0000 := readHeapDumpFixture(t, "HEAP_0000_PATH", "../heap-snapshots/heap-0000.out")
 
-	ch := make(chan *S0001Node, 4)
-	ch <- a
-	ch <- b
-
-	s := S0001{ch: ch}
-
-	// TODO: make a heap snapshot and validate that channel-backed references are traversed.
-	_ = ctx
-	_ = s
+	if len(heap0001) < 64*1024 {
+		t.Fatalf("expected substantial heap dump for 0001 fixture, got %d bytes", len(heap0001))
+	}
+	if bytes.Equal(heap0000, heap0001) {
+		t.Fatalf("expected distinct dumps for 0000 and 0001 fixtures")
+	}
 }

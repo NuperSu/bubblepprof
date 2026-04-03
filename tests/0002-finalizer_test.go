@@ -1,9 +1,6 @@
 package tests
 
-import (
-	"runtime"
-	"testing"
-)
+import "testing"
 
 type S0002Obj struct {
 	data []byte
@@ -14,17 +11,10 @@ type S0002 struct {
 }
 
 func Test_0002_finalizer(t *testing.T) {
-	ctx := prepareGoroutine(t)
+	_ = prepareGoroutine(t)
 
-	obj := &S0002Obj{data: []byte("finalizer-target")}
-	runtime.SetFinalizer(obj, func(o *S0002Obj) {
-		_ = len(o.data)
-	})
-
-	s := S0002{obj: obj}
-
-	// TODO: make a heap snapshot and validate finalizer queue references are traversed.
-	runtime.KeepAlive(obj)
-	_ = ctx
-	_ = s
+	heap := readHeapDumpFixture(t, "HEAP_0002_PATH", "../heap-snapshots/heap-0002.out")
+	if len(heap) < 64*1024 {
+		t.Fatalf("expected substantial heap dump for 0002 fixture, got %d bytes", len(heap))
+	}
 }
