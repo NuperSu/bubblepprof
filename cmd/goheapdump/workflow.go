@@ -196,6 +196,26 @@ func printAnalysisReport(w io.Writer, r *analysisResult) {
 	fmt.Fprintf(w, "goroutines: total=%d readable=%d labeled=%d\n",
 		len(r.goroutines), readable, labeled)
 
+	// Aggregate traversal stats across all goroutines.
+	var totalStats goheap.TraversalStats
+	for _, g := range r.goroutines {
+		if g.live == nil {
+			continue
+		}
+		s := g.live.Stats
+		totalStats.StackPops += s.StackPops
+		totalStats.LoadAtCalls += s.LoadAtCalls
+		totalStats.LoadPointeeCalls += s.LoadPointeeCalls
+		totalStats.EnsureLoadedCalls += s.EnsureLoadedCalls
+		totalStats.PointerReloadCalls += s.PointerReloadCalls
+		totalStats.DedupHits += s.DedupHits
+		totalStats.WastedLoads += s.WastedLoads
+	}
+	fmt.Fprintf(w, "traversal stats: stack_pops=%d loadAt_calls=%d (pointee=%d ensure=%d reload=%d) dedup_hits=%d wasted_loads=%d\n",
+		totalStats.StackPops, totalStats.LoadAtCalls,
+		totalStats.LoadPointeeCalls, totalStats.EnsureLoadedCalls, totalStats.PointerReloadCalls,
+		totalStats.DedupHits, totalStats.WastedLoads)
+
 	// Bubble hierarchy grouped by pprof label key.
 	for _, pk := range r.keys {
 		fmt.Fprintf(w, "\n=== pprof key %q (%d bubbles) ===\n", pk.name, len(pk.bubbles))

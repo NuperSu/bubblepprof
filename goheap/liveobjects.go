@@ -41,6 +41,21 @@ type LiveObjects struct {
 	// arbitrary memory addresses via unsafe.Pointer casts.
 	scopeGID   int64
 	scopeFrame int
+
+	// Diagnostic counters for traversal analysis.
+	Stats TraversalStats
+}
+
+// TraversalStats tracks diagnostic counters for the graph traversal.
+type TraversalStats struct {
+	StackPops          int // total items popped from the worklist
+	LoadAtCalls        int // total EvalVariableInScope calls via loadAt
+	LoadPointeeCalls   int // loadAt calls from loadPointee (typed pointer targets)
+	EnsureLoadedCalls  int // loadAt calls from ensureLoaded (composites at recursion boundary)
+	PointerReloadCalls int // loadAt calls from OnlyAddr pointer reload
+	DedupHits          int // pointers skipped because target was already visited
+	WastedLoads        int // loadPointee calls where address was already visited
+	EnsureByKind       map[string]int // ensureLoaded calls broken down by Kind+Type
 }
 
 type LiveObject struct {
@@ -114,6 +129,7 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 		n := len(stack) - 1
 		cur := stack[n]
 		stack = stack[:n]
+		o.Stats.StackPops++
 
 		v := cur.v
 		if v == nil {
@@ -130,12 +146,22 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			// from its address so we can extract the pointer value.
 			if (!ok || ptr == 0) && v.Addr != 0 {
 				if reloaded := o.loadAt(v.TypeString(), uintptr(v.Addr)); reloaded != nil {
+					o.Stats.PointerReloadCalls++
 					v = reloaded
 					ptr, ok = pointerValue(v)
 				}
 			}
 
 			if !ok || ptr == 0 {
+				continue
+			}
+
+			// Fast path: if already visited, just record the edge.
+			if existing := o.visited[ptr]; existing != nil {
+				if cur.parent != nil {
+					cur.parent.Children = append(cur.parent.Children, existing)
+				}
+				o.Stats.DedupHits++
 				continue
 			}
 
@@ -154,10 +180,6 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			}
 			if cur.parent != nil {
 				cur.parent.Children = append(cur.parent.Children, childObj)
-			}
-
-			if childObj.scanned {
-				continue
 			}
 			childObj.scanned = true
 
@@ -246,7 +268,11 @@ func (o *LiveObjects) loadPointee(ptrVar *proc.Variable, addr uintptr) *proc.Var
 		return nil
 	}
 	baseType := ts[1:] // e.g. "*main.Node" becomes "main.Node"
-	return o.loadAt(baseType, addr)
+	result := o.loadAt(baseType, addr)
+	if result != nil {
+		o.Stats.LoadPointeeCalls++
+	}
+	return result
 }
 
 // ensureLoaded reloads addressable variables whose children were not present
@@ -261,6 +287,7 @@ func (o *LiveObjects) ensureLoaded(v *proc.Variable) *proc.Variable {
 	case reflect.Struct, reflect.Slice, reflect.Array,
 		reflect.Map, reflect.Chan, reflect.Interface:
 		if loaded := o.loadAt(v.TypeString(), uintptr(v.Addr)); loaded != nil {
+			o.Stats.EnsureLoadedCalls++
 			return loaded
 		}
 	}
@@ -270,6 +297,7 @@ func (o *LiveObjects) ensureLoaded(v *proc.Variable) *proc.Variable {
 // loadAt evaluates a synthetic unsafe.Pointer expression so Delve reads memory
 // at addr as typeName. It returns nil when the expression cannot be evaluated.
 func (o *LiveObjects) loadAt(typeName string, addr uintptr) *proc.Variable {
+	o.Stats.LoadAtCalls++
 	expr := fmt.Sprintf("*(*%s)(unsafe.Pointer(uintptr(%d)))", typeName, addr)
 	v, err := o.dbg.EvalVariableInScope(o.scopeGID, o.scopeFrame, 0, expr, o.loadCfg)
 	if err != nil {
