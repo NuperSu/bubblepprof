@@ -22,6 +22,12 @@ type SnapshotBundle struct {
 	Metadata         SnapshotMetadata
 }
 
+type SnapshotInfo struct {
+	Metadata             SnapshotMetadata
+	HeapDumpSize         int64
+	GoroutineProfileSize int64
+}
+
 func WriteSnapshotBundle(w io.Writer, src BundleSource) error {
 	if src.HeapDump == nil {
 		return fmt.Errorf("heap dump reader is nil")
@@ -117,6 +123,63 @@ func ReadSnapshotBundle(r io.Reader) (*SnapshotBundle, error) {
 	}
 
 	return bundle, nil
+}
+
+func InspectSnapshotBundle(r io.Reader) (*SnapshotInfo, error) {
+	tr := tar.NewReader(r)
+	info := &SnapshotInfo{}
+
+	var (
+		haveHeapDump bool
+		haveProfile  bool
+		haveMetadata bool
+	)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read tar: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+			continue
+		}
+
+		switch hdr.Name {
+		case HeapDumpFile:
+			info.HeapDumpSize = hdr.Size
+			haveHeapDump = true
+		case GoroutineProfileFile:
+			info.GoroutineProfileSize = hdr.Size
+			haveProfile = true
+		case MetadataFile:
+			b, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", MetadataFile, err)
+			}
+			if err := json.Unmarshal(b, &info.Metadata); err != nil {
+				return nil, fmt.Errorf("decode %s: %w", MetadataFile, err)
+			}
+			haveMetadata = true
+		}
+	}
+
+	if !haveHeapDump {
+		return nil, fmt.Errorf("snapshot missing %s", HeapDumpFile)
+	}
+	if !haveProfile {
+		return nil, fmt.Errorf("snapshot missing %s", GoroutineProfileFile)
+	}
+	if !haveMetadata {
+		return nil, fmt.Errorf("snapshot missing %s", MetadataFile)
+	}
+	if info.Metadata.Format != FormatV1 {
+		return nil, fmt.Errorf("unsupported snapshot format %q", info.Metadata.Format)
+	}
+
+	return info, nil
 }
 
 func writeTarEntry(tw *tar.Writer, name string, size int64, r io.Reader) error {
