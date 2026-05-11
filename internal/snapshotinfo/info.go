@@ -28,18 +28,18 @@ func Print(out io.Writer, path string) error {
 	}
 	defer f.Close()
 
-	bundle, err := snapshot.ReadSnapshotBundle(f)
+	info, err := snapshot.InspectSnapshotBundle(f)
 	if err != nil {
 		return fmt.Errorf("read snapshot: %w", err)
 	}
 
-	fmt.Fprintf(out, "format: %s\n", bundle.Metadata.Format)
-	fmt.Fprintf(out, "created: %s\n", bundle.Metadata.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
-	fmt.Fprintf(out, "go version: %s\n", bundle.Metadata.GoVersion)
-	fmt.Fprintf(out, "pid: %d\n", bundle.Metadata.PID)
-	fmt.Fprintf(out, "gc before heap dump: %t\n", bundle.Metadata.GCBeforeHeapDump)
-	fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.HeapDumpFile, len(bundle.HeapDump))
-	fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.GoroutineProfileFile, len(bundle.GoroutineProfile))
+	fmt.Fprintf(out, "format: %s\n", info.Metadata.Format)
+	fmt.Fprintf(out, "created: %s\n", info.Metadata.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(out, "go version: %s\n", info.Metadata.GoVersion)
+	fmt.Fprintf(out, "pid: %d\n", info.Metadata.PID)
+	fmt.Fprintf(out, "gc before heap dump: %t\n", info.Metadata.GCBeforeHeapDump)
+	fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.HeapDumpFile, info.HeapDumpSize)
+	fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.GoroutineProfileFile, info.GoroutineProfileSize)
 	fmt.Fprintf(out, "%s: valid\n", snapshot.MetadataFile)
 
 	return nil
