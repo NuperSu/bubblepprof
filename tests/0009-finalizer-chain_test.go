@@ -24,7 +24,8 @@ func Test_0009_finalizer_chain(t *testing.T) {
 
 	s := S0009{root: root}
 
-	// TODO: make a heap snapshot and validate finalizer-linked object chains are traversed.
+	// TODO: add a matching fixture snapshot and verify finalizer reachability
+	// after runtime finalizer queues are decoded or otherwise exposed reliably.
 	runtime.KeepAlive(root)
 	_ = ctx
 	_ = s

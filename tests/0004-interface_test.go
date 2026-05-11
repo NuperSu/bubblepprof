@@ -16,7 +16,8 @@ func Test_0004_interface(t *testing.T) {
 	leaf := &S0004Leaf{id: 42}
 	s := S0004{v: leaf}
 
-	// TODO: make a heap snapshot and validate interface-contained pointers are traversed.
+	// TODO: add a matching fixture snapshot and verify that goheap follows the
+	// concrete pointer stored inside an interface value.
 	_ = ctx
 	_ = s
 }

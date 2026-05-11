@@ -12,10 +12,10 @@ import (
 type options struct {
 	exePath  string
 	corePath string
-	pageSize int // goroutine page size for debugger.Goroutines(start,count)
+	pageSize int // Batch size for debugger.Goroutines(start, count).
 
-	// Delve materialization limits per single fetch.
-	// Graph traversal in goheap is unbounded (it re-evaluates lazily).
+	// Delve materialization limits for each variable fetch. They affect how
+	// many children Delve returns for strings, arrays/slices, and structs.
 	maxStringLen    int
 	maxArrayValues  int
 	maxStructFields int
@@ -42,7 +42,7 @@ func parseFlags(errOut io.Writer) options {
 	flag.StringVar(&o.corePath, "core", "", "path to the core dump")
 	flag.IntVar(&o.pageSize, "page", 256, "goroutine page size for debugger.Goroutines(start,count)")
 
-	// Delve variable materialization limits.
+	// Limits for one Delve variable read, not global graph limits.
 	flag.IntVar(&o.maxStringLen, "maxstr", 256, "Delve MaxStringLen")
 	flag.IntVar(&o.maxArrayValues, "maxarr", 1024, "Delve MaxArrayValues")
 	flag.IntVar(&o.maxStructFields, "maxfields", 1024, "Delve MaxStructFields")

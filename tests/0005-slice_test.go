@@ -21,7 +21,8 @@ func Test_0005_slice(t *testing.T) {
 		},
 	}
 
-	// TODO: make a heap snapshot and validate slice element references are traversed.
+	// TODO: add a matching fixture snapshot and verify that goheap follows
+	// pointers stored in slice elements, subject to MaxArrayValues.
 	_ = ctx
 	_ = s
 }

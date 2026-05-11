@@ -24,7 +24,9 @@ func Test_0006_closure(t *testing.T) {
 
 	s := S0006{fn: fn}
 
-	// TODO: make a heap snapshot and validate closure captures are traversed.
+	// TODO: add a matching fixture snapshot and decide whether closure
+	// environments are in scope; current traversal treats funcs as runtime
+	// pointers and does not decode captured variables.
 	_ = ctx
 	_ = s
 }

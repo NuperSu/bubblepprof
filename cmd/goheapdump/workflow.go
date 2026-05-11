@@ -16,6 +16,8 @@ import (
 const maxWarnings = 500
 
 type analysisResult struct {
+	// Current grouping is one graph per goroutine. The thesis target is one
+	// graph per pprof bubble, so this is still an intermediate shape.
 	goroutines []*goroutineAnalysis
 }
 
@@ -48,10 +50,9 @@ func buildHeapGraph(d *debugger.Debugger, o options) (*analysisResult, error) {
 		return nil, fmt.Errorf("list goroutines: %w", err)
 	}
 
-	// MaxVariableRecurse is kept at 1 so that a single LocalVariables call
-	// never explodes into an exponential tree (cyclic/fan-out structures).
-	// goheap lazily re-evaluates pointers it discovers, with deduplication,
-	// so the full graph is still traversed.
+	// MaxVariableRecurse is kept at 1 so one LocalVariables call does not
+	// expand a large or cyclic object graph by itself. goheap then follows
+	// discovered typed pointers lazily and deduplicates nodes by address.
 	loadCfg := proc.LoadConfig{
 		FollowPointers:     true,
 		MaxVariableRecurse: 1,

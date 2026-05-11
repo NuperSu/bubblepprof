@@ -38,7 +38,8 @@ func Test_0010_mixed(t *testing.T) {
 		},
 	}
 
-	// TODO: make a heap snapshot and validate mixed references (channel/map/finalizer) are traversed.
+	// TODO: add a matching fixture snapshot and verify mixed references once
+	// channel buffers, map buckets, and finalizer queues are handled explicitly.
 	runtime.KeepAlive(a)
 	_ = ctx
 	_ = s
