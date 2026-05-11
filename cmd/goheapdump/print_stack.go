@@ -1,5 +1,10 @@
 package main
 
+// This file contains formatting helpers from an earlier output style that
+// printed per-frame details during traversal (see output.txt). The current
+// output is produced by printAnalysisReport in workflow.go. These functions
+// are unused but kept for potential future per-frame reporting.
+
 import (
 	"fmt"
 	"io"

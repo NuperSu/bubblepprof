@@ -12,19 +12,24 @@ import (
 )
 
 // LiveObjects builds a graph of addressable objects reachable from a set of
-// Delve variables, usually locals from one goroutine stack.
+// Delve variables (typically locals from one goroutine's stack frames).
 //
-// Traversal is separated from any printing or formatting.
+// Design: traversal is separated from output. The caller supplies a
+// proc.LoadConfig with MaxVariableRecurse=1 so that each Delve variable
+// fetch returns only immediate children. When the traversal hits a typed
+// pointer (*T) whose pointee was not materialized, it lazily loads the
+// pointee via EvalVariableInScope using a synthetic unsafe.Pointer cast.
+// The visited map deduplicates nodes by address so each object is loaded
+// at most once.
 //
-// The caller supplies a proc.LoadConfig with a small MaxVariableRecurse (e.g. 1).
-// When the traversal hits a pointer whose pointee was not materialized by Delve,
-// it lazily re-evaluates the pointee via EvalVariableInScope. The visited map
-// deduplicates graph nodes by address.
-//
-// Current scope: this follows ordinary typed pointers and scans the children
-// Delve exposes for structs, arrays, slices, interfaces, maps, and channels.
-// It does not decode Go runtime map buckets, channel buffers, closure payloads,
-// or pprof labels/bubbles by itself.
+// Limitations: the traversal relies on what Delve exposes as children.
+// It follows typed pointers and scans structs, arrays, slices, interfaces,
+// maps, and channels. However, it does not decode:
+//   - Go runtime map bucket internals (relies on Delve's map children)
+//   - channel ring-buffer contents (only the hchan struct, not queued elements)
+//   - closure capture environments (func values are treated as opaque addresses)
+//   - global/static roots (only goroutine stack locals are used as roots)
+//   - pprof labels (the thesis goal of grouping by pprof bubble is not yet implemented)
 type LiveObjects struct {
 	dbg     *debugger.Debugger
 	loadCfg proc.LoadConfig
@@ -33,8 +38,10 @@ type LiveObjects struct {
 
 	runtimeRootsAdded bool
 
-	// Scope used when evaluating synthetic expressions for lazy loads. Add
-	// updates it to the goroutine/frame that supplied the current root.
+	// Scope for EvalVariableInScope calls. Updated by each Add() call. Note:
+	// this means all lazy loads use the scope of the most recent Add() call,
+	// which is correct only because any valid goroutine scope can read
+	// arbitrary memory addresses via unsafe.Pointer casts.
 	scopeGID   int64
 	scopeFrame int
 }
@@ -42,8 +49,9 @@ type LiveObjects struct {
 type LiveObject struct {
 	Addr uintptr
 
-	// Delve view of this address, including type, kind, and any materialized
-	// children. It may be a heap object, stack object, or runtime object.
+	// Delve's view of this address: type, kind, value, and any materialized
+	// children. May represent a heap allocation, a stack-local, or a runtime
+	// structure, but no heap/stack distinction is tracked here.
 	Var *proc.Variable
 
 	// Reachability edges discovered by scanning Delve children.
@@ -92,10 +100,14 @@ type root struct {
 	v      *proc.Variable
 }
 
-// walkFromRoots traverses discovered Delve variables with an explicit stack.
-// The traversal has no object-depth limit of its own, but it is still bounded
-// by what Delve can expose and by loadCfg limits such as MaxArrayValues and
-// MaxStructFields.
+// walkFromRoots traverses discovered Delve variables using an explicit stack
+// (LIFO). For each pointer-like value it enters/deduplicates the pointee in
+// the visited map, lazy-loads it via loadPointee if Delve didn't materialize
+// the target, then pushes the pointee's children. Structs with addresses are
+// also tracked as nodes. There is no depth limit; traversal terminates when
+// all reachable nodes are visited. It is still bounded by Delve's loadCfg
+// limits (MaxArrayValues, MaxStructFields) which cap how many children a
+// single variable exposes.
 func (o *LiveObjects) walkFromRoots(roots []root) {
 	stack := make([]root, 0, len(roots)+64)
 	stack = append(stack, roots...)
@@ -185,9 +197,12 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 	}
 }
 
-// addRuntimeRoots best-effort adds runtime finalizer queues as extra roots.
-// This is a heuristic: symbol names and layouts are runtime-version-dependent,
-// and this does not replace proper decoding of runtime finalizer structures.
+// addRuntimeRoots attempts to add runtime finalizer queues (runtime.allfin,
+// runtime.finq) as extra graph roots. These are internal runtime symbols whose
+// names and layouts change between Go versions. The function evaluates them via
+// EvalVariableInScope and walks whatever Delve materializes; it does not parse
+// the finalizer linked-list structure itself. Called once per LiveObjects
+// instance on the first Add().
 func (o *LiveObjects) addRuntimeRoots() {
 	if o.runtimeRootsAdded {
 		return
