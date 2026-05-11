@@ -22,7 +22,8 @@ func Test_0008_channel_interface(t *testing.T) {
 
 	s := S0008{ch: ch}
 
-	// TODO: make a heap snapshot and validate channel-of-interface references are traversed.
+	// TODO: add a matching fixture snapshot and implement channel buffer
+	// decoding before expecting payloads queued in ch to be reachable.
 	_ = ctx
 	_ = s
 }

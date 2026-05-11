@@ -21,7 +21,8 @@ func Test_0007_cycle(t *testing.T) {
 
 	s := S0007{head: a}
 
-	// TODO: make a heap snapshot and validate cyclic references are deduplicated.
+	// TODO: add a matching fixture snapshot and verify that cyclic pointer
+	// graphs produce one node per object address.
 	_ = ctx
 	_ = s
 }

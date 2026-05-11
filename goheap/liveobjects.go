@@ -11,15 +11,20 @@ import (
 	"github.com/go-delve/delve/service/debugger"
 )
 
-// LiveObjects builds a graph of heap objects reachable from a set of roots
-// (typically locals on goroutine stacks).
+// LiveObjects builds a graph of addressable objects reachable from a set of
+// Delve variables, usually locals from one goroutine stack.
 //
 // Traversal is separated from any printing or formatting.
 //
 // The caller supplies a proc.LoadConfig with a small MaxVariableRecurse (e.g. 1).
 // When the traversal hits a pointer whose pointee was not materialized by Delve,
 // it lazily re-evaluates the pointee via EvalVariableInScope. The visited map
-// deduplicates by address, so each object is loaded at most once.
+// deduplicates graph nodes by address.
+//
+// Current scope: this follows ordinary typed pointers and scans the children
+// Delve exposes for structs, arrays, slices, interfaces, maps, and channels.
+// It does not decode Go runtime map buckets, channel buffers, closure payloads,
+// or pprof labels/bubbles by itself.
 type LiveObjects struct {
 	dbg     *debugger.Debugger
 	loadCfg proc.LoadConfig
@@ -28,8 +33,8 @@ type LiveObjects struct {
 
 	runtimeRootsAdded bool
 
-	// Scope for lazy EvalVariableInScope calls.
-	// Updated by Add; any valid goroutine+frame works for memory reads.
+	// Scope used when evaluating synthetic expressions for lazy loads. Add
+	// updates it to the goroutine/frame that supplied the current root.
 	scopeGID   int64
 	scopeFrame int
 }
@@ -37,13 +42,14 @@ type LiveObjects struct {
 type LiveObject struct {
 	Addr uintptr
 
-	// Debug info for this object (type/kind/children).
+	// Delve view of this address, including type, kind, and any materialized
+	// children. It may be a heap object, stack object, or runtime object.
 	Var *proc.Variable
 
-	// Pointer-typed fields of a struct, or array/slice/map elements, etc.
+	// Reachability edges discovered by scanning Delve children.
 	Children []*LiveObject
 
-	// Internal: to avoid rescanning already-expanded nodes.
+	// Internal traversal marker to avoid expanding the same address repeatedly.
 	scanned bool
 }
 
@@ -55,9 +61,9 @@ func New(dbg *debugger.Debugger, loadCfg proc.LoadConfig) *LiveObjects {
 	}
 }
 
-// Add adds a "root" value (typically a local on a goroutine stack frame).
-// gid and frame identify a valid scope for lazy re-evaluation.
-// Traversal populates visited + edges; it does not print.
+// Add adds one root variable to the graph.
+// gid and frame identify the Delve scope used for lazy memory reads. Traversal
+// populates visited nodes and edges only; reporting is handled by callers.
 func (o *LiveObjects) Add(v *proc.Variable, gid int64, frame int) {
 	if v == nil {
 		return
@@ -86,9 +92,10 @@ type root struct {
 	v      *proc.Variable
 }
 
-// walkFromRoots performs an unbounded traversal using an explicit stack.
-// When a pointer's pointee was truncated by Delve's MaxVariableRecurse limit,
-// it lazily loads the pointee via EvalVariableInScope.
+// walkFromRoots traverses discovered Delve variables with an explicit stack.
+// The traversal has no object-depth limit of its own, but it is still bounded
+// by what Delve can expose and by loadCfg limits such as MaxArrayValues and
+// MaxStructFields.
 func (o *LiveObjects) walkFromRoots(roots []root) {
 	stack := make([]root, 0, len(roots)+64)
 	stack = append(stack, roots...)
@@ -103,7 +110,9 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			continue
 		}
 
-		// Pointer-like values: create/lookup the pointee node and expand it once.
+		// Pointer-like values identify another address. For *T pointers this is
+		// the pointed-to object; for maps/channels/functions it is only the
+		// runtime object address unless Delve has already materialized children.
 		if isPointerLike(v) {
 			ptr, ok := pointerValue(v)
 			if !ok || ptr == 0 {
@@ -112,7 +121,7 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 
 			pointee := pointeeOrSelf(v)
 
-			// If the pointee was not materialized (truncated), lazy-load it.
+			// If a typed pointer was not materialized, load *T at ptr.
 			if pointee == v || len(pointee.Children) == 0 {
 				if loaded := o.loadPointee(v, ptr); loaded != nil {
 					pointee = loaded
@@ -132,7 +141,7 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			}
 			childObj.scanned = true
 
-			// Ensure the variable has children before pushing.
+			// Give addressable structs one more chance to expose their fields.
 			expanded := o.ensureExpanded(childObj.Var)
 			if expanded != childObj.Var {
 				childObj.Var = expanded
@@ -143,7 +152,7 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 
 		switch v.Kind {
 		case reflect.Struct:
-			// If addressable, treat it as a node too (dedupe by address).
+			// Addressable structs become nodes even when reached inline.
 			if v.Addr != 0 {
 				obj := o.enterObject(uintptr(v.Addr), v)
 				if obj == nil {
@@ -164,7 +173,8 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 				pushChildren(&stack, obj, expanded)
 				continue
 			}
-			// Not addressable: scan inline.
+			// Non-addressable values can still contain pointers; scan them
+			// without creating a node for the value itself.
 			pushChildren(&stack, cur.parent, v)
 
 		case reflect.Array, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan:
@@ -175,8 +185,9 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 	}
 }
 
-// addRuntimeRoots best-effort adds runtime finalizer queues as roots.
-// If symbols are not available in scope, this is a no-op.
+// addRuntimeRoots best-effort adds runtime finalizer queues as extra roots.
+// This is a heuristic: symbol names and layouts are runtime-version-dependent,
+// and this does not replace proper decoding of runtime finalizer structures.
 func (o *LiveObjects) addRuntimeRoots() {
 	if o.runtimeRootsAdded {
 		return
@@ -201,18 +212,20 @@ func (o *LiveObjects) addRuntimeRoots() {
 	o.walkFromRoots(roots)
 }
 
-// loadPointee loads the object that ptrVar points to, using EvalVariableInScope.
-// Only handles *T pointer types; returns nil for chan/map/func/unsafe.Pointer.
+// loadPointee loads the *T target of a typed pointer using EvalVariableInScope.
+// It deliberately does not decode runtime internals behind chan/map/func or
+// unsafe.Pointer values.
 func (o *LiveObjects) loadPointee(ptrVar *proc.Variable, addr uintptr) *proc.Variable {
 	ts := ptrVar.TypeString()
 	if !strings.HasPrefix(ts, "*") {
 		return nil
 	}
-	baseType := ts[1:] // e.g. "*main.Node" → "main.Node"
+	baseType := ts[1:] // e.g. "*main.Node" becomes "main.Node"
 	return o.loadAt(baseType, addr)
 }
 
-// ensureExpanded reloads a variable from memory if its children were truncated.
+// ensureExpanded reloads addressable structs whose children were not present in
+// the first Delve variable fetch.
 func (o *LiveObjects) ensureExpanded(v *proc.Variable) *proc.Variable {
 	if v == nil || len(v.Children) > 0 || v.Addr == 0 {
 		return v
@@ -226,8 +239,8 @@ func (o *LiveObjects) ensureExpanded(v *proc.Variable) *proc.Variable {
 	return v
 }
 
-// loadAt evaluates *(*typeName)(unsafe.Pointer(uintptr(addr))) to load a
-// variable from the core dump. Returns nil on any error.
+// loadAt evaluates a synthetic unsafe.Pointer expression so Delve reads memory
+// at addr as typeName. It returns nil when the expression cannot be evaluated.
 func (o *LiveObjects) loadAt(typeName string, addr uintptr) *proc.Variable {
 	expr := fmt.Sprintf("*(*%s)(unsafe.Pointer(uintptr(%d)))", typeName, addr)
 	v, err := o.dbg.EvalVariableInScope(o.scopeGID, o.scopeFrame, 0, expr, o.loadCfg)
@@ -241,7 +254,7 @@ func pushChildren(stack *[]root, parent *LiveObject, v *proc.Variable) {
 	if v == nil {
 		return
 	}
-	// Push in reverse so the natural order is preserved with a LIFO stack.
+	// Push in reverse so Delve's child order is preserved by the LIFO stack.
 	for i := len(v.Children) - 1; i >= 0; i-- {
 		c := &v.Children[i]
 		if v.Kind == reflect.Slice && (c.Name == "len" || c.Name == "cap") {
@@ -283,17 +296,16 @@ func isPointerLike(v *proc.Variable) bool {
 	return strings.HasPrefix(ts, "*") || ts == "unsafe.Pointer"
 }
 
-// pointerValue extracts the address a pointer-like variable points to.
-// Delve stores addresses as uint64; we convert to uintptr.
+// pointerValue extracts the address carried by a Delve pointer-like variable.
 func pointerValue(v *proc.Variable) (uintptr, bool) {
 	if v == nil {
 		return 0, false
 	}
 
-	// Prefer Value if it's a concrete integer constant.
+	// Prefer Value when Delve exposed the pointer as an integer constant.
 	if v.Value != nil {
 		if v.Value.Kind() == constant.Int {
-			// Uint64Val / Int64Val are only safe after Kind == Int.
+			// Uint64Val and Int64Val are only meaningful for integer constants.
 			if u, ok := constant.Uint64Val(v.Value); ok {
 				return uintptr(u), true
 			}
@@ -304,7 +316,7 @@ func pointerValue(v *proc.Variable) (uintptr, bool) {
 		// Non-int constants (unknown/string/bool/etc.) -> ignore.
 	}
 
-	// Delve often stores the pointee address here for pointer-like values.
+	// Delve often stores the pointee or runtime object address here.
 	if v.Base != 0 {
 		return uintptr(v.Base), true
 	}
