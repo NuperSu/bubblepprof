@@ -187,7 +187,7 @@ func (g *goroutineAnalysis) addWarning(format string, args ...any) {
 	g.warnings = append(g.warnings, fmt.Sprintf(format, args...))
 }
 
-func printAnalysisReport(w io.Writer, r *analysisResult) {
+func printAnalysisReport(w io.Writer, r *analysisResult, o options) {
 	readable := 0
 	labeled := 0
 	for _, g := range r.goroutines {
@@ -254,7 +254,12 @@ func printAnalysisReport(w io.Writer, r *analysisResult) {
 		printTopTypes(w, typeCounts, "  ")
 	}
 
-	// Per-goroutine detail (unchanged from before).
+	if !o.showGoroutines {
+		return
+	}
+
+	// Per-goroutine detail is useful for debugging traversal, but the default
+	// report is intentionally grouped by pprof bubbles.
 	fmt.Fprintln(w, "\n=== per-goroutine detail ===")
 
 	for _, g := range r.goroutines {
