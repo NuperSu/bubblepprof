@@ -19,6 +19,8 @@ type options struct {
 	maxStringLen    int
 	maxArrayValues  int
 	maxStructFields int
+
+	showGoroutines bool
 }
 
 func main() {
@@ -46,6 +48,7 @@ func parseFlags(errOut io.Writer) options {
 	flag.IntVar(&o.maxStringLen, "maxstr", 256, "Delve MaxStringLen")
 	flag.IntVar(&o.maxArrayValues, "maxarr", 1024, "Delve MaxArrayValues")
 	flag.IntVar(&o.maxStructFields, "maxfields", 1024, "Delve MaxStructFields")
+	flag.BoolVar(&o.showGoroutines, "goroutines", false, "include per-goroutine object details")
 
 	flag.Usage = func() {
 		fmt.Fprintf(errOut, "usage: %s -exe /path/to/bin -core /path/to/core [flags]\n\n", os.Args[0])
@@ -92,6 +95,6 @@ func run(out io.Writer, o options) error {
 		return err
 	}
 
-	printAnalysisReport(out, result)
+	printAnalysisReport(out, result, o)
 	return nil
 }
