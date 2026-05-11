@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"delve_first_project/internal/snapshotinfo"
+	"bubbleprof/internal/snapshotinfo"
 )
 
 func main() {

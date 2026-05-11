@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"delve_first_project/internal/snapshot"
+	"bubbleprof/internal/snapshot"
 )
 
 func TestRuntimeSnapshotCaptureIntegration(t *testing.T) {

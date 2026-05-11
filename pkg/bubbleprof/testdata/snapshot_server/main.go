@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/http"
 
-	"delve_first_project/pkg/bubbleprof"
+	"bubbleprof/pkg/bubbleprof"
 )
 
 func main() {

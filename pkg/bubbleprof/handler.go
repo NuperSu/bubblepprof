@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"delve_first_project/internal/capture"
+	"bubbleprof/internal/capture"
 )
 
 const snapshotPath = "/debug/bubbleprof/snapshot"
