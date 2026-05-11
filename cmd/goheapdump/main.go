@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,7 +29,19 @@ func main() {
 }
 
 func realMain(out, errOut io.Writer) int {
-	opts := parseFlags(errOut)
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "snapshot" {
+		return runSnapshotCommand(out, errOut, args[1:])
+	}
+
+	opts, err := parseFlags(args, errOut)
+	if err != nil {
+		if errors.Is(err, errInvalidUsage) {
+			return 2
+		}
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
 
 	if err := run(out, opts); err != nil {
 		fmt.Fprintln(errOut, err)
@@ -37,28 +50,36 @@ func realMain(out, errOut io.Writer) int {
 	return 0
 }
 
-func parseFlags(errOut io.Writer) options {
+var errInvalidUsage = errors.New("invalid usage")
+
+func parseFlags(args []string, errOut io.Writer) (options, error) {
 	var o options
 
-	flag.StringVar(&o.exePath, "exe", "", "path to the executable that produced the core (must match)")
-	flag.StringVar(&o.corePath, "core", "", "path to the core dump")
-	flag.IntVar(&o.pageSize, "page", 256, "goroutine page size for debugger.Goroutines(start,count)")
+	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	fs.SetOutput(errOut)
+
+	fs.StringVar(&o.exePath, "exe", "", "path to the executable that produced the core (must match)")
+	fs.StringVar(&o.corePath, "core", "", "path to the core dump")
+	fs.IntVar(&o.pageSize, "page", 256, "goroutine page size for debugger.Goroutines(start,count)")
 
 	// Limits for one Delve variable read, not global graph limits.
-	flag.IntVar(&o.maxStringLen, "maxstr", 256, "Delve MaxStringLen")
-	flag.IntVar(&o.maxArrayValues, "maxarr", 1024, "Delve MaxArrayValues")
-	flag.IntVar(&o.maxStructFields, "maxfields", 1024, "Delve MaxStructFields")
-	flag.BoolVar(&o.showGoroutines, "goroutines", false, "include per-goroutine object details")
+	fs.IntVar(&o.maxStringLen, "maxstr", 256, "Delve MaxStringLen")
+	fs.IntVar(&o.maxArrayValues, "maxarr", 1024, "Delve MaxArrayValues")
+	fs.IntVar(&o.maxStructFields, "maxfields", 1024, "Delve MaxStructFields")
+	fs.BoolVar(&o.showGoroutines, "goroutines", false, "include per-goroutine object details")
 
-	flag.Usage = func() {
+	fs.Usage = func() {
 		fmt.Fprintf(errOut, "usage: %s -exe /path/to/bin -core /path/to/core [flags]\n\n", os.Args[0])
-		flag.PrintDefaults()
+		fmt.Fprintf(errOut, "       %s snapshot info snapshot.tar\n\n", os.Args[0])
+		fs.PrintDefaults()
 	}
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		return o, err
+	}
 
 	if o.exePath == "" || o.corePath == "" {
-		flag.Usage()
-		os.Exit(2)
+		fs.Usage()
+		return o, errInvalidUsage
 	}
 	if o.pageSize <= 0 {
 		o.pageSize = 256
@@ -73,7 +94,7 @@ func parseFlags(errOut io.Writer) options {
 		o.maxStructFields = 1024
 	}
 
-	return o
+	return o, nil
 }
 
 func run(out io.Writer, o options) error {
