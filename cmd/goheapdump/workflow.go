@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -17,6 +16,7 @@ import (
 const maxWarnings = 500
 
 type analysisResult struct {
+	graph      *goheap.ProcessGraph
 	goroutines []*goroutineAnalysis
 	keys       []*pprofKey          // pprof label keys, sorted alphabetically
 	unlabeled  []*goroutineAnalysis // goroutines with no pprof labels
@@ -33,6 +33,7 @@ type pprofBubble struct {
 	key        string
 	value      string
 	goroutines []*goroutineAnalysis
+	reachable  map[goheap.ObjectID]struct{}
 }
 
 type goroutineAnalysis struct {
@@ -55,8 +56,8 @@ type typeCount struct {
 }
 
 type objectEntry struct {
-	addr uintptr
-	obj  *goheap.LiveObject
+	id  goheap.ObjectID
+	obj *goheap.Object
 }
 
 func buildHeapGraph(d *debugger.Debugger, o options) (*analysisResult, error) {
@@ -77,6 +78,7 @@ func buildHeapGraph(d *debugger.Debugger, o options) (*analysisResult, error) {
 	}
 
 	res := &analysisResult{
+		graph:      goheap.NewProcessGraph(),
 		goroutines: make([]*goroutineAnalysis, 0, len(gs)),
 	}
 
@@ -87,7 +89,7 @@ func buildHeapGraph(d *debugger.Debugger, o options) (*analysisResult, error) {
 			labels:   g.Labels(),
 		}
 		if ga.readable {
-			ga.live = goheap.New(d, loadCfg)
+			ga.live = goheap.New(res.graph, d, loadCfg, uint64(g.ID), ga.labels)
 		} else {
 			ga.addWarning("unreadable: %v", g.Unreadable)
 			res.goroutines = append(res.goroutines, ga)
@@ -159,6 +161,10 @@ func buildHeapGraph(d *debugger.Debugger, o options) (*analysisResult, error) {
 		}
 	}
 
+	for _, pb := range bubbleMap {
+		pb.reachable = unionReachable(pb.goroutines)
+	}
+
 	// Collect and sort keys alphabetically; sort bubbles by value within each key.
 	res.keys = make([]*pprofKey, 0, len(keyMap))
 	for _, pk := range keyMap {
@@ -215,10 +221,12 @@ func printAnalysisReport(w io.Writer, r *analysisResult) {
 		totalStats.StackPops, totalStats.LoadAtCalls,
 		totalStats.LoadPointeeCalls, totalStats.EnsureLoadedCalls, totalStats.PointerReloadCalls,
 		totalStats.DedupHits, totalStats.WastedLoads)
+	fmt.Fprintf(w, "process graph: objects=%d\n", len(r.graph.Objects))
 
 	// Bubble hierarchy grouped by pprof label key.
 	for _, pk := range r.keys {
 		fmt.Fprintf(w, "\n=== pprof key %q (%d bubbles) ===\n", pk.name, len(pk.bubbles))
+		fmt.Fprintf(w, "shared heap: objects=%d\n", sharedHeapCount(pk.bubbles))
 
 		for _, pb := range pk.bubbles {
 			ids := make([]int64, len(pb.goroutines))
@@ -228,8 +236,10 @@ func printAnalysisReport(w io.Writer, r *analysisResult) {
 			fmt.Fprintf(w, "\n  -- bubble %q=%q (%d goroutines: %s) --\n",
 				pb.key, pb.value, len(pb.goroutines), formatIDs(ids))
 
-			objectCount, edgeCount, typeCounts := collectBubbleStats(pb.goroutines)
-			fmt.Fprintf(w, "  aggregate: objects=%d edges=%d\n", objectCount, edgeCount)
+			exclusiveCount := exclusiveHeapCount(pk.bubbles, pb)
+			edgeCount, typeCounts := collectReachableStats(r.graph, pb.reachable)
+			fmt.Fprintf(w, "  bubble heap: unique=%d exclusive=%d shared=%d edges=%d\n",
+				len(pb.reachable), exclusiveCount, len(pb.reachable)-exclusiveCount, edgeCount)
 			printTopTypes(w, typeCounts, "  ")
 		}
 	}
@@ -237,7 +247,9 @@ func printAnalysisReport(w io.Writer, r *analysisResult) {
 	// Unlabeled goroutines aggregate.
 	if len(r.unlabeled) > 0 {
 		fmt.Fprintf(w, "\n=== unlabeled goroutines (%d goroutines) ===\n", len(r.unlabeled))
-		objectCount, edgeCount, typeCounts := collectBubbleStats(r.unlabeled)
+		reachable := unionReachable(r.unlabeled)
+		edgeCount, typeCounts := collectReachableStats(r.graph, reachable)
+		objectCount := len(reachable)
 		fmt.Fprintf(w, "  aggregate: objects=%d edges=%d\n", objectCount, edgeCount)
 		printTopTypes(w, typeCounts, "  ")
 	}
@@ -267,8 +279,7 @@ func printAnalysisReport(w io.Writer, r *analysisResult) {
 		if len(objects) > 0 {
 			fmt.Fprintln(w, "objects:")
 			for i, entry := range objects {
-				typeName := normalizeTypeName(entry.obj.Var)
-				fmt.Fprintf(w, "  %5d. 0x%x %s (children=%d)\n", i+1, entry.addr, typeName, len(entry.obj.Children))
+				fmt.Fprintf(w, "  %5d. 0x%x %s (children=%d)\n", i+1, entry.obj.Addr, entry.obj.TypeName, len(entry.obj.Children))
 			}
 		}
 
@@ -286,13 +297,12 @@ func collectGraphStats(live *goheap.LiveObjects) (int, int, []typeCount, []objec
 	byType := make(map[string]int, 128)
 	objects := make([]objectEntry, 0, 256)
 
-	for addr, obj := range live.All() {
+	for id, obj := range live.All() {
 		objectCount++
 		edgeCount += len(obj.Children)
-		objects = append(objects, objectEntry{addr: addr, obj: obj})
+		objects = append(objects, objectEntry{id: id, obj: obj})
 
-		t := normalizeTypeName(obj.Var)
-		byType[t]++
+		byType[obj.TypeName]++
 	}
 
 	typeCounts := make([]typeCount, 0, len(byType))
@@ -306,34 +316,37 @@ func collectGraphStats(live *goheap.LiveObjects) (int, int, []typeCount, []objec
 		return typeCounts[i].count > typeCounts[j].count
 	})
 	sort.Slice(objects, func(i, j int) bool {
-		return objects[i].addr < objects[j].addr
+		return objects[i].obj.Addr < objects[j].obj.Addr
 	})
 
 	return objectCount, edgeCount, typeCounts, objects
 }
 
-// collectBubbleStats merges objects from all goroutines in a group,
-// deduplicating by address so shared objects are counted once.
-func collectBubbleStats(goroutines []*goroutineAnalysis) (int, int, []typeCount) {
-	seen := make(map[uintptr]bool)
-	objectCount := 0
-	edgeCount := 0
-	byType := make(map[string]int, 128)
-
+func unionReachable(goroutines []*goroutineAnalysis) map[goheap.ObjectID]struct{} {
+	reachable := make(map[goheap.ObjectID]struct{})
 	for _, ga := range goroutines {
 		if ga.live == nil {
 			continue
 		}
-		for addr, obj := range ga.live.All() {
-			if seen[addr] {
-				continue
-			}
-			seen[addr] = true
-			objectCount++
-			edgeCount += len(obj.Children)
-			t := normalizeTypeName(obj.Var)
-			byType[t]++
+		info := ga.live.Info()
+		for id := range info.Reachable {
+			reachable[id] = struct{}{}
 		}
+	}
+	return reachable
+}
+
+func collectReachableStats(graph *goheap.ProcessGraph, reachable map[goheap.ObjectID]struct{}) (int, []typeCount) {
+	edgeCount := 0
+	byType := make(map[string]int, 128)
+
+	for id := range reachable {
+		obj := graph.Object(id)
+		if obj == nil {
+			continue
+		}
+		edgeCount += len(obj.Children)
+		byType[obj.TypeName]++
 	}
 
 	typeCounts := make([]typeCount, 0, len(byType))
@@ -347,7 +360,40 @@ func collectBubbleStats(goroutines []*goroutineAnalysis) (int, int, []typeCount)
 		return typeCounts[i].count > typeCounts[j].count
 	})
 
-	return objectCount, edgeCount, typeCounts
+	return edgeCount, typeCounts
+}
+
+func exclusiveHeapCount(bubbles []*pprofBubble, target *pprofBubble) int {
+	count := 0
+	for id := range target.reachable {
+		owners := 0
+		for _, pb := range bubbles {
+			if _, ok := pb.reachable[id]; ok {
+				owners++
+			}
+		}
+		if owners == 1 {
+			count++
+		}
+	}
+	return count
+}
+
+func sharedHeapCount(bubbles []*pprofBubble) int {
+	ownersByObject := make(map[goheap.ObjectID]int)
+	for _, pb := range bubbles {
+		for id := range pb.reachable {
+			ownersByObject[id]++
+		}
+	}
+
+	count := 0
+	for _, owners := range ownersByObject {
+		if owners > 1 {
+			count++
+		}
+	}
+	return count
 }
 
 func printTopTypes(w io.Writer, typeCounts []typeCount, indent string) {
@@ -396,17 +442,4 @@ func printWarnings(w io.Writer, warnings []string) {
 	if len(warnings) == maxWarnings {
 		fmt.Fprintf(w, "  - warning limit reached (%d)\n", maxWarnings)
 	}
-}
-
-func normalizeTypeName(v *proc.Variable) string {
-	if v == nil {
-		return "<unknown>"
-	}
-	if ts := v.TypeString(); ts != "" {
-		return ts
-	}
-	if v.Kind != reflect.Invalid {
-		return v.Kind.String()
-	}
-	return "<unknown>"
 }

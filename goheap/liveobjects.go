@@ -11,27 +11,124 @@ import (
 	"github.com/go-delve/delve/service/debugger"
 )
 
-// LiveObjects builds a graph of addressable objects reachable from a set of
-// Delve variables (typically locals from one goroutine's stack frames).
-//
-// Design: traversal is separated from output. The caller supplies a
-// proc.LoadConfig with MaxVariableRecurse=1 so that each Delve variable
-// fetch returns only immediate children. When the traversal encounters a
-// variable whose children were not materialized (due to the recursion
-// limit), it lazily reloads the variable via EvalVariableInScope using a
-// synthetic unsafe.Pointer cast. This works for all composite types:
-// typed pointers (*T), structs, slices, arrays, maps, channels, and
-// interfaces. The visited map deduplicates nodes by address so each
-// object is loaded at most once.
-//
-// Limitations:
-//   - closure capture environments (func values are treated as opaque addresses)
-//   - global/static roots (only goroutine stack locals are used as roots)
+// ObjectID identifies one process-wide object record.
+type ObjectID uint32
+
+// ProcessGraph stores each discovered object address once for the whole
+// process. Delve variables are used only while scanning and are not retained in
+// this graph.
+type ProcessGraph struct {
+	ByAddr  map[uintptr]ObjectID
+	Objects []Object
+
+	scanned map[ObjectID]bool
+}
+
+// Object is the compact persistent record for one addressable object.
+type Object struct {
+	ID       ObjectID
+	Addr     uintptr
+	Size     uint64
+	TypeName string
+	Children []ObjectID
+}
+
+// GoroutineInfo stores only compact references into the process graph.
+type GoroutineInfo struct {
+	ID        uint64
+	Labels    map[string]string
+	Roots     []ObjectID
+	Reachable map[ObjectID]struct{}
+}
+
+// NewProcessGraph creates an empty process-wide object table.
+func NewProcessGraph() *ProcessGraph {
+	return &ProcessGraph{
+		ByAddr:  make(map[uintptr]ObjectID, 1024),
+		Objects: make([]Object, 0, 1024),
+		scanned: make(map[ObjectID]bool, 1024),
+	}
+}
+
+// Object returns the object for id, or nil for an invalid id.
+func (g *ProcessGraph) Object(id ObjectID) *Object {
+	if g == nil || int(id) < 0 || int(id) >= len(g.Objects) {
+		return nil
+	}
+	return &g.Objects[id]
+}
+
+// All returns all process-wide objects discovered so far.
+func (g *ProcessGraph) All() iter.Seq2[ObjectID, *Object] {
+	return func(yield func(ObjectID, *Object) bool) {
+		if g == nil {
+			return
+		}
+		for i := range g.Objects {
+			id := ObjectID(i)
+			if !yield(id, &g.Objects[i]) {
+				return
+			}
+		}
+	}
+}
+
+func (g *ProcessGraph) enterObject(addr uintptr, v *proc.Variable) (ObjectID, bool) {
+	if addr == 0 || v == nil {
+		return 0, false
+	}
+	if id, ok := g.ByAddr[addr]; ok {
+		obj := &g.Objects[id]
+		if obj.TypeName == "" {
+			obj.TypeName = typeName(v)
+		}
+		if obj.Size == 0 {
+			obj.Size = objectSize(v)
+		}
+		return id, true
+	}
+
+	id := ObjectID(len(g.Objects))
+	g.ByAddr[addr] = id
+	g.Objects = append(g.Objects, Object{
+		ID:       id,
+		Addr:     addr,
+		Size:     objectSize(v),
+		TypeName: typeName(v),
+	})
+	return id, true
+}
+
+func (g *ProcessGraph) addChild(parent, child ObjectID) {
+	if g == nil || int(parent) >= len(g.Objects) || int(child) >= len(g.Objects) {
+		return
+	}
+	children := g.Objects[parent].Children
+	for _, existing := range children {
+		if existing == child {
+			return
+		}
+	}
+	g.Objects[parent].Children = append(children, child)
+}
+
+func (g *ProcessGraph) isScanned(id ObjectID) bool {
+	return g != nil && g.scanned[id]
+}
+
+func (g *ProcessGraph) markScanned(id ObjectID) {
+	if g != nil {
+		g.scanned[id] = true
+	}
+}
+
+// LiveObjects scans one goroutine's roots into a shared ProcessGraph. Its
+// persistent per-goroutine state is only roots and reachable object IDs.
 type LiveObjects struct {
 	dbg     *debugger.Debugger
 	loadCfg proc.LoadConfig
-
-	visited map[uintptr]*LiveObject
+	graph   *ProcessGraph
+	info    GoroutineInfo
 
 	runtimeRootsAdded bool
 
@@ -48,57 +145,73 @@ type LiveObjects struct {
 
 // TraversalStats tracks diagnostic counters for the graph traversal.
 type TraversalStats struct {
-	StackPops          int // total items popped from the worklist
-	LoadAtCalls        int // total EvalVariableInScope calls via loadAt
-	LoadPointeeCalls   int // loadAt calls from loadPointee (typed pointer targets)
-	EnsureLoadedCalls  int // loadAt calls from ensureLoaded (composites at recursion boundary)
-	PointerReloadCalls int // loadAt calls from OnlyAddr pointer reload
-	DedupHits          int // pointers skipped because target was already visited
-	WastedLoads        int // loadPointee calls where address was already visited
+	StackPops          int            // total items popped from the worklist
+	LoadAtCalls        int            // total EvalVariableInScope calls via loadAt
+	LoadPointeeCalls   int            // loadAt calls from loadPointee (typed pointer targets)
+	EnsureLoadedCalls  int            // loadAt calls from ensureLoaded (composites at recursion boundary)
+	PointerReloadCalls int            // loadAt calls from OnlyAddr pointer reload
+	DedupHits          int            // pointers skipped because target was already globally scanned
+	WastedLoads        int            // retained for report compatibility
 	EnsureByKind       map[string]int // ensureLoaded calls broken down by Kind+Type
 }
 
-type LiveObject struct {
-	Addr uintptr
-
-	// Delve's view of this address: type, kind, value, and any materialized
-	// children. May represent a heap allocation, a stack-local, or a runtime
-	// structure, but no heap/stack distinction is tracked here.
-	Var *proc.Variable
-
-	// Reachability edges discovered by scanning Delve children.
-	Children []*LiveObject
-
-	// Internal traversal marker to avoid expanding the same address repeatedly.
-	scanned bool
-}
-
-func New(dbg *debugger.Debugger, loadCfg proc.LoadConfig) *LiveObjects {
+func New(graph *ProcessGraph, dbg *debugger.Debugger, loadCfg proc.LoadConfig, gid uint64, labels map[string]string) *LiveObjects {
+	if graph == nil {
+		graph = NewProcessGraph()
+	}
 	return &LiveObjects{
 		dbg:     dbg,
 		loadCfg: loadCfg,
-		visited: make(map[uintptr]*LiveObject, 256),
+		graph:   graph,
+		info: GoroutineInfo{
+			ID:        gid,
+			Labels:    labels,
+			Roots:     make([]ObjectID, 0, 16),
+			Reachable: make(map[ObjectID]struct{}, 256),
+		},
 	}
 }
 
-// Add adds one root variable to the graph.
-// gid and frame identify the Delve scope used for lazy memory reads. Traversal
-// populates visited nodes and edges only; reporting is handled by callers.
+// Graph returns the shared process-wide object table.
+func (o *LiveObjects) Graph() *ProcessGraph {
+	if o == nil {
+		return nil
+	}
+	return o.graph
+}
+
+// Info returns the compact goroutine reachability record.
+func (o *LiveObjects) Info() GoroutineInfo {
+	if o == nil {
+		return GoroutineInfo{}
+	}
+	return o.info
+}
+
+// Add adds one root variable to this goroutine's reachability set.
+// gid and frame identify the Delve scope used for lazy memory reads.
 func (o *LiveObjects) Add(v *proc.Variable, gid int64, frame int) {
-	if v == nil {
+	if o == nil || v == nil {
 		return
 	}
 	o.scopeGID = gid
 	o.scopeFrame = frame
 	o.addRuntimeRoots()
-	o.walkFromRoots([]root{{parent: nil, v: v}})
+	o.walkFromRoots([]root{{v: v}})
 }
 
-// All returns all unique objects discovered so far.
-func (o *LiveObjects) All() iter.Seq2[uintptr, *LiveObject] {
-	return func(yield func(uintptr, *LiveObject) bool) {
-		for addr, obj := range o.visited {
-			if !yield(addr, obj) {
+// All returns all objects reachable from this goroutine.
+func (o *LiveObjects) All() iter.Seq2[ObjectID, *Object] {
+	return func(yield func(ObjectID, *Object) bool) {
+		if o == nil || o.graph == nil {
+			return
+		}
+		for id := range o.info.Reachable {
+			obj := o.graph.Object(id)
+			if obj == nil {
+				continue
+			}
+			if !yield(id, obj) {
 				return
 			}
 		}
@@ -108,19 +221,13 @@ func (o *LiveObjects) All() iter.Seq2[uintptr, *LiveObject] {
 // ---- traversal internals (no printing) ----
 
 type root struct {
-	parent *LiveObject
-	v      *proc.Variable
+	parent    ObjectID
+	hasParent bool
+	v         *proc.Variable
+	knownID   ObjectID
+	fromGraph bool
 }
 
-// walkFromRoots traverses discovered Delve variables using an explicit stack
-// (LIFO). For each variable it ensures children are loaded (reloading via
-// ensureLoaded if the recursion limit left them empty), enters addressable
-// objects into the visited map for deduplication, and pushes children for
-// further processing. Pointer-like types (Ptr, Map, Chan, Func) create
-// nodes at the target/runtime address; addressable structs create nodes at
-// their own address. The traversal terminates when all reachable nodes are
-// visited. It is bounded by Delve's loadCfg limits (MaxArrayValues,
-// MaxStructFields) which cap how many children a single variable exposes.
 func (o *LiveObjects) walkFromRoots(roots []root) {
 	stack := make([]root, 0, len(roots)+64)
 	stack = append(stack, roots...)
@@ -131,19 +238,18 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 		stack = stack[:n]
 		o.Stats.StackPops++
 
+		if cur.fromGraph {
+			o.markReachableAndPushKnown(&stack, cur.knownID)
+			continue
+		}
+
 		v := cur.v
 		if v == nil {
 			continue
 		}
 
-		// Pointer-like values (Ptr, Map, Chan, Func, UnsafePointer) identify
-		// a target address. The node in the graph is keyed by that address.
 		if isPointerLike(v) {
 			ptr, ok := pointerValue(v)
-
-			// Variable might not be fully loaded (OnlyAddr=true from
-			// recursion limit on pointer-to-pointer chains). Reload
-			// from its address so we can extract the pointer value.
 			if (!ok || ptr == 0) && v.Addr != 0 {
 				if reloaded := o.loadAt(v.TypeString(), uintptr(v.Addr)); reloaded != nil {
 					o.Stats.PointerReloadCalls++
@@ -151,81 +257,109 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 					ptr, ok = pointerValue(v)
 				}
 			}
-
 			if !ok || ptr == 0 {
 				continue
 			}
 
-			// Fast path: if already visited, just record the edge.
-			if existing := o.visited[ptr]; existing != nil {
-				if cur.parent != nil {
-					cur.parent.Children = append(cur.parent.Children, existing)
-				}
-				o.Stats.DedupHits++
-				continue
-			}
-
 			pointee := pointeeOrSelf(v)
-
-			// If a typed pointer was not materialized, load *T at ptr.
 			if pointee == v || len(pointee.Children) == 0 {
 				if loaded := o.loadPointee(v, ptr); loaded != nil {
 					pointee = loaded
 				}
 			}
 
-			childObj := o.enterObject(ptr, pointee)
-			if childObj == nil {
+			id, ok := o.graph.enterObject(ptr, pointee)
+			if !ok {
 				continue
 			}
-			if cur.parent != nil {
-				cur.parent.Children = append(cur.parent.Children, childObj)
-			}
-			childObj.scanned = true
+			o.noteEdgeOrRoot(cur, id)
 
-			// Reload the variable if its children were truncated by the
-			// recursion limit. Works for structs, maps, slices, etc.
-			expanded := o.ensureLoaded(childObj.Var)
-			if expanded != childObj.Var {
-				childObj.Var = expanded
+			if !o.markReachable(id) {
+				continue
 			}
-			pushChildren(&stack, childObj, expanded)
+			if o.graph.isScanned(id) {
+				o.Stats.DedupHits++
+				pushKnownChildren(&stack, o.graph, id)
+				continue
+			}
+
+			expanded := o.ensureLoaded(pointee)
+			o.scanObjectChildren(&stack, id, expanded)
 			continue
 		}
 
 		switch v.Kind {
 		case reflect.Struct:
-			// Addressable structs become nodes even when reached inline.
 			if v.Addr != 0 {
-				obj := o.enterObject(uintptr(v.Addr), v)
-				if obj == nil {
+				id, ok := o.graph.enterObject(uintptr(v.Addr), v)
+				if !ok {
 					continue
 				}
-				if cur.parent != nil {
-					cur.parent.Children = append(cur.parent.Children, obj)
-				}
-				if obj.scanned {
+				o.noteEdgeOrRoot(cur, id)
+
+				if !o.markReachable(id) {
 					continue
 				}
-				obj.scanned = true
+				if o.graph.isScanned(id) {
+					pushKnownChildren(&stack, o.graph, id)
+					continue
+				}
 
 				expanded := o.ensureLoaded(v)
-				if expanded != v {
-					obj.Var = expanded
-				}
-				pushChildren(&stack, obj, expanded)
+				o.scanObjectChildren(&stack, id, expanded)
 				continue
 			}
-			// Non-addressable values can still contain pointers; scan them
-			// without creating a node for the value itself.
-			pushChildren(&stack, cur.parent, v)
+			pushChildren(&stack, cur.parent, cur.hasParent, v)
 
 		case reflect.Array, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan:
 			v = o.ensureLoaded(v)
-			pushChildren(&stack, cur.parent, v)
+			pushChildren(&stack, cur.parent, cur.hasParent, v)
 		default:
 			// primitives: nothing to do
 		}
+	}
+}
+
+func (o *LiveObjects) scanObjectChildren(stack *[]root, id ObjectID, v *proc.Variable) {
+	o.graph.markScanned(id)
+	pushChildren(stack, id, true, v)
+}
+
+func (o *LiveObjects) noteEdgeOrRoot(cur root, id ObjectID) {
+	if cur.hasParent {
+		o.graph.addChild(cur.parent, id)
+		return
+	}
+	for _, existing := range o.info.Roots {
+		if existing == id {
+			return
+		}
+	}
+	o.info.Roots = append(o.info.Roots, id)
+}
+
+func (o *LiveObjects) markReachable(id ObjectID) bool {
+	if _, ok := o.info.Reachable[id]; ok {
+		return false
+	}
+	o.info.Reachable[id] = struct{}{}
+	return true
+}
+
+func (o *LiveObjects) markReachableAndPushKnown(stack *[]root, id ObjectID) {
+	if !o.markReachable(id) {
+		return
+	}
+	pushKnownChildren(stack, o.graph, id)
+}
+
+func pushKnownChildren(stack *[]root, graph *ProcessGraph, id ObjectID) {
+	obj := graph.Object(id)
+	if obj == nil {
+		return
+	}
+	for i := len(obj.Children) - 1; i >= 0; i-- {
+		*stack = append(*stack, root{knownID: obj.Children[i], fromGraph: true})
 	}
 }
 
@@ -306,7 +440,7 @@ func (o *LiveObjects) loadAt(typeName string, addr uintptr) *proc.Variable {
 	return v
 }
 
-func pushChildren(stack *[]root, parent *LiveObject, v *proc.Variable) {
+func pushChildren(stack *[]root, parent ObjectID, hasParent bool, v *proc.Variable) {
 	if v == nil {
 		return
 	}
@@ -316,24 +450,8 @@ func pushChildren(stack *[]root, parent *LiveObject, v *proc.Variable) {
 		if v.Kind == reflect.Slice && (c.Name == "len" || c.Name == "cap") {
 			continue
 		}
-		*stack = append(*stack, root{parent: parent, v: c})
+		*stack = append(*stack, root{parent: parent, hasParent: hasParent, v: c})
 	}
-}
-
-func (o *LiveObjects) enterObject(addr uintptr, v *proc.Variable) *LiveObject {
-	if addr == 0 || v == nil {
-		return nil
-	}
-	if existing := o.visited[addr]; existing != nil {
-		return existing
-	}
-
-	obj := &LiveObject{
-		Addr: addr,
-		Var:  v,
-	}
-	o.visited[addr] = obj
-	return obj
 }
 
 // ---- helpers ----
@@ -361,7 +479,6 @@ func pointerValue(v *proc.Variable) (uintptr, bool) {
 	// Prefer Value when Delve exposed the pointer as an integer constant.
 	if v.Value != nil {
 		if v.Value.Kind() == constant.Int {
-			// Uint64Val and Int64Val are only meaningful for integer constants.
 			if u, ok := constant.Uint64Val(v.Value); ok {
 				return uintptr(u), true
 			}
@@ -369,7 +486,6 @@ func pointerValue(v *proc.Variable) (uintptr, bool) {
 				return uintptr(i), true
 			}
 		}
-		// Non-int constants (unknown/string/bool/etc.) -> ignore.
 	}
 
 	// Delve often stores the pointee or runtime object address here.
@@ -399,4 +515,34 @@ func isTypedPointer(v *proc.Variable) bool {
 		return true
 	}
 	return strings.HasPrefix(v.TypeString(), "*")
+}
+
+func typeName(v *proc.Variable) string {
+	if v == nil {
+		return "<unknown>"
+	}
+	if ts := v.TypeString(); ts != "" {
+		return ts
+	}
+	if v.Kind != reflect.Invalid {
+		return v.Kind.String()
+	}
+	return "<unknown>"
+}
+
+func objectSize(v *proc.Variable) uint64 {
+	if v == nil {
+		return 0
+	}
+	if v.RealType != nil {
+		if size := v.RealType.Size(); size > 0 {
+			return uint64(size)
+		}
+	}
+	if v.DwarfType != nil {
+		if size := v.DwarfType.Size(); size > 0 {
+			return uint64(size)
+		}
+	}
+	return 0
 }
