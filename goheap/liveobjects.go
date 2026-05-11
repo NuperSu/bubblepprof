@@ -16,20 +16,17 @@ import (
 //
 // Design: traversal is separated from output. The caller supplies a
 // proc.LoadConfig with MaxVariableRecurse=1 so that each Delve variable
-// fetch returns only immediate children. When the traversal hits a typed
-// pointer (*T) whose pointee was not materialized, it lazily loads the
-// pointee via EvalVariableInScope using a synthetic unsafe.Pointer cast.
-// The visited map deduplicates nodes by address so each object is loaded
-// at most once.
+// fetch returns only immediate children. When the traversal encounters a
+// variable whose children were not materialized (due to the recursion
+// limit), it lazily reloads the variable via EvalVariableInScope using a
+// synthetic unsafe.Pointer cast. This works for all composite types:
+// typed pointers (*T), structs, slices, arrays, maps, channels, and
+// interfaces. The visited map deduplicates nodes by address so each
+// object is loaded at most once.
 //
-// Limitations: the traversal relies on what Delve exposes as children.
-// It follows typed pointers and scans structs, arrays, slices, interfaces,
-// maps, and channels. However, it does not decode:
-//   - Go runtime map bucket internals (relies on Delve's map children)
-//   - channel ring-buffer contents (only the hchan struct, not queued elements)
+// Limitations:
 //   - closure capture environments (func values are treated as opaque addresses)
 //   - global/static roots (only goroutine stack locals are used as roots)
-//   - pprof labels (the thesis goal of grouping by pprof bubble is not yet implemented)
 type LiveObjects struct {
 	dbg     *debugger.Debugger
 	loadCfg proc.LoadConfig
@@ -101,13 +98,14 @@ type root struct {
 }
 
 // walkFromRoots traverses discovered Delve variables using an explicit stack
-// (LIFO). For each pointer-like value it enters/deduplicates the pointee in
-// the visited map, lazy-loads it via loadPointee if Delve didn't materialize
-// the target, then pushes the pointee's children. Structs with addresses are
-// also tracked as nodes. There is no depth limit; traversal terminates when
-// all reachable nodes are visited. It is still bounded by Delve's loadCfg
-// limits (MaxArrayValues, MaxStructFields) which cap how many children a
-// single variable exposes.
+// (LIFO). For each variable it ensures children are loaded (reloading via
+// ensureLoaded if the recursion limit left them empty), enters addressable
+// objects into the visited map for deduplication, and pushes children for
+// further processing. Pointer-like types (Ptr, Map, Chan, Func) create
+// nodes at the target/runtime address; addressable structs create nodes at
+// their own address. The traversal terminates when all reachable nodes are
+// visited. It is bounded by Delve's loadCfg limits (MaxArrayValues,
+// MaxStructFields) which cap how many children a single variable exposes.
 func (o *LiveObjects) walkFromRoots(roots []root) {
 	stack := make([]root, 0, len(roots)+64)
 	stack = append(stack, roots...)
@@ -122,11 +120,21 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			continue
 		}
 
-		// Pointer-like values identify another address. For *T pointers this is
-		// the pointed-to object; for maps/channels/functions it is only the
-		// runtime object address unless Delve has already materialized children.
+		// Pointer-like values (Ptr, Map, Chan, Func, UnsafePointer) identify
+		// a target address. The node in the graph is keyed by that address.
 		if isPointerLike(v) {
 			ptr, ok := pointerValue(v)
+
+			// Variable might not be fully loaded (OnlyAddr=true from
+			// recursion limit on pointer-to-pointer chains). Reload
+			// from its address so we can extract the pointer value.
+			if (!ok || ptr == 0) && v.Addr != 0 {
+				if reloaded := o.loadAt(v.TypeString(), uintptr(v.Addr)); reloaded != nil {
+					v = reloaded
+					ptr, ok = pointerValue(v)
+				}
+			}
+
 			if !ok || ptr == 0 {
 				continue
 			}
@@ -153,8 +161,9 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			}
 			childObj.scanned = true
 
-			// Give addressable structs one more chance to expose their fields.
-			expanded := o.ensureExpanded(childObj.Var)
+			// Reload the variable if its children were truncated by the
+			// recursion limit. Works for structs, maps, slices, etc.
+			expanded := o.ensureLoaded(childObj.Var)
 			if expanded != childObj.Var {
 				childObj.Var = expanded
 			}
@@ -178,7 +187,7 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 				}
 				obj.scanned = true
 
-				expanded := o.ensureExpanded(v)
+				expanded := o.ensureLoaded(v)
 				if expanded != v {
 					obj.Var = expanded
 				}
@@ -190,6 +199,7 @@ func (o *LiveObjects) walkFromRoots(roots []root) {
 			pushChildren(&stack, cur.parent, v)
 
 		case reflect.Array, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan:
+			v = o.ensureLoaded(v)
 			pushChildren(&stack, cur.parent, v)
 		default:
 			// primitives: nothing to do
@@ -239,14 +249,17 @@ func (o *LiveObjects) loadPointee(ptrVar *proc.Variable, addr uintptr) *proc.Var
 	return o.loadAt(baseType, addr)
 }
 
-// ensureExpanded reloads addressable structs whose children were not present in
-// the first Delve variable fetch.
-func (o *LiveObjects) ensureExpanded(v *proc.Variable) *proc.Variable {
+// ensureLoaded reloads addressable variables whose children were not present
+// in the initial Delve variable fetch (typically due to MaxVariableRecurse
+// limits). Handles all composite types: structs, slices, arrays, maps,
+// channels, and interfaces.
+func (o *LiveObjects) ensureLoaded(v *proc.Variable) *proc.Variable {
 	if v == nil || len(v.Children) > 0 || v.Addr == 0 {
 		return v
 	}
 	switch v.Kind {
-	case reflect.Struct:
+	case reflect.Struct, reflect.Slice, reflect.Array,
+		reflect.Map, reflect.Chan, reflect.Interface:
 		if loaded := o.loadAt(v.TypeString(), uintptr(v.Addr)); loaded != nil {
 			return loaded
 		}
