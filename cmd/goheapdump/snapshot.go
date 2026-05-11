@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	"delve_first_project/internal/snapshotinfo"
+	"bubbleprof/internal/snapshotinfo"
 )
 
 func runSnapshotCommand(out, errOut io.Writer, args []string) int {

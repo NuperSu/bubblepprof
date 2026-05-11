@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"delve_first_project/internal/capture"
-	"delve_first_project/internal/snapshot"
+	"bubbleprof/internal/capture"
+	"bubbleprof/internal/snapshot"
 )
 
 func TestHandlerReturnsValidTar(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"runtime/pprof"
 	"time"
 
-	"delve_first_project/internal/snapshot"
+	"bubbleprof/internal/snapshot"
 )
 
 type RuntimeHeapDumpWriter struct{}

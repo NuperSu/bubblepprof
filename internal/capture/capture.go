@@ -8,7 +8,7 @@ import (
 	"os"
 	"runtime"
 
-	"delve_first_project/internal/snapshot"
+	"bubbleprof/internal/snapshot"
 )
 
 type HeapDumpWriter interface {
