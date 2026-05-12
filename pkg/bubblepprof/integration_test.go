@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/snapshot"
+	"bubblepprof/internal/snapshotparse"
 )
 
 func TestRuntimeSnapshotCaptureIntegration(t *testing.T) {
@@ -79,5 +81,32 @@ func TestRuntimeSnapshotCaptureIntegration(t *testing.T) {
 	}
 	if bundle.Metadata.Format != snapshot.FormatV1 {
 		t.Fatalf("format = %q", bundle.Metadata.Format)
+	}
+
+	// Phase 3: the heap dump must parse cleanly through the snapshotparse
+	// pipeline and expose the broad invariants that distinguish a real
+	// dump from an empty one.
+	res, err := snapshotparse.ParseSnapshot(bytes.NewReader(body), heapdump.Options{})
+	if err != nil {
+		t.Fatalf("parse snapshot: %v", err)
+	}
+	snap := res.Snapshot
+	if snap == nil {
+		t.Fatal("parsed snapshot is nil")
+	}
+	if snap.Header != heapdump.Header {
+		t.Fatalf("heap dump header = %q", snap.Header)
+	}
+	if snap.Params.PtrSize != 4 && snap.Params.PtrSize != 8 {
+		t.Fatalf("ptr size = %d", snap.Params.PtrSize)
+	}
+	if snap.Stats.ObjectCount == 0 {
+		t.Fatal("expected at least one object in real heap dump")
+	}
+	if snap.Stats.GoroutineCount == 0 {
+		t.Fatal("expected at least one goroutine")
+	}
+	if snap.Stats.StackFrameCount == 0 {
+		t.Fatal("expected at least one stack frame")
 	}
 }
