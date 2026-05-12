@@ -7,6 +7,7 @@ import (
 
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/snapshot"
+	"bubblepprof/internal/snapshotgraph"
 	"bubblepprof/internal/snapshotparse"
 )
 
@@ -36,6 +37,16 @@ func Run(out, errOut io.Writer, program string, args []string) int {
 			return 1
 		}
 		return 0
+	case "graph":
+		if len(args) != 2 {
+			usage(errOut, program)
+			return 2
+		}
+		if err := PrintGraph(out, args[1]); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
 	default:
 		usage(errOut, program)
 		return 2
@@ -46,6 +57,7 @@ func usage(w io.Writer, program string) {
 	fmt.Fprintf(w, "usage:\n")
 	fmt.Fprintf(w, "  %s snapshot info snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot parse snapshot.tar\n", program)
+	fmt.Fprintf(w, "  %s snapshot graph snapshot.tar\n", program)
 }
 
 func Print(out io.Writer, path string) error {
@@ -94,5 +106,32 @@ func PrintParse(out io.Writer, path string) error {
 	fmt.Fprintf(out, "%s size: %d bytes\n", snapshot.GoroutineProfileFile, res.GoroutineProfileSize)
 	fmt.Fprintln(out)
 	res.Snapshot.PrintSummary(out)
+	return nil
+}
+
+// PrintGraph parses a snapshot tar into a HeapSnapshot, builds the
+// resolved object graph + per-goroutine and global reachability sets,
+// and writes a summary. It does not attribute bubbles.
+func PrintGraph(out io.Writer, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open snapshot: %w", err)
+	}
+	defer f.Close()
+
+	res, err := snapshotparse.ParseSnapshot(f, heapdump.Options{})
+	if err != nil {
+		return fmt.Errorf("parse snapshot: %w", err)
+	}
+	analysis, err := snapshotgraph.Build(res.Snapshot, snapshotgraph.Options{})
+	if err != nil {
+		return fmt.Errorf("build snapshot graph: %w", err)
+	}
+
+	fmt.Fprintf(out, "snapshot format: %s\n", res.Metadata.Format)
+	fmt.Fprintf(out, "metadata go version: %s\n", res.Metadata.GoVersion)
+	fmt.Fprintf(out, "heap dump build version: %s\n", res.Snapshot.Params.BuildVersion)
+	fmt.Fprintln(out)
+	analysis.PrintSummary(out)
 	return nil
 }

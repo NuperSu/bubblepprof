@@ -95,6 +95,49 @@ func TestPrintParseSummary(t *testing.T) {
 	}
 }
 
+func TestPrintGraphSummary(t *testing.T) {
+	heap := buildMinimalHeapDump()
+	var tar bytes.Buffer
+	if err := snapshot.WriteSnapshotBundle(&tar, snapshot.BundleSource{
+		HeapDump:         bytes.NewReader(heap),
+		HeapDumpSize:     int64(len(heap)),
+		GoroutineProfile: []byte("p"),
+		Metadata: snapshot.SnapshotMetadata{
+			Format:               snapshot.FormatV1,
+			GoVersion:            "go-test",
+			PID:                  9999,
+			HeapDumpFile:         snapshot.HeapDumpFile,
+			GoroutineProfileFile: snapshot.GoroutineProfileFile,
+		},
+	}); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+
+	path := t.TempDir() + "/snapshot.tar"
+	if err := os.WriteFile(path, tar.Bytes(), 0o600); err != nil {
+		t.Fatalf("write temp snapshot: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := PrintGraph(&out, path); err != nil {
+		t.Fatalf("print graph: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"snapshot format: bubblepprof-snapshot-v1",
+		"objects: 1",
+		"goroutines: 1",
+		"goroutine roots:",
+		"global roots:",
+		"unreachable objects:",
+		"bubble attribution: not implemented in this phase",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRunRejectsUnknownSubcommand(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	code := Run(&out, &errBuf, "bubblepprof", []string{"bogus"})
