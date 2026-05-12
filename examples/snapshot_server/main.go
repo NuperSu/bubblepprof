@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"sync"
 
-	"bubbleprof/pkg/bubbleprof"
+	"bubblepprof/pkg/bubblepprof"
 )
 
 type retainedChunk struct {
@@ -27,7 +27,7 @@ func main() {
 
 	// Phase 2 profiler endpoint.
 	// This should be passive: it captures only when requested.
-	bubbleprof.Register(mux)
+	bubblepprof.Register(mux)
 
 	// Example app endpoints. These are query-driven and do not run periodically.
 	mux.HandleFunc("/", status)
@@ -36,7 +36,7 @@ func main() {
 
 	addr := "127.0.0.1:6060"
 	log.Printf("listening on http://%s", addr)
-	log.Printf("snapshot: curl http://%s/debug/bubbleprof/snapshot -o snapshot.tar", addr)
+	log.Printf("snapshot: curl http://%s/debug/bubblepprof/snapshot -o snapshot.tar", addr)
 	log.Printf("retain sample heap: curl 'http://%s/retain?bubble=alpha&mb=4'", addr)
 	log.Printf("reset sample heap: curl http://%s/reset", addr)
 
@@ -55,7 +55,7 @@ func status(w http.ResponseWriter, _ *http.Request) {
 		byBubble[chunk.Bubble] += len(chunk.Data)
 	}
 
-	fmt.Fprintf(w, "bubbleprof snapshot example is running\n")
+	fmt.Fprintf(w, "bubblepprof snapshot example is running\n")
 	fmt.Fprintf(w, "retained chunks: %d\n", len(retain))
 	fmt.Fprintf(w, "retained total: %d MiB\n", totalBytes/(1024*1024))
 
@@ -67,7 +67,7 @@ func status(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	fmt.Fprintf(w, "\nendpoints:\n")
-	fmt.Fprintf(w, "  GET /debug/bubbleprof/snapshot\n")
+	fmt.Fprintf(w, "  GET /debug/bubblepprof/snapshot\n")
 	fmt.Fprintf(w, "  GET /retain?bubble=alpha&mb=4\n")
 	fmt.Fprintf(w, "  GET /reset\n")
 }
@@ -92,7 +92,7 @@ func retainHandler(w http.ResponseWriter, r *http.Request) {
 
 	pprof.Do(r.Context(), labels, func(ctx context.Context) {
 		data := make([]byte, mb*1024*1024)
-		copy(data, "bubbleprof example retained heap: "+bubble)
+		copy(data, "bubblepprof example retained heap: "+bubble)
 
 		mu.Lock()
 		retain = append(retain, retainedChunk{
@@ -114,4 +114,3 @@ func resetHandler(w http.ResponseWriter, _ *http.Request) {
 
 	fmt.Fprintf(w, "retained heap reset\n")
 }
-

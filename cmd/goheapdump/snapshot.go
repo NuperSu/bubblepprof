@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	"bubbleprof/internal/snapshotinfo"
+	"bubblepprof/internal/snapshotinfo"
 )
 
 func runSnapshotCommand(out, errOut io.Writer, args []string) int {

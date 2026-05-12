@@ -1,4 +1,4 @@
-module bubbleprof
+module bubblepprof
 
 go 1.25
 

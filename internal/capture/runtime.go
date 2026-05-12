@@ -9,7 +9,7 @@ import (
 	"runtime/pprof"
 	"time"
 
-	"bubbleprof/internal/snapshot"
+	"bubblepprof/internal/snapshot"
 )
 
 type RuntimeHeapDumpWriter struct{}

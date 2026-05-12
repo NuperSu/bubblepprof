@@ -3,7 +3,7 @@ package snapshot
 import "time"
 
 const (
-	FormatV1 = "bubbleprof-snapshot-v1"
+	FormatV1 = "bubblepprof-snapshot-v1"
 
 	HeapDumpFile         = "heap.dump"
 	GoroutineProfileFile = "goroutine.pprof"
