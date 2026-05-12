@@ -10,7 +10,7 @@ import (
 	"github.com/go-delve/delve/service/api"
 	"github.com/go-delve/delve/service/debugger"
 
-	"bubbleprof/goheap"
+	"bubblepprof/goheap"
 )
 
 const maxWarnings = 500

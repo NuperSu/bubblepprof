@@ -8,7 +8,7 @@ import (
 	"os"
 	"runtime"
 
-	"bubbleprof/internal/snapshot"
+	"bubblepprof/internal/snapshot"
 )
 
 type HeapDumpWriter interface {
@@ -39,7 +39,7 @@ func WriteSnapshot(ctx context.Context, w io.Writer, opts CaptureOptions) error 
 
 	opts = withDefaults(opts)
 
-	tmpDir, err := os.MkdirTemp("", "bubbleprof-snapshot-*")
+	tmpDir, err := os.MkdirTemp("", "bubblepprof-snapshot-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"bubbleprof/internal/snapshot"
+	"bubblepprof/internal/snapshot"
 )
 
 func TestPrintUsesSnapshotSizes(t *testing.T) {
@@ -39,7 +39,7 @@ func TestPrintUsesSnapshotSizes(t *testing.T) {
 
 	got := out.String()
 	for _, want := range []string{
-		"format: bubbleprof-snapshot-v1",
+		"format: bubblepprof-snapshot-v1",
 		"heap.dump: present, 9 bytes",
 		"goroutine.pprof: present, 12 bytes",
 		"metadata.json: valid",
