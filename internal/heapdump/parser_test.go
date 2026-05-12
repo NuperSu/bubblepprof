@@ -127,37 +127,68 @@ func TestParseObjectZeroPointerSkipped(t *testing.T) {
 	}
 }
 
+func TestParseObjectInterfaceFieldsPreservedButNotDecoded(t *testing.T) {
+	buf := newSyntheticBuffer()
+
+	contents := make([]byte, 16)
+	binary.LittleEndian.PutUint64(contents[8:16], 0x4000)
+	writeUvarint(buf, tagObject)
+	writeUvarint(buf, 0x3500)
+	writeBytes(buf, contents)
+	writeFieldList(buf, []heapsnapshot.Field{{Kind: heapsnapshot.FieldKindEface, Offset: 0}})
+
+	writeUvarint(buf, tagEOF)
+
+	snap, err := Parse(buf, Options{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.Objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(snap.Objects))
+	}
+	obj := snap.Objects[0]
+	if len(obj.Fields) != 1 || obj.Fields[0].Kind != heapsnapshot.FieldKindEface {
+		t.Fatalf("fields = %+v", obj.Fields)
+	}
+	if len(obj.PointerAddrs) != 0 {
+		t.Fatalf("expected iface/eface pointer not to be decoded, got %v", obj.PointerAddrs)
+	}
+	if len(snap.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", snap.Warnings)
+	}
+}
+
 func TestParseGoroutineAndStackFrames(t *testing.T) {
 	buf := newSyntheticBuffer()
 
 	// Goroutine record.
 	writeUvarint(buf, tagGoroutine)
-	writeUvarint(buf, 0xaa00) // addr
-	writeUvarint(buf, 0xbb00) // sp
-	writeUvarint(buf, 42)     // goid
-	writeUvarint(buf, 0xcc00) // gopc
-	writeUvarint(buf, 4)      // status
-	writeBool(buf, false)     // isSystem
-	writeBool(buf, false)     // isBackground
-	writeUvarint(buf, 0)      // wait since
+	writeUvarint(buf, 0xaa00)  // addr
+	writeUvarint(buf, 0xbb00)  // sp
+	writeUvarint(buf, 42)      // goid
+	writeUvarint(buf, 0xcc00)  // gopc
+	writeUvarint(buf, 4)       // status
+	writeBool(buf, false)      // isSystem
+	writeBool(buf, false)      // isBackground
+	writeUvarint(buf, 0)       // wait since
 	writeString(buf, "select") // wait reason
-	writeUvarint(buf, 0) // ctxt
-	writeUvarint(buf, 0) // m
-	writeUvarint(buf, 0) // defer
-	writeUvarint(buf, 0) // panic
+	writeUvarint(buf, 0)       // ctxt
+	writeUvarint(buf, 0)       // m
+	writeUvarint(buf, 0)       // defer
+	writeUvarint(buf, 0)       // panic
 
 	// Stack frame with one pointer at offset 0 -> 0x3000.
 	frameContents := make([]byte, 16)
 	binary.LittleEndian.PutUint64(frameContents[0:8], 0x3000)
 	writeUvarint(buf, tagStackFrame)
-	writeUvarint(buf, 0xbb00)        // sp
-	writeUvarint(buf, 0)             // depth
-	writeUvarint(buf, 0)             // childSP
-	writeBytes(buf, frameContents)   // contents
-	writeUvarint(buf, 0xff00)        // entry pc
-	writeUvarint(buf, 0xff10)        // current pc
-	writeUvarint(buf, 0xff20)        // cont pc
-	writeString(buf, "main.run")     // func name
+	writeUvarint(buf, 0xbb00)      // sp
+	writeUvarint(buf, 0)           // depth
+	writeUvarint(buf, 0)           // childSP
+	writeBytes(buf, frameContents) // contents
+	writeUvarint(buf, 0xff00)      // entry pc
+	writeUvarint(buf, 0xff10)      // current pc
+	writeUvarint(buf, 0xff20)      // cont pc
+	writeString(buf, "main.run")   // func name
 	writeFieldList(buf, []heapsnapshot.Field{{Kind: heapsnapshot.FieldKindPtr, Offset: 0}})
 
 	writeUvarint(buf, tagEOF)
@@ -228,6 +259,35 @@ func TestParseDataAndBSSGlobals(t *testing.T) {
 	}
 	if snap.Globals[2].Kind != "bss" || snap.Globals[2].Addr != 0xe000 {
 		t.Fatalf("bss root = %+v", snap.Globals[2])
+	}
+}
+
+func TestParseDataGlobalsUseSlotForNonZeroPointer(t *testing.T) {
+	buf := newSyntheticBuffer()
+
+	dataContents := make([]byte, 16)
+	binary.LittleEndian.PutUint64(dataContents[8:16], 0x9200)
+
+	writeUvarint(buf, tagData)
+	writeUvarint(buf, 0xd000)
+	writeBytes(buf, dataContents)
+	writeFieldList(buf, []heapsnapshot.Field{
+		{Kind: heapsnapshot.FieldKindPtr, Offset: 0},
+		{Kind: heapsnapshot.FieldKindPtr, Offset: 8},
+	})
+
+	writeUvarint(buf, tagEOF)
+
+	snap, err := Parse(buf, Options{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.Globals) != 1 {
+		t.Fatalf("expected 1 global root, got %d", len(snap.Globals))
+	}
+	root := snap.Globals[0]
+	if root.Kind != "data" || root.Addr != 0xd008 || root.PointerAddr != 0x9200 {
+		t.Fatalf("data root = %+v", root)
 	}
 }
 
@@ -305,6 +365,24 @@ func TestParseOutOfBoundsPointerWarns(t *testing.T) {
 	}
 }
 
+func TestParsePointerOffsetOverflowWarns(t *testing.T) {
+	buf := newSyntheticBuffer()
+	contents := make([]byte, 8)
+	writeUvarint(buf, tagObject)
+	writeUvarint(buf, 0x7000)
+	writeBytes(buf, contents)
+	writeFieldList(buf, []heapsnapshot.Field{{Kind: heapsnapshot.FieldKindPtr, Offset: ^uint64(0)}})
+	writeUvarint(buf, tagEOF)
+
+	snap, err := Parse(buf, Options{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.Warnings) == 0 {
+		t.Fatalf("expected at least one warning, got none")
+	}
+}
+
 func TestParseOutOfBoundsPointerStrictErrors(t *testing.T) {
 	buf := newSyntheticBuffer()
 	contents := make([]byte, 4)
@@ -317,6 +395,27 @@ func TestParseOutOfBoundsPointerStrictErrors(t *testing.T) {
 	_, err := Parse(buf, Options{Strict: true})
 	if err == nil {
 		t.Fatal("expected strict mode to fail on out-of-bounds pointer")
+	}
+}
+
+func TestParseMaxMemRangeLimit(t *testing.T) {
+	build := func() *bytes.Buffer {
+		buf := newSyntheticBuffer()
+		writeUvarint(buf, tagObject)
+		writeUvarint(buf, 0x8000)
+		writeBytes(buf, make([]byte, 8))
+		writeFieldList(buf, nil)
+		writeUvarint(buf, tagEOF)
+		return buf
+	}
+
+	_, err := Parse(build(), Options{MaxMemRangeBytes: 4})
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("got err=%v, want exceeds limit", err)
+	}
+
+	if _, err := Parse(build(), Options{MaxMemRangeBytes: 0}); err != nil {
+		t.Fatalf("parse with zero limit: %v", err)
 	}
 }
 

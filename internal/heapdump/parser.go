@@ -20,8 +20,7 @@ type Options struct {
 	KeepObjectContents bool
 
 	// MaxStringBytes is an upper bound on length-prefixed strings such as
-	// function names and wait reasons. Zero means no limit. Defaults
-	// applied in Parse if the field is left zero.
+	// function names and wait reasons. Zero uses the parser default.
 	MaxStringBytes uint64
 
 	// MaxMemRangeBytes is an upper bound on length-prefixed memory ranges
@@ -34,8 +33,7 @@ type Options struct {
 }
 
 const (
-	defaultMaxStringBytes   = 16 << 20  // 16 MiB
-	defaultMaxMemRangeBytes = 512 << 20 // 512 MiB
+	defaultMaxStringBytes = 16 << 20 // 16 MiB
 )
 
 // Parse reads a heap dump from r and returns the normalized snapshot.
@@ -45,9 +43,6 @@ const (
 func Parse(r io.Reader, opts Options) (*heapsnapshot.HeapSnapshot, error) {
 	if opts.MaxStringBytes == 0 {
 		opts.MaxStringBytes = defaultMaxStringBytes
-	}
-	if opts.MaxMemRangeBytes == 0 {
-		opts.MaxMemRangeBytes = defaultMaxMemRangeBytes
 	}
 
 	rd := newReader(r, Limits{
