@@ -11,7 +11,7 @@ import (
 // using the field list emitted by the runtime.
 //
 // `slotAddrs`, if non-nil, will be appended with (containerAddr + offset)
-// for every pointer slot decoded (used for global root attribution).
+// for every non-zero pointer target decoded (used for global root attribution).
 // `targets`, if non-nil, will be appended with the decoded pointer values
 // (zero values are skipped).
 //
@@ -46,37 +46,17 @@ func extractPointers(
 				}
 				continue
 			}
-			if slots != nil {
-				*slots = append(*slots, containerAddr+f.Offset)
-			}
 			if ptr != 0 && targets != nil {
+				if slots != nil {
+					*slots = append(*slots, containerAddr+f.Offset)
+				}
 				*targets = append(*targets, ptr)
 			}
 		case heapsnapshot.FieldKindIface, heapsnapshot.FieldKindEface:
-			// Phase 3 does not try to decode the iface/eface payloads.
-			// Their concrete pointer lives at offset+ptrSize and is reached
-			// via the itab/type. We still record the data slot so future
-			// phases can resolve it. Skip silently when out of bounds.
-			if int(f.Offset)+2*ptrSize > len(contents) {
-				if warn != nil {
-					warn(fmt.Sprintf("%s: %s field at offset %d out of bounds for size %d", context, f.Kind, f.Offset, len(contents)))
-				}
-				continue
-			}
-			// Read the data word; it may be a direct pointer for non-indirect
-			// interfaces. Skip when the bit-pattern is clearly not a pointer
-			// is left to later phases — for now we just store the raw value
-			// so callers can decide.
-			ptr, ok := readPointer(contents, f.Offset+uint64(ptrSize), ptrSize, byteOrder)
-			if !ok {
-				continue
-			}
-			if slots != nil {
-				*slots = append(*slots, containerAddr+f.Offset+uint64(ptrSize))
-			}
-			if ptr != 0 && targets != nil {
-				*targets = append(*targets, ptr)
-			}
+			// Phase 3 preserves iface/eface fields but does not decode them.
+			// Whether the data word is a pointer depends on runtime type
+			// metadata, so guessing here would create false roots.
+			continue
 		default:
 			if warn != nil {
 				warn(fmt.Sprintf("%s: unknown field kind %d at offset %d", context, f.Kind, f.Offset))
@@ -86,10 +66,14 @@ func extractPointers(
 }
 
 func readPointer(contents []byte, offset uint64, ptrSize int, byteOrder binary.ByteOrder) (uint64, bool) {
-	end := offset + uint64(ptrSize)
-	if end > uint64(len(contents)) {
+	size := uint64(len(contents))
+	if offset > size {
 		return 0, false
 	}
+	if uint64(ptrSize) > size-offset {
+		return 0, false
+	}
+	end := offset + uint64(ptrSize)
 	slot := contents[offset:end]
 	switch ptrSize {
 	case 4:
