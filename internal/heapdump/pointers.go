@@ -46,11 +46,13 @@ func extractPointers(
 				}
 				continue
 			}
-			if ptr != 0 && targets != nil {
+			if ptr != 0 {
 				if slots != nil {
 					*slots = append(*slots, containerAddr+f.Offset)
 				}
-				*targets = append(*targets, ptr)
+				if targets != nil {
+					*targets = append(*targets, ptr)
+				}
 			}
 		case heapsnapshot.FieldKindIface, heapsnapshot.FieldKindEface:
 			// Phase 3 preserves iface/eface fields but does not decode them.
