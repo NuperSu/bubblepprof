@@ -17,6 +17,8 @@ func realMain() int {
 		return snapshotinfo.Run(os.Stdout, os.Stderr, os.Args[0], args[1:])
 	}
 
-	fmt.Fprintf(os.Stderr, "usage: %s snapshot info snapshot.tar\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "usage:\n")
+	fmt.Fprintf(os.Stderr, "  %s snapshot info snapshot.tar\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "  %s snapshot parse snapshot.tar\n", os.Args[0])
 	return 2
 }
