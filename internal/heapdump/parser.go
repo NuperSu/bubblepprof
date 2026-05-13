@@ -188,7 +188,15 @@ func (p *parser) parseRecords() error {
 				return p.wrap("alloc sample", startOff, err)
 			}
 		default:
-			return fmt.Errorf("unknown record tag %d at offset %d", tag, startOff)
+			// Unknown tags from a future runtime version cannot be skipped
+			// because the record format is unknown. Stop here, but in
+			// non-strict mode return the partial snapshot so callers can
+			// still inspect what was parsed before the unknown tag.
+			p.snap.Stats.UnknownRecords++
+			if err := p.warn("unknown record tag %d at offset %d; stopping parse (snapshot is partial)", tag, startOff); err != nil {
+				return err
+			}
+			return nil
 		}
 	}
 }
@@ -684,11 +692,11 @@ func (p *parser) parseStackFrame() error {
 	}
 
 	if p.haveParams {
-		var targets []uint64
+		var targets, slots []uint64
 		var warnErr error
 		ctx := fmt.Sprintf("frame %q (sp=0x%x)", name, sp)
 		iface, eface := extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, sp, ctx,
-			&targets, nil, func(msg string) {
+			&targets, &slots, func(msg string) {
 				if warnErr == nil {
 					warnErr = p.warn("%s", msg)
 				}
@@ -699,6 +707,7 @@ func (p *parser) parseStackFrame() error {
 		p.snap.Stats.InterfaceFieldsSkipped += iface
 		p.snap.Stats.EfaceFieldsSkipped += eface
 		frame.PointerAddrs = targets
+		frame.PointerSlots = slots
 		p.snap.Stats.StackPointers += len(targets)
 	}
 
