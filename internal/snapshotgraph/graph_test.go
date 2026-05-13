@@ -741,6 +741,178 @@ func TestPointerAccountingInvariant(t *testing.T) {
 	}
 }
 
+// nil snapshot is a hard error, not a panic.
+func TestBuildNilSnapshotError(t *testing.T) {
+	if _, err := Build(nil, Options{}); err == nil {
+		t.Fatalf("expected error on nil snapshot")
+	}
+}
+
+// An empty snapshot must produce a non-nil zero-valued Analysis with
+// non-nil reachability maps (callers should not have to nil-check).
+func TestBuildEmptySnapshot(t *testing.T) {
+	a := mustBuild(t, &heapsnapshot.HeapSnapshot{})
+	if a.Graph == nil {
+		t.Fatalf("Graph must not be nil")
+	}
+	if len(a.Graph.Objects) != 0 || len(a.Goroutines) != 0 {
+		t.Fatalf("expected empty graph, got %d objects / %d goroutines",
+			len(a.Graph.Objects), len(a.Goroutines))
+	}
+	if a.Globals.Reachable == nil {
+		t.Fatalf("GlobalReachability.Reachable must not be nil even when no roots")
+	}
+	if a.Stats.UnreachableObjects != 0 {
+		t.Fatalf("UnreachableObjects = %d", a.Stats.UnreachableObjects)
+	}
+}
+
+// Reachability through a chain of interior pointers: A points into B's
+// interior, B points into C's interior. DFS must follow both hops.
+func TestTransitiveInteriorReachability(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 64, PointerAddrs: []uint64{0x2010}}, // -> B.interior
+			{Addr: 0x2000, Size: 64, PointerAddrs: []uint64{0x3020}}, // -> C.interior
+			{Addr: 0x3000, Size: 64},
+		},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID:     1,
+			Frames: []heapsnapshot.StackFrame{{PointerAddrs: []uint64{0x1008}}}, // -> A.interior
+		}},
+	}
+	a := mustBuild(t, snap)
+	gr := a.Goroutines[0]
+	if len(gr.Reachable) != 3 {
+		t.Fatalf("reachable size = %d", len(gr.Reachable))
+	}
+	for _, addr := range []uint64{0x1000, 0x2000, 0x3000} {
+		if _, ok := gr.Reachable[idFor(t, a.Graph, addr)]; !ok {
+			t.Fatalf("0x%x missing from reachable", addr)
+		}
+	}
+}
+
+// SharedByGoroutinesObjects counts objects reachable from more than one
+// goroutine — independently of whether the same object is also reachable
+// from globals.
+func TestSharedCountIgnoresGlobals(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 8, PointerAddrs: []uint64{0x3000}},
+			{Addr: 0x2000, Size: 8, PointerAddrs: []uint64{0x3000}},
+			{Addr: 0x3000, Size: 8}, // shared
+		},
+		Goroutines: []heapsnapshot.Goroutine{
+			{ID: 1, Frames: []heapsnapshot.StackFrame{{PointerAddrs: []uint64{0x1000}}}},
+			{ID: 2, Frames: []heapsnapshot.StackFrame{{PointerAddrs: []uint64{0x2000}}}},
+		},
+		Globals: []heapsnapshot.Root{
+			{Kind: "data", PointerAddr: 0x3000}, // global also references shared
+		},
+	}
+	a := mustBuild(t, snap)
+	sharedID := idFor(t, a.Graph, 0x3000)
+	// Sharing is computed across goroutines only; global reachability is
+	// reported separately.
+	if a.Stats.SharedByGoroutinesObjects != 1 {
+		t.Fatalf("SharedByGoroutinesObjects = %d", a.Stats.SharedByGoroutinesObjects)
+	}
+	if _, ok := a.Globals.Reachable[sharedID]; !ok {
+		t.Fatalf("shared object should also be in global reachable set")
+	}
+	// Whole-process reachable = goroutine ∪ global. Should equal 3 here.
+	if a.Stats.UnreachableObjects != 0 {
+		t.Fatalf("UnreachableObjects = %d", a.Stats.UnreachableObjects)
+	}
+}
+
+// snap.Data / snap.BSS pointers produce data/bss global roots — and the
+// builder must not double-count them against snap.Globals, which the
+// parser also fills from the same segments.
+func TestGlobalRootDedupAcrossSources(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 8},
+		},
+		// The parser publishes the same data-segment pointer in both
+		// snap.Globals (Kind="data", Addr=slot) and snap.Data (PointerAddrs +
+		// matching Fields). Phase 4 must de-duplicate by (kind, ptr, slot).
+		Globals: []heapsnapshot.Root{
+			{Kind: "data", Addr: 0xd008, PointerAddr: 0x1000},
+		},
+		Data: []heapsnapshot.DataSegment{{
+			Kind:         "data",
+			Addr:         0xd000,
+			Size:         16,
+			Fields:       []heapsnapshot.Field{{Kind: heapsnapshot.FieldKindPtr, Offset: 8}},
+			PointerAddrs: []uint64{0x1000},
+		}},
+	}
+	a := mustBuild(t, snap)
+	count := 0
+	for _, r := range a.Globals.Roots {
+		if r.Kind == "data" && r.Ptr == 0x1000 && r.SlotAddr == 0xd008 {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 dedup'd data root, got %d (roots=%+v)", count, a.Globals.Roots)
+	}
+	if a.Stats.GlobalRoots != 1 {
+		t.Fatalf("GlobalRoots = %d", a.Stats.GlobalRoots)
+	}
+}
+
+// A pointer to an object's exact base address goes through the ByAddr
+// fast path, not the range index. This guards against a regression where
+// FindObjectContaining could resolve nonsense via overlapping ranges if
+// ByAddr was removed.
+func TestByAddrFastPathForExactBase(t *testing.T) {
+	a := mustBuild(t, makeSnap([]heapsnapshot.Object{
+		{Addr: 0x1000, Size: 16},
+		{Addr: 0x2000, Size: 16},
+	}))
+	g := a.Graph
+	id, ok := g.FindObjectContaining(0x2000)
+	if !ok {
+		t.Fatalf("exact base lookup failed")
+	}
+	if g.Objects[id].Addr != 0x2000 {
+		t.Fatalf("got Addr 0x%x, want 0x2000", g.Objects[id].Addr)
+	}
+	// Sanity: address 0x2000 is also the start of its own range, so the
+	// binary-search path must return the same answer if ByAddr were
+	// bypassed. Verify by stripping ByAddr and re-running.
+	delete(g.ByAddr, 0x2000)
+	id2, ok := g.FindObjectContaining(0x2000)
+	if !ok || g.Objects[id2].Addr != 0x2000 {
+		t.Fatalf("range-index fallback failed: ok=%t id=%d", ok, id2)
+	}
+}
+
+// A finalizer registered on an object that also references itself should
+// not cause double-counting or non-termination.
+func TestFinalizerOnSelfReferentialObject(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 16, PointerAddrs: []uint64{0x1000}}, // self
+		},
+		Finalizers: []heapsnapshot.Finalizer{{ObjectAddr: 0x1000}},
+	}
+	a := mustBuild(t, snap)
+	if len(a.Globals.Roots) != 1 {
+		t.Fatalf("global roots = %d", len(a.Globals.Roots))
+	}
+	if a.Stats.GlobalReachableObjects != 1 {
+		t.Fatalf("GlobalReachableObjects = %d", a.Stats.GlobalReachableObjects)
+	}
+	id := idFor(t, a.Graph, 0x1000)
+	if !hasChild(a.Graph, id, id) {
+		t.Fatalf("expected self edge")
+	}
+}
+
 // ReachableFrom must not panic on invalid root or invalid child edges.
 func TestReachableFromInvalidIDsSafe(t *testing.T) {
 	a := mustBuild(t, makeSnap([]heapsnapshot.Object{
