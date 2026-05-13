@@ -186,8 +186,9 @@ func TestSummaryIncludesNewCounters(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"zero object pointers: 1",
+		"resolved object edges: 0",
 		"goroutines: 1 (system: 1)",
-		"goroutine root pointers: 0",
+		"goroutine roots: 0",
 		"bubble attribution: not implemented in this phase",
 	} {
 		if !strings.Contains(got, want) {
