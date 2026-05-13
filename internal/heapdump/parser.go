@@ -309,7 +309,7 @@ func (p *parser) parseObject() error {
 	var pointers []uint64
 	if p.haveParams {
 		var warnErr error
-		extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, addr,
+		iface, eface := extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, addr,
 			fmt.Sprintf("object 0x%x", addr),
 			&pointers, nil, func(msg string) {
 				if warnErr == nil {
@@ -319,6 +319,8 @@ func (p *parser) parseObject() error {
 		if warnErr != nil {
 			return warnErr
 		}
+		p.snap.Stats.InterfaceFieldsSkipped += iface
+		p.snap.Stats.EfaceFieldsSkipped += eface
 	}
 
 	obj := heapsnapshot.Object{
@@ -516,7 +518,7 @@ func (p *parser) parseDataLike(kind string) error {
 		var targets, slots []uint64
 		var warnErr error
 		ctx := fmt.Sprintf("%s 0x%x", kind, addr)
-		extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, addr, ctx,
+		iface, eface := extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, addr, ctx,
 			&targets, &slots, func(msg string) {
 				if warnErr == nil {
 					warnErr = p.warn("%s", msg)
@@ -525,6 +527,8 @@ func (p *parser) parseDataLike(kind string) error {
 		if warnErr != nil {
 			return warnErr
 		}
+		p.snap.Stats.InterfaceFieldsSkipped += iface
+		p.snap.Stats.EfaceFieldsSkipped += eface
 		seg.PointerAddrs = targets
 		for i, target := range targets {
 			var slot uint64
@@ -683,7 +687,7 @@ func (p *parser) parseStackFrame() error {
 		var targets []uint64
 		var warnErr error
 		ctx := fmt.Sprintf("frame %q (sp=0x%x)", name, sp)
-		extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, sp, ctx,
+		iface, eface := extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, sp, ctx,
 			&targets, nil, func(msg string) {
 				if warnErr == nil {
 					warnErr = p.warn("%s", msg)
@@ -692,6 +696,8 @@ func (p *parser) parseStackFrame() error {
 		if warnErr != nil {
 			return warnErr
 		}
+		p.snap.Stats.InterfaceFieldsSkipped += iface
+		p.snap.Stats.EfaceFieldsSkipped += eface
 		frame.PointerAddrs = targets
 		p.snap.Stats.StackPointers += len(targets)
 	}

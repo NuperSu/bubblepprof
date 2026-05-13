@@ -12,6 +12,10 @@ import (
 // pointer values to object IDs (supporting interior pointers), builds
 // graph edges with deduplication, extracts goroutine and global roots,
 // and computes per-goroutine and process-global reachability.
+//
+// Parser-level warnings from snap.Warnings are forwarded to
+// Analysis.Warnings with a "parse: " prefix so downstream consumers see
+// every recoverable problem in one place.
 func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	if snap == nil {
 		return nil, fmt.Errorf("snapshotgraph: snapshot is nil")
@@ -22,10 +26,40 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	}
 	a := &Analysis{Graph: g}
 
+	for _, w := range snap.Warnings {
+		a.Warnings = append(a.Warnings, "parse: "+w)
+	}
+	if iface, eface := snap.Stats.InterfaceFieldsSkipped, snap.Stats.EfaceFieldsSkipped; iface+eface > 0 {
+		a.Warnings = append(a.Warnings,
+			fmt.Sprintf("parse: %d interface and %d eface fields were preserved but not decoded into graph edges",
+				iface, eface))
+	}
+
+	zeroAddrWarned := false
 	zeroSizedWarned := false
 	for i := range snap.Objects {
 		src := &snap.Objects[i]
-		if existing, ok := g.ByAddr[src.Addr]; ok && src.Addr != 0 {
+
+		// Address 0 cannot be used for lookup (would alias with nil
+		// pointers). Keep the object in the graph for completeness, but
+		// do not add it to ByAddr or ranges.
+		if src.Addr == 0 {
+			id := ObjectID(len(g.Objects))
+			ptrs := append([]uint64(nil), src.PointerAddrs...)
+			g.Objects = append(g.Objects, Object{
+				ID:           id,
+				Addr:         0,
+				Size:         src.Size,
+				PointerAddrs: ptrs,
+			})
+			if !zeroAddrWarned {
+				a.Warnings = append(a.Warnings, "object with address 0 ignored for direct lookup")
+				zeroAddrWarned = true
+			}
+			continue
+		}
+
+		if existing, ok := g.ByAddr[src.Addr]; ok {
 			a.Warnings = append(a.Warnings,
 				fmt.Sprintf("duplicate object address 0x%x (existing ID %d)",
 					src.Addr, existing))
@@ -34,6 +68,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 			}
 			continue
 		}
+
 		id := ObjectID(len(g.Objects))
 		ptrs := append([]uint64(nil), src.PointerAddrs...)
 		g.Objects = append(g.Objects, Object{
@@ -89,10 +124,10 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 			}
 			targetID, ok := g.FindObjectContaining(ptr)
 			if !ok {
-				a.Stats.UnresolvedPointers++
+				a.Stats.UnresolvedObjectPointers++
 				continue
 			}
-			a.Stats.ResolvedObjectEdges++
+			a.Stats.ResolvedObjectPointers++
 			g.AddEdge(obj.ID, targetID)
 		}
 	}
@@ -113,7 +148,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 				}
 				targetID, ok := g.FindObjectContaining(ptr)
 				if !ok {
-					a.Stats.UnresolvedPointers++
+					a.Stats.UnresolvedGoroutineRoots++
 					continue
 				}
 				roots = append(roots, RootRef{
@@ -140,7 +175,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		}
 		targetID, ok := g.FindObjectContaining(ptr)
 		if !ok {
-			a.Stats.UnresolvedPointers++
+			a.Stats.UnresolvedGlobalRoots++
 			continue
 		}
 		kind := r.Kind
@@ -162,7 +197,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		}
 		targetID, ok := g.FindObjectContaining(ptr)
 		if !ok {
-			a.Stats.UnresolvedPointers++
+			a.Stats.UnresolvedFinalizerRoots++
 			continue
 		}
 		globalRoots = append(globalRoots, RootRef{
@@ -178,7 +213,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		}
 		targetID, ok := g.FindObjectContaining(ptr)
 		if !ok {
-			a.Stats.UnresolvedPointers++
+			a.Stats.UnresolvedFinalizerRoots++
 			continue
 		}
 		globalRoots = append(globalRoots, RootRef{
@@ -194,6 +229,12 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		a.Goroutines[i].Reachable = ReachableFrom(g, a.Goroutines[i].Roots)
 	}
 	a.Globals.Reachable = ReachableFrom(g, a.Globals.Roots)
+
+	a.Stats.UnresolvedPointers =
+		a.Stats.UnresolvedObjectPointers +
+			a.Stats.UnresolvedGoroutineRoots +
+			a.Stats.UnresolvedGlobalRoots +
+			a.Stats.UnresolvedFinalizerRoots
 
 	a.Stats.Objects = len(g.Objects)
 	var bytes uint64

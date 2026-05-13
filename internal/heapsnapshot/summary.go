@@ -44,6 +44,8 @@ func (s *HeapSnapshot) PrintSummary(w io.Writer) {
 	fmt.Fprintf(w, "mem prof entries: %d\n", s.Stats.MemProfCount)
 	fmt.Fprintf(w, "alloc samples: %d\n", s.Stats.AllocSampleCount)
 	fmt.Fprintf(w, "unknown records: %d\n", s.Stats.UnknownRecords)
+	fmt.Fprintf(w, "interface fields skipped: %d\n", s.Stats.InterfaceFieldsSkipped)
+	fmt.Fprintf(w, "eface fields skipped: %d\n", s.Stats.EfaceFieldsSkipped)
 	fmt.Fprintf(w, "warnings: %d\n", len(s.Warnings))
 	for _, msg := range s.Warnings {
 		fmt.Fprintf(w, "  warning: %s\n", msg)

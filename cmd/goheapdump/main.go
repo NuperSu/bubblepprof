@@ -70,7 +70,9 @@ func parseFlags(args []string, errOut io.Writer) (options, error) {
 
 	fs.Usage = func() {
 		fmt.Fprintf(errOut, "usage: %s -exe /path/to/bin -core /path/to/core [flags]\n\n", os.Args[0])
-		fmt.Fprintf(errOut, "       %s snapshot info snapshot.tar\n\n", os.Args[0])
+		fmt.Fprintf(errOut, "       %s snapshot info snapshot.tar\n", os.Args[0])
+		fmt.Fprintf(errOut, "       %s snapshot parse snapshot.tar\n", os.Args[0])
+		fmt.Fprintf(errOut, "       %s snapshot graph snapshot.tar\n\n", os.Args[0])
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

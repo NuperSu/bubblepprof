@@ -203,4 +203,11 @@ type ParseStats struct {
 	MemProfCount     int
 	AllocSampleCount int
 	UnknownRecords   int
+
+	// Iface/eface fields the parser saw but did not decode into
+	// PointerAddrs because their data word is type-tag dependent. These
+	// counters surface a confidence gap before higher phases build bubble
+	// reports.
+	InterfaceFieldsSkipped int
+	EfaceFieldsSkipped     int
 }
