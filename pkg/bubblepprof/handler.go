@@ -2,11 +2,11 @@ package bubblepprof
 
 import (
 	"fmt"
-	"io"
+	"log"
 	"net/http"
-	"os"
 
 	"bubblepprof/internal/capture"
+	"bubblepprof/internal/snapshot"
 )
 
 const snapshotPath = "/debug/bubblepprof/snapshot"
@@ -40,28 +40,23 @@ func handler(captureOpts capture.CaptureOptions) http.Handler {
 			opts.GCBeforeHeapDump = false
 		}
 
-		tmp, err := os.CreateTemp("", "bubblepprof-snapshot-*.tar")
+		// Capture first so heap-dump or goroutine-profile errors can be
+		// reported as 5xx before any response body is written. The actual
+		// tar bundle then streams straight into the response writer —
+		// avoiding a second double-buffer of the whole snapshot to disk
+		// (the heap dump itself is already on disk inside the capture).
+		captured, err := capture.Capture(r.Context(), opts)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("create snapshot temp file: %v", err), http.StatusInternalServerError)
-			return
-		}
-		tmpName := tmp.Name()
-		defer os.Remove(tmpName)
-		defer tmp.Close()
-
-		if err := capture.WriteSnapshot(r.Context(), tmp, opts); err != nil {
 			http.Error(w, fmt.Sprintf("capture snapshot: %v", err), http.StatusInternalServerError)
 			return
 		}
-		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-			http.Error(w, fmt.Sprintf("rewind snapshot: %v", err), http.StatusInternalServerError)
-			return
-		}
+		defer captured.Cleanup()
 
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", `attachment; filename="bubblepprof-snapshot.tar"`)
 		w.WriteHeader(http.StatusOK)
-		if _, err := io.Copy(w, tmp); err != nil {
+		if err := snapshot.WriteSnapshotBundle(w, captured.BundleSource()); err != nil {
+			log.Printf("bubblepprof: snapshot bundle write failed mid-stream: %v", err)
 			return
 		}
 	})

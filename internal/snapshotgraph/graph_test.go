@@ -616,6 +616,147 @@ func TestAddEdgeReturnAndValidate(t *testing.T) {
 	}
 }
 
+// System goroutines (g0, GC workers, finalizer goroutine, …) must be
+// surfaced through GoroutineReachability.IsSystem so later phases can
+// filter them out of bubble attribution. The runtime emits IsSystem in
+// each goroutine record; Phase 4 just has to forward it.
+func TestSystemGoroutineFlagPropagated(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 8},
+			{Addr: 0x2000, Size: 8},
+		},
+		Goroutines: []heapsnapshot.Goroutine{
+			{
+				ID:       1,
+				IsSystem: false,
+				Frames: []heapsnapshot.StackFrame{{
+					PointerAddrs: []uint64{0x1000},
+				}},
+			},
+			{
+				ID:           99,
+				IsSystem:     true,
+				IsBackground: true,
+				Frames: []heapsnapshot.StackFrame{{
+					PointerAddrs: []uint64{0x2000},
+				}},
+			},
+		},
+	}
+	a := mustBuild(t, snap)
+	if len(a.Goroutines) != 2 {
+		t.Fatalf("Goroutines len = %d", len(a.Goroutines))
+	}
+	for _, gr := range a.Goroutines {
+		switch gr.GoroutineID {
+		case 1:
+			if gr.IsSystem || gr.IsBackground {
+				t.Fatalf("goroutine 1 misflagged: %+v", gr)
+			}
+		case 99:
+			if !gr.IsSystem || !gr.IsBackground {
+				t.Fatalf("goroutine 99 should be IsSystem and IsBackground: %+v", gr)
+			}
+		default:
+			t.Fatalf("unexpected goroutine id %d", gr.GoroutineID)
+		}
+	}
+	if a.Stats.SystemGoroutines != 1 {
+		t.Fatalf("SystemGoroutines = %d, want 1", a.Stats.SystemGoroutines)
+	}
+}
+
+// Stack-root SlotAddr must be filled in from the parser-supplied
+// PointerSlots so later phases can attribute roots to specific stack
+// locations.
+func TestStackRootSlotAddrPreserved(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 8},
+		},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID: 1,
+			Frames: []heapsnapshot.StackFrame{{
+				SP:           0xc000_0000,
+				PointerAddrs: []uint64{0x1000},
+				PointerSlots: []uint64{0xc000_0010}, // sp+0x10
+			}},
+		}},
+	}
+	a := mustBuild(t, snap)
+	gr := a.Goroutines[0]
+	if len(gr.Roots) != 1 {
+		t.Fatalf("roots = %d", len(gr.Roots))
+	}
+	if gr.Roots[0].SlotAddr != 0xc000_0010 {
+		t.Fatalf("SlotAddr = 0x%x, want 0xc000_0010", gr.Roots[0].SlotAddr)
+	}
+}
+
+// If a future parser stops emitting PointerSlots for some frames, the
+// builder must not panic and SlotAddr defaults to zero rather than
+// mis-attributing to a wrong slot.
+func TestStackRootMissingSlotsTolerated(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 8},
+		},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID: 1,
+			Frames: []heapsnapshot.StackFrame{{
+				PointerAddrs: []uint64{0x1000},
+				// PointerSlots intentionally nil.
+			}},
+		}},
+	}
+	a := mustBuild(t, snap)
+	gr := a.Goroutines[0]
+	if len(gr.Roots) != 1 {
+		t.Fatalf("roots = %d", len(gr.Roots))
+	}
+	if gr.Roots[0].SlotAddr != 0 {
+		t.Fatalf("SlotAddr should default to 0, got 0x%x", gr.Roots[0].SlotAddr)
+	}
+}
+
+// Pointer-accounting invariant:
+//
+//	RawObjectPointers = ZeroObjectPointers + ResolvedObjectPointers + UnresolvedObjectPointers
+//
+// Holds whether or not the input contains zero pointers — including the
+// synthetic case where a test passes a literal nil pointer through.
+func TestPointerAccountingInvariant(t *testing.T) {
+	snap := makeSnap([]heapsnapshot.Object{
+		{Addr: 0x1000, Size: 16, PointerAddrs: []uint64{
+			0x2000, // resolved
+			0,      // zero
+			0xdead, // unresolved
+			0x2008, // resolved (interior)
+		}},
+		{Addr: 0x2000, Size: 16},
+	})
+	a := mustBuild(t, snap)
+	s := a.Stats
+	if s.RawObjectPointers != 4 {
+		t.Fatalf("RawObjectPointers = %d", s.RawObjectPointers)
+	}
+	if s.ZeroObjectPointers != 1 {
+		t.Fatalf("ZeroObjectPointers = %d", s.ZeroObjectPointers)
+	}
+	if s.ResolvedObjectPointers != 2 {
+		t.Fatalf("ResolvedObjectPointers = %d", s.ResolvedObjectPointers)
+	}
+	if s.UnresolvedObjectPointers != 1 {
+		t.Fatalf("UnresolvedObjectPointers = %d", s.UnresolvedObjectPointers)
+	}
+	if s.ZeroObjectPointers+s.ResolvedObjectPointers+s.UnresolvedObjectPointers != s.RawObjectPointers {
+		t.Fatalf("invariant violated: %d + %d + %d != %d",
+			s.ZeroObjectPointers, s.ResolvedObjectPointers,
+			s.UnresolvedObjectPointers, s.RawObjectPointers)
+	}
+}
+
 // ReachableFrom must not panic on invalid root or invalid child edges.
 func TestReachableFromInvalidIDsSafe(t *testing.T) {
 	a := mustBuild(t, makeSnap([]heapsnapshot.Object{

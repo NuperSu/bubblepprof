@@ -120,6 +120,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		for _, ptr := range obj.PointerAddrs {
 			a.Stats.RawObjectPointers++
 			if ptr == 0 {
+				a.Stats.ZeroObjectPointers++
 				continue
 			}
 			targetID, ok := g.FindObjectContaining(ptr)
@@ -142,7 +143,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		var roots []RootRef
 		for fi := range gr.Frames {
 			fr := &gr.Frames[fi]
-			for _, ptr := range fr.PointerAddrs {
+			for pi, ptr := range fr.PointerAddrs {
 				if ptr == 0 {
 					continue
 				}
@@ -151,19 +152,29 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 					a.Stats.UnresolvedGoroutineRoots++
 					continue
 				}
+				var slot uint64
+				if pi < len(fr.PointerSlots) {
+					slot = fr.PointerSlots[pi]
+				}
 				roots = append(roots, RootRef{
 					ObjectID: targetID,
 					Ptr:      ptr,
+					SlotAddr: slot,
 					Kind:     "stack",
 					Detail:   fr.FuncName,
 				})
 			}
 		}
 		a.Goroutines = append(a.Goroutines, GoroutineReachability{
-			GoroutineID: gr.ID,
-			Roots:       roots,
+			GoroutineID:  gr.ID,
+			IsSystem:     gr.IsSystem,
+			IsBackground: gr.IsBackground,
+			Roots:        roots,
 		})
-		a.Stats.GoroutineRoots += len(roots)
+		if gr.IsSystem {
+			a.Stats.SystemGoroutines++
+		}
+		a.Stats.GoroutineRootPointers += len(roots)
 	}
 	a.Stats.Goroutines = len(a.Goroutines)
 
