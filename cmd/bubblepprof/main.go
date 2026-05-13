@@ -21,5 +21,7 @@ func realMain() int {
 	fmt.Fprintf(os.Stderr, "  %s snapshot info snapshot.tar\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "  %s snapshot parse snapshot.tar\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "  %s snapshot graph snapshot.tar\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "  %s snapshot labels snapshot.tar\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "  %s snapshot bubbles snapshot.tar\n", os.Args[0])
 	return 2
 }

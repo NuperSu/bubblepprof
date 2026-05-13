@@ -8,6 +8,8 @@ const (
 	HeapDumpFile         = "heap.dump"
 	GoroutineProfileFile = "goroutine.pprof"
 	MetadataFile         = "metadata.json"
+	LabelsFile           = "labels.json"
+	GoroutineStacksFile  = "goroutine.stacks"
 )
 
 type SnapshotMetadata struct {
@@ -17,6 +19,8 @@ type SnapshotMetadata struct {
 	PID                  int               `json:"pid"`
 	HeapDumpFile         string            `json:"heap_dump_file"`
 	GoroutineProfileFile string            `json:"goroutine_profile_file"`
+	LabelsFile           string            `json:"labels_file,omitempty"`
+	GoroutineStacksFile  string            `json:"goroutine_stacks_file,omitempty"`
 	GCBeforeHeapDump     bool              `json:"gc_before_heap_dump"`
 	Extra                map[string]string `json:"extra,omitempty"`
 }

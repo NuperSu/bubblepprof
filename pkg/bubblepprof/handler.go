@@ -13,14 +13,38 @@ const snapshotPath = "/debug/bubblepprof/snapshot"
 
 type Options struct {
 	GCBeforeHeapDump bool
+
+	// IncludeGoroutineStacks toggles whether the snapshot tar embeds a
+	// debug=2 goroutine stack dump alongside the protobuf goroutine
+	// profile. Default true.
+	IncludeGoroutineStacks bool
+
+	// IncludeLabelsManifest toggles whether the snapshot embeds a
+	// labels.json built from the bubblepprof Registry. Default true;
+	// has no effect if the registry is empty.
+	IncludeLabelsManifest bool
 }
 
 func Handler() http.Handler {
-	return HandlerWithOptions(Options{GCBeforeHeapDump: true})
+	return HandlerWithOptions(Options{
+		GCBeforeHeapDump:       true,
+		IncludeGoroutineStacks: true,
+		IncludeLabelsManifest:  true,
+	})
 }
 
 func HandlerWithOptions(opts Options) http.Handler {
-	return handler(capture.CaptureOptions{GCBeforeHeapDump: opts.GCBeforeHeapDump})
+	captureOpts := capture.CaptureOptions{GCBeforeHeapDump: opts.GCBeforeHeapDump}
+	if opts.IncludeLabelsManifest {
+		captureOpts.LabelManifestProvider = capture.RegistryLabelManifestProvider{
+			Registry: defaultRegistry,
+			Source:   registrySourceID,
+		}
+	}
+	if opts.IncludeGoroutineStacks {
+		captureOpts.GoroutineStacksWriter = capture.RuntimeGoroutineStacksWriter{}
+	}
+	return handler(captureOpts)
 }
 
 func Register(mux *http.ServeMux) {
