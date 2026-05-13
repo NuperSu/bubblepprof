@@ -11,6 +11,19 @@ import (
 	"bubblepprof/internal/snapshot"
 )
 
+func TestParseSnapshotMissingHeapDumpFile(t *testing.T) {
+	metadata := metadataJSON(t, snapshot.FormatV1)
+	buf := snapshotTar(t, map[string][]byte{
+		snapshot.GoroutineProfileFile: []byte("profile"),
+		snapshot.MetadataFile:         metadata,
+	})
+
+	_, err := ParseSnapshot(bytes.NewReader(buf), heapdump.Options{})
+	if err == nil || !strings.Contains(err.Error(), "snapshot missing heap.dump") {
+		t.Fatalf("err = %v, want missing heap.dump", err)
+	}
+}
+
 func TestParseSnapshotMissingMetadata(t *testing.T) {
 	heapDump := buildHeapDump(t)
 	buf := snapshotTar(t, map[string][]byte{

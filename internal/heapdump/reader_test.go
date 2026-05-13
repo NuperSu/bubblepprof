@@ -21,8 +21,11 @@ func TestReaderUvarint(t *testing.T) {
 		{name: "zero", bytes: []byte{0x00}, want: 0},
 		{name: "small", bytes: []byte{0x7f}, want: 0x7f},
 		{name: "two bytes", bytes: []byte{0x80, 0x01}, want: 0x80},
-		{name: "max safe", bytes: encodeUvarint(1 << 50)},
-		{name: "truncated", bytes: []byte{0x80}, wantErr: true},
+		{name: "multi byte", bytes: encodeUvarint(1 << 50), want: 1 << 50},
+		{name: "max uint64", bytes: encodeUvarint(^uint64(0)), want: ^uint64(0)},
+		{name: "truncated continuation", bytes: []byte{0x80}, wantErr: true},
+		// 10 continuation bytes with a final byte > 1: overflows uint64.
+		{name: "overflow", bytes: []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02}, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,12 +39,6 @@ func TestReaderUvarint(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-			if tc.name == "max safe" {
-				if got != 1<<50 {
-					t.Fatalf("got %d, want %d", got, uint64(1<<50))
-				}
-				return
 			}
 			if got != tc.want {
 				t.Fatalf("got %d, want %d", got, tc.want)

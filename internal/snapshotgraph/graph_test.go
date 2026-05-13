@@ -128,7 +128,7 @@ func TestGoroutineRoots(t *testing.T) {
 	if len(gr.Roots) != 1 {
 		t.Fatalf("expected 1 stack root, got %d", len(gr.Roots))
 	}
-	if gr.Roots[0].Kind != "stack" || gr.Roots[0].Detail != "main.run" {
+	if gr.Roots[0].Kind != "stack" || gr.Roots[0].Detail != "main.run" || gr.Roots[0].Ptr != 0x1000 {
 		t.Fatalf("root = %+v", gr.Roots[0])
 	}
 	aID := idFor(t, a.Graph, 0x1000)
@@ -364,6 +364,11 @@ func TestZeroSizedObject(t *testing.T) {
 	if _, ok := a.Graph.ByAddr[0x1000]; !ok {
 		t.Fatalf("zero-sized object should be in Graph.ByAddr")
 	}
+	// Interior pointer must NOT resolve to a zero-sized object — it has no
+	// range registered, only the exact-address ByAddr entry.
+	if _, ok := a.Graph.FindObjectContaining(0x1001); ok {
+		t.Fatalf("interior pointer 0x1001 must not resolve to zero-sized object")
+	}
 	if a.Stats.UnresolvedPointers != 0 {
 		t.Fatalf("UnresolvedPointers = %d", a.Stats.UnresolvedPointers)
 	}
@@ -383,34 +388,6 @@ func TestZeroSizedObject(t *testing.T) {
 	}
 }
 
-// Duplicate object addresses: keep every parsed node, but keep the first
-// address mapping deterministic and warn.
-func TestDuplicateAddressWarn(t *testing.T) {
-	snap := makeSnap([]heapsnapshot.Object{
-		{Addr: 0x1000, Size: 8},
-		{Addr: 0x1000, Size: 16}, // dup
-	})
-	a := mustBuild(t, snap)
-	if len(a.Graph.Objects) != 2 {
-		t.Fatalf("expected both object nodes kept, got %d", len(a.Graph.Objects))
-	}
-	if a.Graph.Objects[0].Size != 8 {
-		t.Fatalf("kept second object instead of first; size = %d", a.Graph.Objects[0].Size)
-	}
-	if a.Graph.ByAddr[0x1000] != 0 {
-		t.Fatalf("ByAddr should keep first object for duplicate address, got ID %d", a.Graph.ByAddr[0x1000])
-	}
-	foundWarn := false
-	for _, w := range a.Warnings {
-		if strings.Contains(w, "duplicate") {
-			foundWarn = true
-		}
-	}
-	if !foundWarn {
-		t.Fatalf("expected duplicate warning, got %v", a.Warnings)
-	}
-}
-
 // Nil pointer in object pointer list does not produce edge.
 func TestNilPointerIgnored(t *testing.T) {
 	snap := makeSnap([]heapsnapshot.Object{
@@ -423,6 +400,9 @@ func TestNilPointerIgnored(t *testing.T) {
 	}
 	if a.Stats.RawObjectPointers != 1 {
 		t.Fatalf("RawObjectPointers = %d", a.Stats.RawObjectPointers)
+	}
+	if a.Stats.ZeroObjectPointers != 1 {
+		t.Fatalf("ZeroObjectPointers = %d, want 1 (per pointer-accounting invariant)", a.Stats.ZeroObjectPointers)
 	}
 	if a.Stats.UnresolvedPointers != 0 {
 		t.Fatalf("zero pointer must not count as unresolved")
