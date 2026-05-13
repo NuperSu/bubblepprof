@@ -49,9 +49,10 @@ func TestParseSnapshotFromBundle(t *testing.T) {
 	}
 }
 
-func TestParseSnapshotMissingHeapDump(t *testing.T) {
-	heapDump := buildHeapDump(t)
-	_ = heapDump // unused on purpose
+// Empty heap.dump entry: the tar contains heap.dump but it has zero bytes,
+// so the parser fails reading the header. This is distinct from the file
+// being absent entirely (see TestParseSnapshotMissingHeapDumpFile).
+func TestParseSnapshotEmptyHeapDump(t *testing.T) {
 	var tarBuf bytes.Buffer
 	if err := snapshot.WriteSnapshotBundle(&tarBuf, snapshot.BundleSource{
 		HeapDump:         strings.NewReader(""),
@@ -68,8 +69,9 @@ func TestParseSnapshotMissingHeapDump(t *testing.T) {
 		t.Fatalf("write bundle: %v", err)
 	}
 
-	if _, err := ParseSnapshot(&tarBuf, heapdump.Options{}); err == nil {
-		t.Fatal("expected error for empty heap dump")
+	_, err := ParseSnapshot(&tarBuf, heapdump.Options{})
+	if err == nil || !strings.Contains(err.Error(), "parse heap.dump") {
+		t.Fatalf("err = %v, want parse-heap-dump error", err)
 	}
 }
 

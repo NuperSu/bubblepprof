@@ -308,7 +308,7 @@ func TestParseDataAndBSSGlobals(t *testing.T) {
 	if snap.Globals[0].Kind != "data" || snap.Globals[0].Addr != 0xd000 || snap.Globals[0].PointerAddr != 0x9100 {
 		t.Fatalf("data root = %+v", snap.Globals[0])
 	}
-	if snap.Globals[2].Kind != "bss" || snap.Globals[2].Addr != 0xe000 {
+	if snap.Globals[2].Kind != "bss" || snap.Globals[2].Addr != 0xe000 || snap.Globals[2].PointerAddr != 0x9100 {
 		t.Fatalf("bss root = %+v", snap.Globals[2])
 	}
 }
@@ -450,8 +450,8 @@ func TestParseOutOfBoundsPointerWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(snap.Warnings) == 0 {
-		t.Fatalf("expected at least one warning, got none")
+	if !hasParseWarning(snap.Warnings, "out of bounds") {
+		t.Fatalf("expected out-of-bounds warning, got %v", snap.Warnings)
 	}
 }
 
@@ -468,8 +468,8 @@ func TestParsePointerOffsetOverflowWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(snap.Warnings) == 0 {
-		t.Fatalf("expected at least one warning, got none")
+	if !hasParseWarning(snap.Warnings, "out of bounds") {
+		t.Fatalf("expected out-of-bounds warning, got %v", snap.Warnings)
 	}
 }
 
