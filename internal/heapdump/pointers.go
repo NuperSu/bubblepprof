@@ -18,6 +18,12 @@ import (
 // Out-of-bounds offsets and unsupported field kinds become warnings
 // appended via warn rather than fatal errors so the rest of the dump can
 // still be parsed.
+//
+// Returns the number of iface and eface fields the parser saw and chose
+// not to decode. Those words depend on runtime type metadata that the
+// dump format does not surface directly; speculating here would produce
+// false roots. Callers are expected to fold these counts into
+// ParseStats so the limitation stays visible.
 func extractPointers(
 	contents []byte,
 	fields []heapsnapshot.Field,
@@ -28,12 +34,12 @@ func extractPointers(
 	targets *[]uint64,
 	slots *[]uint64,
 	warn func(string),
-) {
+) (ifaceSkipped, efaceSkipped int) {
 	if ptrSize != 4 && ptrSize != 8 {
 		if warn != nil {
 			warn(fmt.Sprintf("%s: unsupported ptr size %d", context, ptrSize))
 		}
-		return
+		return 0, 0
 	}
 
 	for _, f := range fields {
@@ -54,17 +60,17 @@ func extractPointers(
 					*targets = append(*targets, ptr)
 				}
 			}
-		case heapsnapshot.FieldKindIface, heapsnapshot.FieldKindEface:
-			// Phase 3 preserves iface/eface fields but does not decode them.
-			// Whether the data word is a pointer depends on runtime type
-			// metadata, so guessing here would create false roots.
-			continue
+		case heapsnapshot.FieldKindIface:
+			ifaceSkipped++
+		case heapsnapshot.FieldKindEface:
+			efaceSkipped++
 		default:
 			if warn != nil {
 				warn(fmt.Sprintf("%s: unknown field kind %d at offset %d", context, f.Kind, f.Offset))
 			}
 		}
 	}
+	return ifaceSkipped, efaceSkipped
 }
 
 func readPointer(contents []byte, offset uint64, ptrSize int, byteOrder binary.ByteOrder) (uint64, bool) {

@@ -303,8 +303,8 @@ func TestDuplicateEdgesAreDeduped(t *testing.T) {
 	if a.Stats.RawObjectPointers != 3 {
 		t.Fatalf("RawObjectPointers = %d", a.Stats.RawObjectPointers)
 	}
-	if a.Stats.ResolvedObjectEdges != 3 {
-		t.Fatalf("ResolvedObjectEdges = %d", a.Stats.ResolvedObjectEdges)
+	if a.Stats.ResolvedObjectPointers != 3 {
+		t.Fatalf("ResolvedObjectPointers = %d", a.Stats.ResolvedObjectPointers)
 	}
 	if a.Stats.Edges != 1 {
 		t.Fatalf("Edges = %d", a.Stats.Edges)
@@ -347,8 +347,8 @@ func TestPointerToObjectEndExclusive(t *testing.T) {
 	if a.Stats.UnresolvedPointers != 1 {
 		t.Fatalf("UnresolvedPointers = %d", a.Stats.UnresolvedPointers)
 	}
-	if a.Stats.ResolvedObjectEdges != 0 {
-		t.Fatalf("ResolvedObjectEdges = %d", a.Stats.ResolvedObjectEdges)
+	if a.Stats.ResolvedObjectPointers != 0 {
+		t.Fatalf("ResolvedObjectPointers = %d", a.Stats.ResolvedObjectPointers)
 	}
 }
 
@@ -507,5 +507,135 @@ func TestStrictModeOverlapError(t *testing.T) {
 	})
 	if _, err := Build(snap, Options{Strict: true}); err == nil {
 		t.Fatalf("expected error in strict mode")
+	}
+}
+
+// Parser warnings are propagated into Analysis.Warnings with a "parse:"
+// prefix so snapshot graph callers see them too.
+func TestParserWarningsPropagate(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Warnings: []string{"truncated object 0x42"},
+		Stats: heapsnapshot.ParseStats{
+			InterfaceFieldsSkipped: 3,
+			EfaceFieldsSkipped:     2,
+		},
+	}
+	a := mustBuild(t, snap)
+	foundParse := false
+	foundIface := false
+	for _, w := range a.Warnings {
+		if strings.HasPrefix(w, "parse: truncated object") {
+			foundParse = true
+		}
+		if strings.Contains(w, "3 interface and 2 eface") {
+			foundIface = true
+		}
+	}
+	if !foundParse {
+		t.Fatalf("expected parser warning to propagate; got %v", a.Warnings)
+	}
+	if !foundIface {
+		t.Fatalf("expected iface/eface skipped warning; got %v", a.Warnings)
+	}
+}
+
+// Address 0 is never resolvable, even if a zero-addr object exists.
+func TestAddressZeroNotResolvable(t *testing.T) {
+	snap := makeSnap([]heapsnapshot.Object{
+		{Addr: 0, Size: 16},
+		{Addr: 0x1000, Size: 8, PointerAddrs: []uint64{0}},
+	})
+	a := mustBuild(t, snap)
+	if _, ok := a.Graph.FindObjectContaining(0); ok {
+		t.Fatalf("FindObjectContaining(0) must not resolve")
+	}
+	if _, ok := a.Graph.ByAddr[0]; ok {
+		t.Fatalf("address 0 must not appear in ByAddr")
+	}
+	foundWarn := false
+	for _, w := range a.Warnings {
+		if strings.Contains(w, "address 0") {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("expected zero-address warning; got %v", a.Warnings)
+	}
+}
+
+// Unresolved pointers are broken down by source category.
+func TestUnresolvedBreakdown(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 8, PointerAddrs: []uint64{0xdead}}, // object ptr
+		},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID:     1,
+			Frames: []heapsnapshot.StackFrame{{PointerAddrs: []uint64{0xbeef}}},
+		}},
+		Globals:          []heapsnapshot.Root{{PointerAddr: 0xcafe}},
+		Finalizers:       []heapsnapshot.Finalizer{{ObjectAddr: 0xf00d}},
+		QueuedFinalizers: []heapsnapshot.QueuedFinalizer{{ObjectAddr: 0xfade}},
+	}
+	a := mustBuild(t, snap)
+	if a.Stats.UnresolvedObjectPointers != 1 {
+		t.Fatalf("UnresolvedObjectPointers = %d", a.Stats.UnresolvedObjectPointers)
+	}
+	if a.Stats.UnresolvedGoroutineRoots != 1 {
+		t.Fatalf("UnresolvedGoroutineRoots = %d", a.Stats.UnresolvedGoroutineRoots)
+	}
+	if a.Stats.UnresolvedGlobalRoots != 1 {
+		t.Fatalf("UnresolvedGlobalRoots = %d", a.Stats.UnresolvedGlobalRoots)
+	}
+	if a.Stats.UnresolvedFinalizerRoots != 2 {
+		t.Fatalf("UnresolvedFinalizerRoots = %d", a.Stats.UnresolvedFinalizerRoots)
+	}
+	if a.Stats.UnresolvedPointers != 5 {
+		t.Fatalf("UnresolvedPointers = %d (want 5)", a.Stats.UnresolvedPointers)
+	}
+}
+
+// AddEdge tolerates invalid IDs and returns whether it actually appended.
+func TestAddEdgeReturnAndValidate(t *testing.T) {
+	a := mustBuild(t, makeSnap([]heapsnapshot.Object{
+		{Addr: 0x1000, Size: 8},
+		{Addr: 0x2000, Size: 8},
+	}))
+	g := a.Graph
+	if !g.AddEdge(0, 1) {
+		t.Fatalf("first AddEdge should return true")
+	}
+	if g.AddEdge(0, 1) {
+		t.Fatalf("duplicate AddEdge should return false")
+	}
+	if g.AddEdge(99, 1) {
+		t.Fatalf("invalid from-ID should return false (and not panic)")
+	}
+	if g.AddEdge(0, 99) {
+		t.Fatalf("invalid to-ID should return false (and not panic)")
+	}
+}
+
+// ReachableFrom must not panic on invalid root or invalid child edges.
+func TestReachableFromInvalidIDsSafe(t *testing.T) {
+	a := mustBuild(t, makeSnap([]heapsnapshot.Object{
+		{Addr: 0x1000, Size: 8},
+	}))
+	g := a.Graph
+	// Inject an invalid child edge directly.
+	g.Objects[0].Children = []ObjectID{99}
+
+	got := ReachableFrom(g, []RootRef{
+		{ObjectID: 99}, // invalid root, should be skipped
+		{ObjectID: 0},  // valid
+	})
+	if _, ok := got[0]; !ok {
+		t.Fatalf("expected ID 0 in reachable")
+	}
+	if _, ok := got[99]; ok {
+		t.Fatalf("invalid ID 99 should not be in reachable")
+	}
+	if len(got) != 1 {
+		t.Fatalf("reachable size = %d", len(got))
 	}
 }
