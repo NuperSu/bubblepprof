@@ -383,18 +383,22 @@ func TestZeroSizedObject(t *testing.T) {
 	}
 }
 
-// Duplicate object addresses: keep first, warn.
+// Duplicate object addresses: keep every parsed node, but keep the first
+// address mapping deterministic and warn.
 func TestDuplicateAddressWarn(t *testing.T) {
 	snap := makeSnap([]heapsnapshot.Object{
 		{Addr: 0x1000, Size: 8},
 		{Addr: 0x1000, Size: 16}, // dup
 	})
 	a := mustBuild(t, snap)
-	if len(a.Graph.Objects) != 1 {
-		t.Fatalf("expected 1 object kept, got %d", len(a.Graph.Objects))
+	if len(a.Graph.Objects) != 2 {
+		t.Fatalf("expected both object nodes kept, got %d", len(a.Graph.Objects))
 	}
 	if a.Graph.Objects[0].Size != 8 {
 		t.Fatalf("kept second object instead of first; size = %d", a.Graph.Objects[0].Size)
+	}
+	if a.Graph.ByAddr[0x1000] != 0 {
+		t.Fatalf("ByAddr should keep first object for duplicate address, got ID %d", a.Graph.ByAddr[0x1000])
 	}
 	foundWarn := false
 	for _, w := range a.Warnings {
