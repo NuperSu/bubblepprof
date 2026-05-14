@@ -47,6 +47,8 @@ func Run(out, errOut io.Writer, program string, args []string) int {
 			return 1
 		}
 		return 0
+	case "heap-labels":
+		return runHeapLabels(out, errOut, program, args[1:])
 	case "labels":
 		return runLabels(out, errOut, program, args[1:])
 	case "bubbles":
@@ -62,6 +64,7 @@ func usage(w io.Writer, program string) {
 	fmt.Fprintf(w, "  %s snapshot info snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot parse snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot graph snapshot.tar\n", program)
+	fmt.Fprintf(w, "  %s snapshot heap-labels [--g-labels-offset 0xNNN] [--find-offset key=value] [--show-failed] snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot labels [--labels-source auto|manifest|profile] snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot bubbles [--label-key K] [--include-system] [--include-unlabeled] [--labels-source auto|manifest|profile] snapshot.tar\n", program)
 }
