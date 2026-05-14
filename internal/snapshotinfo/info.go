@@ -148,6 +148,9 @@ func PrintGraph(out io.Writer, path string) error {
 	if err != nil {
 		return fmt.Errorf("build snapshot graph: %w", err)
 	}
+	// PrintSummary reports whole-process reachability counters; Build no
+	// longer fills them, so do the BFS pass here.
+	snapshotgraph.ComputeReachability(analysis)
 
 	fmt.Fprintf(out, "snapshot format: %s\n", res.Metadata.Format)
 	fmt.Fprintf(out, "metadata go version: %s\n", res.Metadata.GoVersion)
