@@ -106,9 +106,15 @@ func NewComputer(opts Options) *Computer {
 //  1. Capture a heap dump to a temp file.
 //  2. Parse it with KeepObjectContents=true (required for heap-native
 //     label recovery).
-//  3. Build the object graph and per-goroutine/global reachability.
-//  4. Recover pprof labels via the configured LabelRecoverer.
-//  5. Hand off to ComputeFromAnalysis.
+//  3. Recover pprof labels via the configured LabelRecoverer.
+//  4. If the runtime layout is unsupported, return before paying the
+//     graph-build cost.
+//  5. Build the object graph and per-goroutine/global reachability.
+//  6. Hand off to ComputeFromAnalysis.
+//
+// ctx.Err() is checked between stages so a cancelled client does not
+// pay for the parse/build work that follows WriteHeapDump (WriteHeapDump
+// itself is stop-the-world and cannot be interrupted).
 func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) {
 	if c == nil {
 		return nil, fmt.Errorf("memusage: nil Computer")
@@ -128,6 +134,10 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	}
 	defer cleanup()
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open heap dump: %w", err)
@@ -139,16 +149,29 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		return nil, fmt.Errorf("parse heap dump: %w", err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Decode labels first so an unsupported runtime can short-circuit
+	// before the (expensive) graph build.
+	result, err := recoverer.Recover(snap)
+	if err != nil {
+		return nil, fmt.Errorf("recover heap-native labels: %w", err)
+	}
+	diag := DiagnosticsFromHeapLabels(snap, result)
+	if diag.UnsupportedRuntime {
+		return nil, &UnsupportedRuntimeError{GoVersion: diag.GoVersion, GOARCH: diag.GOARCH}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	analysis, err := snapshotgraph.Build(snap, snapshotgraph.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("build object graph: %w", err)
 	}
 
-	result, err := recoverer.Recover(snap)
-	if err != nil {
-		return nil, fmt.Errorf("recover heap-native labels: %w", err)
-	}
-
-	diag := DiagnosticsFromHeapLabels(snap, result)
 	return ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, c.Opts)
 }

@@ -37,6 +37,34 @@ func TestMemUsageHandler_ValidationError(t *testing.T) {
 	}
 }
 
+func TestMemUsageOptions_DefaultsKeepGCOn(t *testing.T) {
+	// Phase-1 review fix: the zero value of MemUsageOptions must match
+	// MemUsageHandler()'s defaults so a caller flipping an unrelated
+	// flag never accidentally turns the pre-dump GC off.
+	cases := []struct {
+		name    string
+		opts    MemUsageOptions
+		wantGC  bool
+		wantSys bool
+	}{
+		{name: "zero", opts: MemUsageOptions{}, wantGC: true, wantSys: false},
+		{name: "disable gc", opts: MemUsageOptions{DisableGCBeforeHeapDump: true}, wantGC: false, wantSys: false},
+		{name: "include system only", opts: MemUsageOptions{IncludeSystemGoroutines: true}, wantGC: true, wantSys: true},
+		{name: "both", opts: MemUsageOptions{DisableGCBeforeHeapDump: true, IncludeSystemGoroutines: true}, wantGC: false, wantSys: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.opts.toInternal()
+			if got.GCBeforeHeapDump != tc.wantGC {
+				t.Fatalf("GCBeforeHeapDump = %t, want %t", got.GCBeforeHeapDump, tc.wantGC)
+			}
+			if got.IncludeSystemGoroutines != tc.wantSys {
+				t.Fatalf("IncludeSystemGoroutines = %t, want %t", got.IncludeSystemGoroutines, tc.wantSys)
+			}
+		})
+	}
+}
+
 func TestRegisterMemUsage(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterMemUsage(mux)
