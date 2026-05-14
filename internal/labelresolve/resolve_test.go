@@ -64,7 +64,7 @@ func TestProfileStackSingleMatch(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, nil, prof, Options{})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if got := res.LabelsByGID[1]["bubble"]; got != "alpha" {
 		t.Fatalf("labels[1] = %v", res.LabelsByGID[1])
 	}
@@ -73,6 +73,9 @@ func TestProfileStackSingleMatch(t *testing.T) {
 	}
 	if res.MatchedFromProfile != 1 {
 		t.Fatalf("matched profile = %d", res.MatchedFromProfile)
+	}
+	if res.Diagnostics.Attribution != AttributionBestEffortProfile {
+		t.Fatalf("attribution = %v", res.Diagnostics.Attribution)
 	}
 }
 
@@ -90,7 +93,7 @@ func TestProfileStackNToN(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, nil, prof, Options{})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if res.LabelsByGID[1]["bubble"] != "alpha" || res.LabelsByGID[2]["bubble"] != "alpha" {
 		t.Fatalf("labels = %v", res.LabelsByGID)
 	}
@@ -118,7 +121,7 @@ func TestProfileStackAmbiguousDistinctLabels(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, nil, prof, Options{})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if len(res.LabelsByGID) != 0 {
 		t.Fatalf("expected no labels, got %v", res.LabelsByGID)
 	}
@@ -141,7 +144,7 @@ func TestProfileStackCountMismatch(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, nil, prof, Options{})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if len(res.LabelsByGID) != 0 {
 		t.Fatalf("expected no labels, got %v", res.LabelsByGID)
 	}
@@ -163,7 +166,7 @@ func TestProfileSampleNoHeapMatch(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, nil, prof, Options{})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if len(res.LabelsByGID) != 0 {
 		t.Fatalf("expected no labels, got %v", res.LabelsByGID)
 	}
@@ -194,7 +197,7 @@ func TestManifestWinsOverProfile(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, m, prof, Options{})
+	res := ResolveLabels(snap, m, prof, Options{AllowProfileFallback: true})
 	if !reflect.DeepEqual(res.LabelsByGID[1], map[string]string{"bubble": "exact"}) {
 		t.Fatalf("labels[1] = %v", res.LabelsByGID[1])
 	}
@@ -221,7 +224,7 @@ func TestHeapLabelsWinOverManifestAndProfile(t *testing.T) {
 		},
 	}
 
-	res := ResolveLabels(snap, m, prof, Options{})
+	res := ResolveLabels(snap, m, prof, Options{AllowProfileFallback: true})
 	if !reflect.DeepEqual(res.LabelsByGID[1], map[string]string{"bubble": "heap"}) {
 		t.Fatalf("labels[1] = %v", res.LabelsByGID[1])
 	}
@@ -273,7 +276,7 @@ func TestUnsupportedHeapLayoutFallsBackToProfile(t *testing.T) {
 		},
 	}
 
-	res := ResolveLabels(snap, nil, prof, Options{})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if res.SourcesByGID[1] != SourceProfileID {
 		t.Fatalf("source = %v", res.SourcesByGID[1])
 	}
@@ -285,6 +288,12 @@ func TestUnsupportedHeapLayoutFallsBackToProfile(t *testing.T) {
 	}
 	if !hasWarningContaining(res.Warnings, "heap label recovery unsupported") {
 		t.Fatalf("missing unsupported heap warning: %v", res.Warnings)
+	}
+	if !res.Diagnostics.UnsupportedHeapLayout {
+		t.Fatalf("expected UnsupportedHeapLayout diagnostic")
+	}
+	if res.Diagnostics.Attribution != AttributionBestEffortProfile {
+		t.Fatalf("attribution = %v", res.Diagnostics.Attribution)
 	}
 }
 
@@ -301,7 +310,7 @@ func TestProfileGoidLabel(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, nil, prof, Options{})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if res.SourcesByGID[5] != SourceProfileID {
 		t.Fatalf("source = %v", res.SourcesByGID[5])
 	}
@@ -326,7 +335,7 @@ func TestDisableProfileSkipsCorrelation(t *testing.T) {
 			},
 		},
 	}
-	res := ResolveLabels(snap, nil, prof, Options{DisableProfile: true})
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true, DisableProfile: true})
 	if len(res.LabelsByGID) != 0 {
 		t.Fatalf("DisableProfile should yield no labels: %v", res.LabelsByGID)
 	}
