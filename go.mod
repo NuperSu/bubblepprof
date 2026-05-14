@@ -1,4 +1,4 @@
-module bubblepprof
+module delve_first_project
 
 go 1.25
 
