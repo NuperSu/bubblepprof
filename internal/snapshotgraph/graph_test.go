@@ -11,12 +11,15 @@ func makeSnap(objs []heapsnapshot.Object) *heapsnapshot.HeapSnapshot {
 	return &heapsnapshot.HeapSnapshot{Objects: objs}
 }
 
+// mustBuild builds the graph and then computes reachability. Tests that
+// only need the structural side of Build call Build directly.
 func mustBuild(t *testing.T, snap *heapsnapshot.HeapSnapshot) *Analysis {
 	t.Helper()
 	a, err := Build(snap, Options{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
+	ComputeReachability(a)
 	return a
 }
 
@@ -749,7 +752,8 @@ func TestBuildNilSnapshotError(t *testing.T) {
 }
 
 // An empty snapshot must produce a non-nil zero-valued Analysis with
-// non-nil reachability maps (callers should not have to nil-check).
+// non-nil reachability maps after ComputeReachability (callers should
+// not have to nil-check).
 func TestBuildEmptySnapshot(t *testing.T) {
 	a := mustBuild(t, &heapsnapshot.HeapSnapshot{})
 	if a.Graph == nil {
@@ -764,6 +768,84 @@ func TestBuildEmptySnapshot(t *testing.T) {
 	}
 	if a.Stats.UnreachableObjects != 0 {
 		t.Fatalf("UnreachableObjects = %d", a.Stats.UnreachableObjects)
+	}
+}
+
+// Build alone must produce roots and structural stats but leave
+// reachability sets and reach-derived stats untouched. Reachability is
+// the job of ComputeReachability; the /debug/memusage path skips it.
+func TestBuildIsStructuralOnly(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 8, PointerAddrs: []uint64{0x2000}},
+			{Addr: 0x2000, Size: 8},
+		},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID:     1,
+			Frames: []heapsnapshot.StackFrame{{PointerAddrs: []uint64{0x1000}}},
+		}},
+		Globals: []heapsnapshot.Root{{Kind: "data", PointerAddr: 0x2000}},
+	}
+	a, err := Build(snap, Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	// Structural side is filled.
+	if got := len(a.Graph.Objects); got != 2 {
+		t.Fatalf("len(Objects) = %d, want 2", got)
+	}
+	if got := a.Stats.Edges; got != 1 {
+		t.Fatalf("Stats.Edges = %d, want 1", got)
+	}
+	if got := len(a.Goroutines[0].Roots); got != 1 {
+		t.Fatalf("len(Roots) = %d, want 1", got)
+	}
+	if got := len(a.Globals.Roots); got != 1 {
+		t.Fatalf("len(Globals.Roots) = %d, want 1", got)
+	}
+	// Reachability side is NOT filled by Build.
+	if a.Goroutines[0].Reachable != nil {
+		t.Fatalf("Goroutines[0].Reachable should be nil before ComputeReachability, got %v", a.Goroutines[0].Reachable)
+	}
+	if a.Globals.Reachable != nil {
+		t.Fatalf("Globals.Reachable should be nil before ComputeReachability, got %v", a.Globals.Reachable)
+	}
+	if a.Stats.GoroutineReachableObjects != 0 {
+		t.Fatalf("GoroutineReachableObjects = %d, want 0 before ComputeReachability", a.Stats.GoroutineReachableObjects)
+	}
+	if a.Stats.GlobalReachableObjects != 0 {
+		t.Fatalf("GlobalReachableObjects = %d, want 0 before ComputeReachability", a.Stats.GlobalReachableObjects)
+	}
+	if a.Stats.SharedByGoroutinesObjects != 0 {
+		t.Fatalf("SharedByGoroutinesObjects = %d, want 0 before ComputeReachability", a.Stats.SharedByGoroutinesObjects)
+	}
+	if a.Stats.UnreachableObjects != 0 {
+		t.Fatalf("UnreachableObjects = %d, want 0 before ComputeReachability", a.Stats.UnreachableObjects)
+	}
+
+	// After ComputeReachability the sets and counters are populated.
+	ComputeReachability(a)
+	if a.Goroutines[0].Reachable == nil || len(a.Goroutines[0].Reachable) != 2 {
+		t.Fatalf("Goroutines[0].Reachable size = %d, want 2", len(a.Goroutines[0].Reachable))
+	}
+	if a.Globals.Reachable == nil || len(a.Globals.Reachable) != 1 {
+		t.Fatalf("Globals.Reachable size = %d, want 1", len(a.Globals.Reachable))
+	}
+	if a.Stats.GoroutineReachableObjects != 2 {
+		t.Fatalf("GoroutineReachableObjects = %d, want 2", a.Stats.GoroutineReachableObjects)
+	}
+	if a.Stats.GlobalReachableObjects != 1 {
+		t.Fatalf("GlobalReachableObjects = %d, want 1", a.Stats.GlobalReachableObjects)
+	}
+	if a.Stats.UnreachableObjects != 0 {
+		t.Fatalf("UnreachableObjects = %d, want 0", a.Stats.UnreachableObjects)
+	}
+
+	// Idempotent.
+	prevReach := a.Goroutines[0].Reachable
+	ComputeReachability(a)
+	if len(a.Goroutines[0].Reachable) != len(prevReach) {
+		t.Fatalf("ComputeReachability not idempotent: size %d -> %d", len(prevReach), len(a.Goroutines[0].Reachable))
 	}
 }
 

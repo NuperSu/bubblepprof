@@ -21,17 +21,26 @@ func LabelsMatch(have, want map[string]string) bool {
 	return true
 }
 
-// UnionReachable unions the reachability sets of the supplied goroutines
-// into a single ObjectID set. Counted-once semantics: an object reached
-// by multiple goroutines appears exactly once in the result.
-func UnionReachable(goroutines []snapshotgraph.GoroutineReachability) map[snapshotgraph.ObjectID]struct{} {
-	out := make(map[snapshotgraph.ObjectID]struct{})
-	for _, gr := range goroutines {
-		for id := range gr.Reachable {
-			out[id] = struct{}{}
-		}
+// reachableFromGoroutines walks the graph once from the union of the
+// supplied goroutines' Roots and returns the unioned reachable object
+// set. This is the single-BFS replacement for "BFS each goroutine then
+// union the results": same answer, paid for once.
+func reachableFromGoroutines(g *snapshotgraph.Graph, goroutines []*snapshotgraph.GoroutineReachability) map[snapshotgraph.ObjectID]struct{} {
+	if g == nil || len(goroutines) == 0 {
+		return map[snapshotgraph.ObjectID]struct{}{}
 	}
-	return out
+	rootCount := 0
+	for _, gr := range goroutines {
+		rootCount += len(gr.Roots)
+	}
+	if rootCount == 0 {
+		return map[snapshotgraph.ObjectID]struct{}{}
+	}
+	roots := make([]snapshotgraph.RootRef, 0, rootCount)
+	for _, gr := range goroutines {
+		roots = append(roots, gr.Roots...)
+	}
+	return snapshotgraph.ReachableFrom(g, roots)
 }
 
 // ObjectSetBytes sums the shallow size of the objects in set, skipping
@@ -127,9 +136,17 @@ func (e *StringMissingError) Error() string {
 	return "pprof labels were found but some label string bytes were unavailable"
 }
 
-// ComputeFromAnalysis is the pure core of /debug/memusage: it takes an
-// already-built object graph, a precomputed labelsByGID map, and label
-// diagnostics, and returns the response payload.
+// ComputeFromAnalysis is the pure core of /debug/memusage: it takes a
+// structural object graph (built by snapshotgraph.Build, without the
+// optional ComputeReachability pass), a precomputed labelsByGID map,
+// and label diagnostics, and returns the response payload.
+//
+// Reachability is traversed on demand: one BFS over the union of
+// matched-goroutine roots, plus at most one BFS each for the global and
+// system-goroutine overlap denominators (skipped entirely when nothing
+// matches). This is the key reason Build no longer eagerly walks every
+// goroutine: for a selector matching S of N goroutines we now pay
+// O(reach(S)) instead of O(reach(N)).
 //
 // Validation runs first so direct callers (e.g. unit tests, future CLI
 // adapters) cannot bypass the same checks the HTTP handler applies.
@@ -162,9 +179,10 @@ func ComputeFromAnalysis(
 
 	g := analysis.Graph
 
-	matched := make([]snapshotgraph.GoroutineReachability, 0)
-	var systemGoroutines []snapshotgraph.GoroutineReachability
-	for _, gr := range analysis.Goroutines {
+	matched := make([]*snapshotgraph.GoroutineReachability, 0)
+	var systemGoroutines []*snapshotgraph.GoroutineReachability
+	for i := range analysis.Goroutines {
+		gr := &analysis.Goroutines[i]
 		isSystem := gr.IsSystem || gr.IsBackground
 		if isSystem {
 			systemGoroutines = append(systemGoroutines, gr)
@@ -193,20 +211,21 @@ func ComputeFromAnalysis(
 		}
 	}
 
-	union := UnionReachable(matched)
+	union := reachableFromGoroutines(g, matched)
 
-	var systemUnion map[snapshotgraph.ObjectID]struct{}
-	if !opts.IncludeSystemGoroutines && len(systemGoroutines) > 0 {
-		systemUnion = make(map[snapshotgraph.ObjectID]struct{})
-		for _, gr := range systemGoroutines {
-			for id := range gr.Reachable {
-				systemUnion[id] = struct{}{}
-			}
+	// Skip the overlap traversals when nothing matched. They would
+	// intersect with an empty set and return zero anyway, and globals
+	// alone can be large.
+	var systemReach, globalReach map[snapshotgraph.ObjectID]struct{}
+	if len(union) > 0 {
+		globalReach = snapshotgraph.ReachableFrom(g, analysis.Globals.Roots)
+		if !opts.IncludeSystemGoroutines && len(systemGoroutines) > 0 {
+			systemReach = reachableFromGoroutines(g, systemGoroutines)
 		}
 	}
 
-	globalCount, globalBytes := IntersectCountBytes(g, union, analysis.Globals.Reachable)
-	systemCount, systemBytes := IntersectCountBytes(g, union, systemUnion)
+	globalCount, globalBytes := IntersectCountBytes(g, union, globalReach)
+	systemCount, systemBytes := IntersectCountBytes(g, union, systemReach)
 
 	attribution := AttributionHeapNative
 	if diag.StringMissingCount > 0 || diag.FailedGoroutines > 0 {
