@@ -1,9 +1,0 @@
-; -*- mode: org -*-
-
-
-** TODO Testcases to ensure 100% branch coverage. There may be no
-   "But Value can also hold the raw pointer value as an integer constant"
-   without a test.
-** TODO Walk objects referenced by channels and finalizers.
-** TODO enterObject(isStackLocal) is broken. Only GC roots are reported as
-   stack-allocated. It's not true.
