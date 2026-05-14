@@ -22,6 +22,7 @@ import (
 	"bubblepprof/internal/goroutineprofile"
 	"bubblepprof/internal/heaplabels"
 	"bubblepprof/internal/heapsnapshot"
+	"bubblepprof/internal/runtimelayout"
 )
 
 // Source describes where one goroutine's labels came from.
@@ -107,9 +108,10 @@ type Options struct {
 	// and AllowProfileFallback.
 	DisableProfile bool
 
-	// HeapLabels configures heap-dump-native decoding. If no explicit
-	// GLabelsOffset is provided, ResolveLabels uses the verified layout
-	// table in internal/heaplabels.
+	// HeapLabels configures heap-dump-native decoding limits
+	// (MaxLabels, MaxStringLen). The runtime layout itself is resolved
+	// through internal/runtimelayout; callers cannot override the
+	// runtime.g.labels offset here, by design.
 	HeapLabels heaplabels.Options
 }
 
@@ -490,16 +492,14 @@ func resolveHeapLabels(snap *heapsnapshot.HeapSnapshot, opts heaplabels.Options)
 	if !hasObjectContents(snap) {
 		return heaplabels.Result{}, false, "heap label recovery skipped: heap object contents were not retained"
 	}
-	if !opts.HasGLabelsOffset {
-		off, ok := heaplabels.LookupGLabelsOffset(snap)
-		if !ok {
-			return heaplabels.Result{}, false, fmt.Sprintf("heap label recovery unsupported for build=%q goarch=%q ptrSize=%d",
-				snap.Params.BuildVersion, snap.Params.GOARCH, snap.Params.PtrSize)
-		}
-		opts.GLabelsOffset = off
-		opts.HasGLabelsOffset = true
+	input := heaplabels.LookupInputFromSnapshot(snap)
+	layout, ok := runtimelayout.Lookup(input)
+	if !ok {
+		return heaplabels.Result{}, false, fmt.Sprintf(
+			"heap label recovery unsupported: %s", runtimelayout.UnsupportedMessage(input),
+		)
 	}
-	return heaplabels.DecodeAll(snap, opts), true, ""
+	return heaplabels.DecodeAll(snap, layout, opts), true, ""
 }
 
 func hasObjectContents(snap *heapsnapshot.HeapSnapshot) bool {

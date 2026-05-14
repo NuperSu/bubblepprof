@@ -11,6 +11,7 @@ import (
 	"bubblepprof/internal/capture"
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heapsnapshot"
+	"bubblepprof/internal/runtimelayout"
 )
 
 func TestRuntimeHeapDumpDynamicPprofLabels(t *testing.T) {
@@ -126,18 +127,19 @@ func captureRuntimePprofLabels(t *testing.T, specs ...runtimeWorkerSpec) (map[ui
 		t.Fatalf("parse heap dump: %v", err)
 	}
 
-	var offset uint64
-	var haveOffset bool
-	if off, ok := LookupGLabelsOffset(snap); ok {
-		offset, haveOffset = off, true
-	} else {
+	layout, haveLayout := LookupLayout(snap)
+	if !haveLayout {
 		for _, spec := range specs {
 			if len(spec.Want) == 0 {
 				continue
 			}
 			candidates := FindOffsetCandidates(snap, NewMemory(snap), spec.Want, Options{})
 			if len(candidates) == 1 {
-				offset, haveOffset = candidates[0].Offset, true
+				manual, err := runtimelayout.Manual(LookupInputFromSnapshot(snap), candidates[0].Offset)
+				if err != nil {
+					t.Fatalf("runtimelayout.Manual: %v", err)
+				}
+				layout, haveLayout = manual, true
 				break
 			}
 			if len(candidates) > 1 {
@@ -145,14 +147,11 @@ func captureRuntimePprofLabels(t *testing.T, specs ...runtimeWorkerSpec) (map[ui
 			}
 		}
 	}
-	if !haveOffset {
+	if !haveLayout {
 		t.Skipf("no runtime.g.labels offset found for %s %s", runtime.Version(), runtime.GOARCH)
 	}
 
-	res := DecodeAll(snap, Options{
-		GLabelsOffset:    offset,
-		HasGLabelsOffset: true,
-	})
+	res := DecodeAll(snap, layout, Options{})
 	return res.LabelsByGID, res
 }
 
@@ -222,7 +221,7 @@ func dynamicKV(kv ...string) []string {
 	return out
 }
 
-func TestLookupGLabelsOffsetVerifiedGo126AMD64(t *testing.T) {
+func TestLookupLayoutVerifiedGo126AMD64(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{
 			PtrSize:      8,
@@ -230,9 +229,12 @@ func TestLookupGLabelsOffsetVerifiedGo126AMD64(t *testing.T) {
 			BuildVersion: "go1.26.3-X:nodwarf5",
 		},
 	}
-	off, ok := LookupGLabelsOffset(snap)
-	if !ok || off != 0x160 {
-		t.Fatalf("LookupGLabelsOffset = %#x, %t", off, ok)
+	layout, ok := LookupLayout(snap)
+	if !ok || layout.GLabelsOffset != 0x160 {
+		t.Fatalf("LookupLayout offset = %#x, ok=%t", layout.GLabelsOffset, ok)
+	}
+	if layout.Source != runtimelayout.SourceTable {
+		t.Fatalf("Source = %q", layout.Source)
 	}
 }
 
