@@ -119,9 +119,9 @@ type Options struct {
 // function uses. The returned values describe whether each source is
 // allowed to contribute labels in the current call.
 type effectivePolicy struct {
-	useHeap    bool
+	useHeap     bool
 	useManifest bool
-	useProfile bool
+	useProfile  bool
 	// profileBestEffort marks that any profile match must be reported
 	// as best-effort attribution.
 	profileBestEffort bool
@@ -153,10 +153,10 @@ func (o Options) policy() effectivePolicy {
 type AttributionMode string
 
 const (
-	AttributionNone             AttributionMode = "no_labels"
-	AttributionHeapNative       AttributionMode = "heap_native_exact"
-	AttributionManifest         AttributionMode = "manifest_exact"
-	AttributionMixedExact       AttributionMode = "mixed_exact_heap_and_manifest"
+	AttributionNone              AttributionMode = "no_labels"
+	AttributionHeapNative        AttributionMode = "heap_native_exact"
+	AttributionManifest          AttributionMode = "manifest_exact"
+	AttributionMixedExact        AttributionMode = "mixed_exact_heap_and_manifest"
 	AttributionBestEffortProfile AttributionMode = "best_effort_profile_fallback"
 )
 
@@ -274,6 +274,7 @@ func ResolveLabels(
 						heapRes.Stats.GoroutinesFailed,
 						heapRes.Stats.StringsMissing))
 			}
+			res.Warnings = append(res.Warnings, heapRes.Warnings...)
 		} else {
 			res.Diagnostics.UnsupportedHeapLayout = true
 			res.Diagnostics.HeapLayoutReason = reason
@@ -296,16 +297,16 @@ func ResolveLabels(
 				continue
 			}
 			if source, dup := res.SourcesByGID[e.ID]; dup {
+				if source == SourceManifest {
+					res.Warnings = append(res.Warnings,
+						fmt.Sprintf("manifest contains duplicate entry for goroutine %d; duplicate ignored", e.ID))
+					continue
+				}
 				res.Warnings = append(res.Warnings,
 					fmt.Sprintf("manifest entry for goroutine %d ignored; labels already resolved from %s", e.ID, source))
 				continue
 			}
-			if _, dup := res.LabelsByGID[e.ID]; dup {
-				res.Warnings = append(res.Warnings,
-					fmt.Sprintf("manifest contains duplicate entry for goroutine %d; keeping last", e.ID))
-			} else {
-				res.MatchedFromManifest++
-			}
+			res.MatchedFromManifest++
 			res.LabelsByGID[e.ID] = copyLabels(e.Labels)
 			res.SourcesByGID[e.ID] = SourceManifest
 		}
@@ -343,7 +344,11 @@ func ResolveLabels(
 				matchedSamples[idx] = true
 				continue
 			}
-			res.LabelsByGID[id] = copyLabels(sample.Labels)
+			labels := copyNonCorrelationLabels(sample.Labels)
+			if len(labels) == 0 {
+				continue
+			}
+			res.LabelsByGID[id] = labels
 			res.SourcesByGID[id] = SourceProfileID
 			res.MatchedFromProfile++
 			matchedSamples[idx] = true
@@ -382,6 +387,10 @@ func ResolveLabels(
 		if matchedSamples[idx] {
 			continue
 		}
+		labels := copyNonCorrelationLabels(sample.Labels)
+		if len(labels) == 0 {
+			continue
+		}
 		sig := ProfileStackSignature(sample)
 		if sig == "" {
 			continue
@@ -392,7 +401,7 @@ func ResolveLabels(
 			profBySig[sig] = b
 		}
 		b.count += sample.Count
-		b.labelSets = append(b.labelSets, sample.Labels)
+		b.labelSets = append(b.labelSets, labels)
 		b.sampleIdxs = append(b.sampleIdxs, idx)
 	}
 
@@ -614,6 +623,23 @@ func copyLabels(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
 		out[k] = v
+	}
+	return out
+}
+
+func copyNonCorrelationLabels(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		if IsCorrelationLabelKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
