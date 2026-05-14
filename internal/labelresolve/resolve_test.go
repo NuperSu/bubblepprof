@@ -51,6 +51,30 @@ func TestManifestExactMatch(t *testing.T) {
 	}
 }
 
+func TestManifestDuplicateKeepsFirstAndWarns(t *testing.T) {
+	snap := snapWith(
+		heapsnapshot.Goroutine{ID: 7, Frames: []heapsnapshot.StackFrame{gframe("main.main")}},
+	)
+	m := &bubblelabels.Manifest{
+		Format: bubblelabels.ManifestFormatV1,
+		Goroutines: []bubblelabels.GoroutineLabels{
+			{ID: 7, Labels: map[string]string{"bubble": "first"}},
+			{ID: 7, Labels: map[string]string{"bubble": "second"}},
+		},
+	}
+
+	res := ResolveLabels(snap, m, nil, Options{})
+	if got := res.LabelsByGID[7]["bubble"]; got != "first" {
+		t.Fatalf("duplicate manifest label = %q, want first", got)
+	}
+	if res.MatchedFromManifest != 1 {
+		t.Fatalf("MatchedFromManifest = %d, want 1", res.MatchedFromManifest)
+	}
+	if !hasWarningContaining(res.Warnings, "duplicate entry for goroutine 7; duplicate ignored") {
+		t.Fatalf("missing duplicate warning: %v", res.Warnings)
+	}
+}
+
 func TestProfileStackSingleMatch(t *testing.T) {
 	snap := snapWith(
 		heapsnapshot.Goroutine{ID: 1, Frames: []heapsnapshot.StackFrame{gframe("worker.run"), gframe("main.main")}},
@@ -58,7 +82,7 @@ func TestProfileStackSingleMatch(t *testing.T) {
 	prof := &goroutineprofile.Profile{
 		Goroutines: []goroutineprofile.GoroutineSample{
 			{
-				Labels: map[string]string{"bubble": "alpha"},
+				Labels: map[string]string{"bubble": "alpha", "goid": "99"},
 				Count:  1,
 				Frames: []goroutineprofile.Frame{{Func: "worker.run"}, {Func: "main.main"}},
 			},
@@ -67,6 +91,9 @@ func TestProfileStackSingleMatch(t *testing.T) {
 	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
 	if got := res.LabelsByGID[1]["bubble"]; got != "alpha" {
 		t.Fatalf("labels[1] = %v", res.LabelsByGID[1])
+	}
+	if _, ok := res.LabelsByGID[1]["goid"]; ok {
+		t.Fatalf("profile stack labels leaked goid: %v", res.LabelsByGID[1])
 	}
 	if res.SourcesByGID[1] != SourceProfileStack {
 		t.Fatalf("source = %v", res.SourcesByGID[1])
@@ -317,8 +344,37 @@ func TestProfileGoidLabel(t *testing.T) {
 	if res.LabelsByGID[5]["bubble"] != "alpha" {
 		t.Fatalf("labels[5] = %v", res.LabelsByGID[5])
 	}
+	if _, ok := res.LabelsByGID[5]["goid"]; ok {
+		t.Fatalf("profile ID labels leaked goid: %v", res.LabelsByGID[5])
+	}
 	if res.MatchedFromProfile != 1 {
 		t.Fatalf("MatchedFromProfile = %d", res.MatchedFromProfile)
+	}
+}
+
+func TestProfileGoidOnlyDoesNotMatch(t *testing.T) {
+	snap := snapWith(
+		heapsnapshot.Goroutine{ID: 5, Frames: []heapsnapshot.StackFrame{gframe("worker.loop")}},
+	)
+	prof := &goroutineprofile.Profile{
+		Goroutines: []goroutineprofile.GoroutineSample{
+			{
+				Labels: map[string]string{"goid": "5"},
+				Count:  1,
+				Frames: []goroutineprofile.Frame{{Func: "worker.loop"}},
+			},
+		},
+	}
+
+	res := ResolveLabels(snap, nil, prof, Options{AllowProfileFallback: true})
+	if len(res.LabelsByGID) != 0 {
+		t.Fatalf("goid-only profile sample should not assign labels: %v", res.LabelsByGID)
+	}
+	if res.MatchedFromProfile != 0 {
+		t.Fatalf("MatchedFromProfile = %d, want 0", res.MatchedFromProfile)
+	}
+	if res.SourcesByGID[5] != SourceNone {
+		t.Fatalf("source = %v, want none", res.SourcesByGID[5])
 	}
 }
 
