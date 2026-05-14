@@ -2,7 +2,6 @@ package memusage
 
 import (
 	"errors"
-	"reflect"
 	"testing"
 
 	"bubblepprof/internal/heaplabels"
@@ -64,26 +63,21 @@ func TestLabelsMatch(t *testing.T) {
 	}
 }
 
-func TestObjectSetBytesAndUnion(t *testing.T) {
+func TestObjectSetBytesAndIntersect(t *testing.T) {
 	g := newTestGraph(t, []testObject{
 		{addr: 0x1000, size: 10},
 		{addr: 0x2000, size: 20},
 		{addr: 0x3000, size: 30},
 	})
-	g1 := snapshotgraph.GoroutineReachability{GoroutineID: 1, Reachable: setOf(0, 1)}
-	g2 := snapshotgraph.GoroutineReachability{GoroutineID: 2, Reachable: setOf(1, 2)}
+	a := setOf(0, 1)
+	b := setOf(1, 2)
 
-	union := UnionReachable([]snapshotgraph.GoroutineReachability{g1, g2})
-	if got := len(union); got != 3 {
-		t.Fatalf("len(union) = %d, want 3", got)
+	if bytes := ObjectSetBytes(g, a); bytes != 30 {
+		t.Fatalf("ObjectSetBytes(a) = %d, want 30", bytes)
 	}
-	if bytes := ObjectSetBytes(g, union); bytes != 60 {
-		t.Fatalf("union bytes = %d, want 60 (counted-once semantics)", bytes)
-	}
-
-	count, bytes := IntersectCountBytes(g, g1.Reachable, g2.Reachable)
+	count, bytes := IntersectCountBytes(g, a, b)
 	if count != 1 || bytes != 20 {
-		t.Fatalf("intersection of g1∩g2 = (%d, %d), want (1, 20)", count, bytes)
+		t.Fatalf("intersection of a∩b = (%d, %d), want (1, 20)", count, bytes)
 	}
 }
 
@@ -96,25 +90,25 @@ func TestComputeFromAnalysis_SystemExclusionAndOverlap(t *testing.T) {
 	})
 	user1 := snapshotgraph.GoroutineReachability{
 		GoroutineID: 11,
-		Reachable:   setOf(0, 1), // A, B
+		Roots:       rootsForIDs(0, 1), // A, B
 	}
 	user2 := snapshotgraph.GoroutineReachability{
 		GoroutineID: 12,
-		Reachable:   setOf(1), // B
+		Roots:       rootsForIDs(1), // B
 	}
 	other := snapshotgraph.GoroutineReachability{
 		GoroutineID: 13,
-		Reachable:   setOf(2), // C
+		Roots:       rootsForIDs(2), // C
 	}
 	sys := snapshotgraph.GoroutineReachability{
 		GoroutineID: 14,
 		IsSystem:    true,
-		Reachable:   setOf(1, 3), // B, D — system overlap on B
+		Roots:       rootsForIDs(1, 3), // B, D — system overlap on B
 	}
 	analysis := &snapshotgraph.Analysis{
 		Graph:      g,
 		Goroutines: []snapshotgraph.GoroutineReachability{user1, user2, other, sys},
-		Globals:    snapshotgraph.GlobalReachability{Reachable: setOf(0)}, // A is also a global
+		Globals:    snapshotgraph.GlobalReachability{Roots: rootsForIDs(0)}, // A is also a global
 	}
 	labelsByGID := map[uint64]map[string]string{
 		11: {"job": "42"},
@@ -197,7 +191,7 @@ func TestComputeFromAnalysis_UnsupportedRuntime(t *testing.T) {
 
 func TestComputeFromAnalysis_StringMissingNoLabels(t *testing.T) {
 	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
-	user := snapshotgraph.GoroutineReachability{GoroutineID: 1, Reachable: setOf(0)}
+	user := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
 	analysis := &snapshotgraph.Analysis{
 		Graph:      g,
 		Goroutines: []snapshotgraph.GoroutineReachability{user},
@@ -231,8 +225,8 @@ func TestComputeFromAnalysis_IncompleteAttribution(t *testing.T) {
 		{addr: 0x1000, size: 10},
 		{addr: 0x2000, size: 20},
 	})
-	user1 := snapshotgraph.GoroutineReachability{GoroutineID: 1, Reachable: setOf(0)}
-	user2 := snapshotgraph.GoroutineReachability{GoroutineID: 2, Reachable: setOf(1)}
+	user1 := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
+	user2 := snapshotgraph.GoroutineReachability{GoroutineID: 2, Roots: rootsForIDs(1)}
 	analysis := &snapshotgraph.Analysis{
 		Graph:      g,
 		Goroutines: []snapshotgraph.GoroutineReachability{user1, user2},
@@ -340,15 +334,15 @@ func setOf(ids ...snapshotgraph.ObjectID) map[snapshotgraph.ObjectID]struct{} {
 	return out
 }
 
-// Reflect-based sanity: makes sure Reachable values are real maps, not
-// nil shadows, when ComputeFromAnalysis iterates them.
-func TestUnionReachable_NilSafe(t *testing.T) {
-	gr := snapshotgraph.GoroutineReachability{Reachable: nil}
-	got := UnionReachable([]snapshotgraph.GoroutineReachability{gr})
-	want := map[snapshotgraph.ObjectID]struct{}{}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("UnionReachable(nil reachable) = %v, want %v", got, want)
+// rootsForIDs builds a slice of stack RootRefs pointing at the given
+// object IDs. Used for tests that need to drive the on-demand traversal
+// without constructing a parser-shaped HeapSnapshot.
+func rootsForIDs(ids ...snapshotgraph.ObjectID) []snapshotgraph.RootRef {
+	out := make([]snapshotgraph.RootRef, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, snapshotgraph.RootRef{ObjectID: id, Kind: "stack"})
 	}
+	return out
 }
 
 func TestComputeFromAnalysis_ValidatesRequest(t *testing.T) {
@@ -356,7 +350,7 @@ func TestComputeFromAnalysis_ValidatesRequest(t *testing.T) {
 	analysis := &snapshotgraph.Analysis{
 		Graph: g,
 		Goroutines: []snapshotgraph.GoroutineReachability{
-			{GoroutineID: 1, Reachable: setOf(0)},
+			{GoroutineID: 1, Roots: rootsForIDs(0)},
 		},
 	}
 	// Empty want must NOT match every goroutine.
@@ -379,8 +373,8 @@ func TestComputeFromAnalysis_NoMatchWithStringMissing(t *testing.T) {
 	// decoder reported string_missing for at least one goroutine. The
 	// honest answer is 422 string_missing, not 200 "no match".
 	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
-	user1 := snapshotgraph.GoroutineReachability{GoroutineID: 1, Reachable: setOf(0)}
-	user2 := snapshotgraph.GoroutineReachability{GoroutineID: 2, Reachable: setOf(0)}
+	user1 := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
+	user2 := snapshotgraph.GoroutineReachability{GoroutineID: 2, Roots: rootsForIDs(0)}
 	analysis := &snapshotgraph.Analysis{
 		Graph:      g,
 		Goroutines: []snapshotgraph.GoroutineReachability{user1, user2},

@@ -120,6 +120,9 @@ func PrintBubbles(out io.Writer, path string, resOpts labelresolve.Options, repO
 	if err != nil {
 		return fmt.Errorf("build snapshot graph: %w", err)
 	}
+	// bubblereport needs whole-process reachability; Build is structural
+	// only, so run the BFS pass here.
+	snapshotgraph.ComputeReachability(analysis)
 
 	report, err := bubblereport.Build(bubblereport.Input{
 		Analysis:    analysis,

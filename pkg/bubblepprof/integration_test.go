@@ -118,6 +118,9 @@ func TestRuntimeSnapshotCaptureIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build snapshot graph: %v", err)
 	}
+	// Build is structural-only; the reach-derived counters this test
+	// asserts on are filled by ComputeReachability.
+	snapshotgraph.ComputeReachability(analysis)
 	if analysis.Stats.Objects == 0 {
 		t.Fatal("graph has no objects")
 	}
