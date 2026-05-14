@@ -3,6 +3,7 @@ package bubblepprof
 import (
 	"context"
 	"runtime/pprof"
+	"strings"
 	"time"
 
 	"bubblepprof/internal/bubblelabels"
@@ -27,12 +28,13 @@ type LabelSet struct {
 // Labels panics on an odd number of arguments. This matches
 // runtime/pprof.Labels which also panics in that case.
 func Labels(kv ...string) LabelSet {
-	internal, err := bubblelabels.MakeLabelSet(kv...)
+	copied := cloneLabelStrings(kv)
+	internal, err := bubblelabels.MakeLabelSet(copied...)
 	if err != nil {
 		panic(err)
 	}
 	return LabelSet{
-		pprofLabels: pprof.Labels(kv...),
+		pprofLabels: pprof.Labels(copied...),
 		labels:      internal,
 	}
 }
@@ -42,6 +44,18 @@ func (l LabelSet) Map() map[string]string { return l.labels.Map() }
 
 // Len reports the number of distinct keys in the set.
 func (l LabelSet) Len() int { return l.labels.Len() }
+
+func cloneLabelStrings(kv []string) []string {
+	out := make([]string, len(kv))
+	for i, s := range kv {
+		// Heap-native label recovery decodes runtime/pprof's labelMap
+		// out of heap.dump object bytes. String literals can point at
+		// read-only program data that WriteHeapDump does not preserve as
+		// object contents, so the wrapper feeds pprof heap-owned copies.
+		out[i] = strings.Clone(s)
+	}
+	return out
+}
 
 // DefaultRegistry is the registry that the package-level wrappers write
 // into. Tests can swap it via UseRegistry.

@@ -65,8 +65,9 @@ func usage(w io.Writer, program string) {
 	fmt.Fprintf(w, "  %s snapshot parse snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot graph snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot heap-labels [--g-labels-offset 0xNNN] [--find-offset key=value] [--show-failed] snapshot.tar\n", program)
-	fmt.Fprintf(w, "  %s snapshot labels [--labels-source auto|manifest|profile] snapshot.tar\n", program)
-	fmt.Fprintf(w, "  %s snapshot bubbles [--label-key K] [--include-system] [--include-unlabeled] [--labels-source auto|manifest|profile] snapshot.tar\n", program)
+	fmt.Fprintf(w, "  %s snapshot labels [--labels-source auto|heap|manifest|profile] snapshot.tar\n", program)
+	fmt.Fprintf(w, "  %s snapshot bubbles [--label-key K] [--include-system] [--include-unlabeled] [--labels-source auto|heap|manifest|profile] snapshot.tar\n", program)
+	fmt.Fprintf(w, "      note: labels-source auto and heap retain heap object contents and may use more memory\n")
 }
 
 func Print(out io.Writer, path string) error {
