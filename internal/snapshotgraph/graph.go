@@ -111,6 +111,10 @@ type RootRef struct {
 // goroutine, etc.) hold pointers into runtime metadata that can pollute
 // per-goroutine attribution if folded into user-visible bubbles. Phase 4
 // keeps them in the analysis but tags them so later phases can filter.
+//
+// Reachable is populated by ComputeReachability, not Build. Callers that
+// only need a label-selected subset (e.g. /debug/memusage) can ignore it
+// and walk the graph themselves from Roots.
 type GoroutineReachability struct {
 	GoroutineID  uint64
 	IsSystem     bool
@@ -121,6 +125,8 @@ type GoroutineReachability struct {
 
 // GlobalReachability is the reachability set rooted at process-wide
 // roots: data, bss, otherroot, finalizer, queued_finalizer.
+//
+// Reachable is populated by ComputeReachability, not Build.
 type GlobalReachability struct {
 	Roots     []RootRef
 	Reachable map[ObjectID]struct{}

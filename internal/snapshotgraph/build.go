@@ -10,8 +10,20 @@ import (
 
 // Build converts a parsed HeapSnapshot into an Analysis. It resolves
 // pointer values to object IDs (supporting interior pointers), builds
-// graph edges with deduplication, extracts goroutine and global roots,
-// and computes per-goroutine and process-global reachability.
+// graph edges with deduplication, and extracts goroutine and global
+// roots.
+//
+// Build is structural only: it does not walk the graph. Reachability
+// sets (GoroutineReachability.Reachable, GlobalReachability.Reachable)
+// and reach-derived Stats (GoroutineReachableObjects,
+// GlobalReachableObjects, SharedByGoroutinesObjects, UnreachableObjects)
+// are populated by ComputeReachability. Callers that need reachability
+// — e.g. the offline snapshot CLI and bubblereport — should call
+// ComputeReachability immediately after Build. Callers that only need
+// reachability for a label-selected subset of goroutines (the
+// /debug/memusage handler) should skip ComputeReachability and traverse
+// from the union of matched goroutine roots instead, paying for one BFS
+// rather than one per goroutine plus globals.
 //
 // Parser-level warnings from snap.Warnings are forwarded to
 // Analysis.Warnings with a "parse: " prefix so downstream consumers see
@@ -271,11 +283,6 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	a.Globals.Roots = globalRoots
 	a.Stats.GlobalRoots = len(globalRoots)
 
-	for i := range a.Goroutines {
-		a.Goroutines[i].Reachable = ReachableFrom(g, a.Goroutines[i].Roots)
-	}
-	a.Globals.Reachable = ReachableFrom(g, a.Globals.Roots)
-
 	a.Stats.UnresolvedPointers =
 		a.Stats.UnresolvedObjectPointers +
 			a.Stats.UnresolvedGoroutineRoots +
@@ -289,6 +296,35 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	}
 	a.Stats.ObjectBytes = bytes
 
+	return a, nil
+}
+
+// ComputeReachability walks the graph from every goroutine's roots and
+// from the global roots, filling GoroutineReachability.Reachable,
+// GlobalReachability.Reachable, and the reach-derived counters in
+// Stats (GoroutineReachableObjects, GlobalReachableObjects,
+// SharedByGoroutinesObjects, UnreachableObjects).
+//
+// ComputeReachability is optional: Build no longer calls it. Callers
+// that need whole-process reachability (offline `snapshot graph` /
+// `snapshot bubbles`, the bubblereport builder) should run it
+// immediately after Build. The /debug/memusage handler skips this in
+// favour of a single union BFS over only the goroutines whose labels
+// match the request selector.
+//
+// Idempotent: running ComputeReachability twice yields the same sets
+// and stats.
+func ComputeReachability(a *Analysis) {
+	if a == nil || a.Graph == nil {
+		return
+	}
+	g := a.Graph
+
+	for i := range a.Goroutines {
+		a.Goroutines[i].Reachable = ReachableFrom(g, a.Goroutines[i].Roots)
+	}
+	a.Globals.Reachable = ReachableFrom(g, a.Globals.Roots)
+
 	goroutineOwners := make(map[ObjectID]int, a.Stats.Objects)
 	for _, gr := range a.Goroutines {
 		for id := range gr.Reachable {
@@ -296,6 +332,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		}
 	}
 	a.Stats.GoroutineReachableObjects = len(goroutineOwners)
+	a.Stats.SharedByGoroutinesObjects = 0
 	for _, n := range goroutineOwners {
 		if n > 1 {
 			a.Stats.SharedByGoroutinesObjects++
@@ -315,8 +352,6 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		unreachable = 0
 	}
 	a.Stats.UnreachableObjects = unreachable
-
-	return a, nil
 }
 
 func addSegmentGlobalRoots(seg heapsnapshot.DataSegment, defaultKind string, add func(kind string, ptr, slot uint64, detail string)) {

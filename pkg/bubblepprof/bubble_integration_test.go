@@ -122,6 +122,7 @@ func TestBubbleAttributionIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build snapshot graph: %v", err)
 	}
+	snapshotgraph.ComputeReachability(analysis)
 	report, err := bubblereport.Build(bubblereport.Input{
 		Analysis:    analysis,
 		LabelsByGID: resolution.LabelsByGID,
