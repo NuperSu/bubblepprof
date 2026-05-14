@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"runtime/pprof"
 	"strconv"
 	"sync"
@@ -17,9 +18,17 @@ type retainedChunk struct {
 	Data   []byte
 }
 
+type worker struct {
+	bubble string
+	mb     int
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 var (
-	mu     sync.Mutex
-	retain []retainedChunk
+	mu      sync.Mutex
+	retain  []retainedChunk
+	workers []*worker
 )
 
 func main() {
@@ -33,12 +42,18 @@ func main() {
 	mux.HandleFunc("/", status)
 	mux.HandleFunc("/retain", retainHandler)
 	mux.HandleFunc("/reset", resetHandler)
+	mux.HandleFunc("/start-worker", startWorkerHandler)
+	mux.HandleFunc("/stop-workers", stopWorkersHandler)
+	mux.HandleFunc("/workers", workersHandler)
 
 	addr := "127.0.0.1:6060"
 	log.Printf("listening on http://%s", addr)
 	log.Printf("snapshot: curl http://%s/debug/bubblepprof/snapshot -o snapshot.tar", addr)
 	log.Printf("retain sample heap: curl 'http://%s/retain?bubble=alpha&mb=4'", addr)
-	log.Printf("reset sample heap: curl http://%s/reset", addr)
+	log.Printf("start labeled worker: curl 'http://%s/start-worker?bubble=alpha&mb=4'", addr)
+	log.Printf("stop labeled workers: curl http://%s/stop-workers", addr)
+	log.Printf("list labeled workers: curl http://%s/workers", addr)
+	log.Printf("reset retained heap: curl http://%s/reset", addr)
 
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
@@ -66,9 +81,14 @@ func status(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
+	fmt.Fprintf(w, "\nworkers running: %d\n", len(workers))
+
 	fmt.Fprintf(w, "\nendpoints:\n")
 	fmt.Fprintf(w, "  GET /debug/bubblepprof/snapshot\n")
 	fmt.Fprintf(w, "  GET /retain?bubble=alpha&mb=4\n")
+	fmt.Fprintf(w, "  GET /start-worker?bubble=alpha&mb=4\n")
+	fmt.Fprintf(w, "  GET /stop-workers\n")
+	fmt.Fprintf(w, "  GET /workers\n")
 	fmt.Fprintf(w, "  GET /reset\n")
 }
 
@@ -113,4 +133,76 @@ func resetHandler(w http.ResponseWriter, _ *http.Request) {
 	mu.Unlock()
 
 	fmt.Fprintf(w, "retained heap reset\n")
+}
+
+// startWorkerHandler launches a long-lived goroutine using
+// bubblepprof.Go so the goroutine ID -> labels mapping ends up in
+// labels.json on the next snapshot capture. The worker holds onto an
+// `mb` MiB byte slice that stays reachable from its stack until
+// /stop-workers is hit, so bubble reports can attribute that memory.
+func startWorkerHandler(w http.ResponseWriter, r *http.Request) {
+	bubble := r.URL.Query().Get("bubble")
+	if bubble == "" {
+		bubble = "default"
+	}
+	mb := 4
+	if raw := r.URL.Query().Get("mb"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			http.Error(w, "invalid mb parameter", http.StatusBadRequest)
+			return
+		}
+		mb = parsed
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wk := &worker{bubble: bubble, mb: mb, cancel: cancel, done: make(chan struct{})}
+
+	started := make(chan struct{})
+	labels := bubblepprof.Labels("bubble", bubble)
+	bubblepprof.Do(ctx, labels, func(ctx context.Context) {
+		bubblepprof.Go(ctx, func(ctx context.Context) {
+			defer close(wk.done)
+			data := make([]byte, mb*1024*1024)
+			for i := range data {
+				data[i] = byte(i)
+			}
+			runtime.KeepAlive(data)
+			close(started)
+			<-ctx.Done()
+			runtime.KeepAlive(data)
+		})
+	})
+	<-started
+
+	mu.Lock()
+	workers = append(workers, wk)
+	count := len(workers)
+	mu.Unlock()
+
+	fmt.Fprintf(w, "started worker for bubble=%q with %d MiB; total workers: %d\n", bubble, mb, count)
+}
+
+func stopWorkersHandler(w http.ResponseWriter, _ *http.Request) {
+	mu.Lock()
+	current := workers
+	workers = nil
+	mu.Unlock()
+
+	for _, wk := range current {
+		wk.cancel()
+	}
+	for _, wk := range current {
+		<-wk.done
+	}
+	fmt.Fprintf(w, "stopped %d workers\n", len(current))
+}
+
+func workersHandler(w http.ResponseWriter, _ *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
+	fmt.Fprintf(w, "workers: %d\n", len(workers))
+	for i, wk := range workers {
+		fmt.Fprintf(w, "  [%d] bubble=%s mb=%d\n", i, wk.bubble, wk.mb)
+	}
 }

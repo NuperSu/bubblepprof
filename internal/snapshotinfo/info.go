@@ -47,6 +47,10 @@ func Run(out, errOut io.Writer, program string, args []string) int {
 			return 1
 		}
 		return 0
+	case "labels":
+		return runLabels(out, errOut, program, args[1:])
+	case "bubbles":
+		return runBubbles(out, errOut, program, args[1:])
 	default:
 		usage(errOut, program)
 		return 2
@@ -58,6 +62,8 @@ func usage(w io.Writer, program string) {
 	fmt.Fprintf(w, "  %s snapshot info snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot parse snapshot.tar\n", program)
 	fmt.Fprintf(w, "  %s snapshot graph snapshot.tar\n", program)
+	fmt.Fprintf(w, "  %s snapshot labels [--labels-source auto|manifest|profile] snapshot.tar\n", program)
+	fmt.Fprintf(w, "  %s snapshot bubbles [--label-key K] [--include-system] [--include-unlabeled] [--labels-source auto|manifest|profile] snapshot.tar\n", program)
 }
 
 func Print(out io.Writer, path string) error {
@@ -80,6 +86,16 @@ func Print(out io.Writer, path string) error {
 	fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.HeapDumpFile, info.HeapDumpSize)
 	fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.GoroutineProfileFile, info.GoroutineProfileSize)
 	fmt.Fprintf(out, "%s: valid\n", snapshot.MetadataFile)
+	if info.HaveLabels {
+		fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.LabelsFile, info.LabelsSize)
+	} else {
+		fmt.Fprintf(out, "%s: absent\n", snapshot.LabelsFile)
+	}
+	if info.HaveGoroutineStacks {
+		fmt.Fprintf(out, "%s: present, %d bytes\n", snapshot.GoroutineStacksFile, info.GoroutineStacksSize)
+	} else {
+		fmt.Fprintf(out, "%s: absent\n", snapshot.GoroutineStacksFile)
+	}
 
 	return nil
 }

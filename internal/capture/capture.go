@@ -23,6 +23,18 @@ type MetadataProvider interface {
 	Metadata(gcBeforeHeapDump bool) snapshot.SnapshotMetadata
 }
 
+// LabelManifestProvider produces the optional labels.json payload that
+// accompanies a snapshot. Returning nil bytes omits the entry.
+type LabelManifestProvider interface {
+	LabelManifest() ([]byte, error)
+}
+
+// GoroutineStacksWriter produces the optional debug=2 goroutine stack
+// dump. It writes nothing when the implementation chooses to skip it.
+type GoroutineStacksWriter interface {
+	WriteGoroutineStacks(w io.Writer) error
+}
+
 type CaptureOptions struct {
 	GCBeforeHeapDump bool
 
@@ -30,6 +42,14 @@ type CaptureOptions struct {
 	GoroutineProfileWriter GoroutineProfileWriter
 	MetadataProvider       MetadataProvider
 	GC                     func()
+
+	// LabelManifestProvider is optional. When set, the capture path
+	// asks it for labels.json bytes and embeds them in the snapshot if
+	// the returned payload is non-empty.
+	LabelManifestProvider LabelManifestProvider
+	// GoroutineStacksWriter is optional. When set, the capture path
+	// asks it to emit debug=2 stacks and embeds the result if non-empty.
+	GoroutineStacksWriter GoroutineStacksWriter
 }
 
 // Captured holds the output of Capture: a heap dump open as a temp file
@@ -40,6 +60,13 @@ type Captured struct {
 	HeapDumpSize     int64
 	GoroutineProfile []byte
 	Metadata         snapshot.SnapshotMetadata
+
+	// Labels is the optional labels.json payload. nil if no provider
+	// was configured or the provider returned empty.
+	Labels []byte
+	// GoroutineStacks is the optional goroutine.stacks payload. nil if
+	// no writer was configured or it produced no bytes.
+	GoroutineStacks []byte
 
 	cleanup func()
 }
@@ -117,17 +144,49 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 		return nil, fmt.Errorf("write goroutine profile: %w", err)
 	}
 
+	var labelsPayload []byte
+	if opts.LabelManifestProvider != nil {
+		b, err := opts.LabelManifestProvider.LabelManifest()
+		if err != nil {
+			_ = heapFile.Close()
+			return nil, fmt.Errorf("collect labels manifest: %w", err)
+		}
+		if len(b) > 0 {
+			labelsPayload = b
+		}
+	}
+
+	var stacksPayload []byte
+	if opts.GoroutineStacksWriter != nil {
+		var buf bytes.Buffer
+		if err := opts.GoroutineStacksWriter.WriteGoroutineStacks(&buf); err != nil {
+			_ = heapFile.Close()
+			return nil, fmt.Errorf("write goroutine stacks: %w", err)
+		}
+		if buf.Len() > 0 {
+			stacksPayload = buf.Bytes()
+		}
+	}
+
 	metadata := opts.MetadataProvider.Metadata(opts.GCBeforeHeapDump)
 	metadata.Format = snapshot.FormatV1
 	metadata.HeapDumpFile = snapshot.HeapDumpFile
 	metadata.GoroutineProfileFile = snapshot.GoroutineProfileFile
 	metadata.GCBeforeHeapDump = opts.GCBeforeHeapDump
+	if labelsPayload != nil {
+		metadata.LabelsFile = snapshot.LabelsFile
+	}
+	if stacksPayload != nil {
+		metadata.GoroutineStacksFile = snapshot.GoroutineStacksFile
+	}
 
 	c := &Captured{
 		HeapDump:         heapFile,
 		HeapDumpSize:     heapInfo.Size(),
 		GoroutineProfile: goroutines.Bytes(),
 		Metadata:         metadata,
+		Labels:           labelsPayload,
+		GoroutineStacks:  stacksPayload,
 	}
 	rmTmp := cleanup
 	cleanup = nil // success — defer must not delete tmpDir
@@ -146,6 +205,8 @@ func (c *Captured) BundleSource() snapshot.BundleSource {
 		HeapDumpSize:     c.HeapDumpSize,
 		GoroutineProfile: c.GoroutineProfile,
 		Metadata:         c.Metadata,
+		Labels:           c.Labels,
+		GoroutineStacks:  c.GoroutineStacks,
 	}
 }
 
