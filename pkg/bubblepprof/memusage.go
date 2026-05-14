@@ -30,6 +30,15 @@ type MemUsageOptions struct {
 	// participate in label matching. Default false.
 	IncludeSystemGoroutines bool
 
+	// DisableProcessMemoryReader turns off the in-process
+	// address-space reader the handler opens (when running on
+	// Linux) so the heap-label decoder can recover ordinary
+	// runtime/pprof string literals that live outside heap object
+	// contents. When true, label decoding sees heap object contents
+	// only, and ordinary pprof.Labels("job","42") may fail with
+	// status_missing. Default false (reader enabled).
+	DisableProcessMemoryReader bool
+
 	// MaxRequestBodyBytes caps the request body. Zero falls back to the
 	// internal default (1 MiB).
 	MaxRequestBodyBytes int64
@@ -75,11 +84,12 @@ func MemUsageHandlerWithOptions(opts MemUsageOptions) http.Handler {
 // can be unit-tested without spinning up an HTTP server.
 func (o MemUsageOptions) toInternal() memusage.Options {
 	return memusage.Options{
-		GCBeforeHeapDump:        !o.DisableGCBeforeHeapDump,
-		IncludeSystemGoroutines: o.IncludeSystemGoroutines,
-		MaxLabels:               o.MaxLabels,
-		MaxLabelKeyBytes:        o.MaxLabelKeyBytes,
-		MaxLabelValueBytes:      o.MaxLabelValueBytes,
+		GCBeforeHeapDump:           !o.DisableGCBeforeHeapDump,
+		IncludeSystemGoroutines:    o.IncludeSystemGoroutines,
+		DisableProcessMemoryReader: o.DisableProcessMemoryReader,
+		MaxLabels:                  o.MaxLabels,
+		MaxLabelKeyBytes:           o.MaxLabelKeyBytes,
+		MaxLabelValueBytes:         o.MaxLabelValueBytes,
 	}
 }
 
