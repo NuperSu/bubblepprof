@@ -350,3 +350,71 @@ func TestUnionReachable_NilSafe(t *testing.T) {
 		t.Fatalf("UnionReachable(nil reachable) = %v, want %v", got, want)
 	}
 }
+
+func TestComputeFromAnalysis_ValidatesRequest(t *testing.T) {
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
+	analysis := &snapshotgraph.Analysis{
+		Graph: g,
+		Goroutines: []snapshotgraph.GoroutineReachability{
+			{GoroutineID: 1, Reachable: setOf(0)},
+		},
+	}
+	// Empty want must NOT match every goroutine.
+	_, err := ComputeFromAnalysis(Request{Labels: map[string]string{}}, analysis, nil, Diagnostics{}, Options{})
+	if err == nil {
+		t.Fatal("expected ValidationError, got nil")
+	}
+	var verr *ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("error = %v, want *ValidationError", err)
+	}
+	if verr.Code != "empty_labels" {
+		t.Fatalf("code = %q, want empty_labels", verr.Code)
+	}
+}
+
+func TestComputeFromAnalysis_NoMatchWithStringMissing(t *testing.T) {
+	// Unrelated goroutines did decode labels successfully (labelsByGID
+	// non-empty), but the requested selector matches nothing AND the
+	// decoder reported string_missing for at least one goroutine. The
+	// honest answer is 422 string_missing, not 200 "no match".
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
+	user1 := snapshotgraph.GoroutineReachability{GoroutineID: 1, Reachable: setOf(0)}
+	user2 := snapshotgraph.GoroutineReachability{GoroutineID: 2, Reachable: setOf(0)}
+	analysis := &snapshotgraph.Analysis{
+		Graph:      g,
+		Goroutines: []snapshotgraph.GoroutineReachability{user1, user2},
+	}
+	labelsByGID := map[uint64]map[string]string{
+		1: {"job": "other"},
+	}
+	diag := Diagnostics{StringMissingCount: 1, FailedGoroutines: 1}
+	_, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"job": "alpha"}},
+		analysis,
+		labelsByGID,
+		diag,
+		Options{},
+	)
+	if err == nil {
+		t.Fatal("expected StringMissingError, got nil")
+	}
+	var sme *StringMissingError
+	if !errors.As(err, &sme) {
+		t.Fatalf("error = %v, want StringMissingError", err)
+	}
+}
+
+func TestObjectSetBytes_HugeObjectID(t *testing.T) {
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 7}})
+	// A huge ObjectID must be skipped, not panic, and not pollute byte
+	// counts. Its conversion through uint64 mustn't accidentally look
+	// in-range on platforms where int < uint64.
+	set := map[snapshotgraph.ObjectID]struct{}{
+		0:                          {},
+		^snapshotgraph.ObjectID(0): {}, // max ObjectID
+	}
+	if got := ObjectSetBytes(g, set); got != 7 {
+		t.Fatalf("ObjectSetBytes = %d, want 7 (huge ID must be ignored)", got)
+	}
+}

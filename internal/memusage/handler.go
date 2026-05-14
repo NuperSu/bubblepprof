@@ -77,8 +77,11 @@ func serve(
 		return
 	}
 	// Reject trailing data after a complete JSON value: callers MUST
-	// send exactly one JSON document.
-	if dec.More() {
+	// send exactly one JSON document. (json.Decoder.More is documented
+	// for arrays/objects, not top-level streams — a second Decode that
+	// fails to return io.EOF is the reliable check.)
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
 		writeError(w, http.StatusBadRequest, &ErrorResponse{
 			Error: "request body must contain exactly one JSON object",
 			Code:  "invalid_request",
@@ -116,6 +119,14 @@ func serve(
 }
 
 func writeComputeError(w http.ResponseWriter, err error) {
+	var validation *ValidationError
+	if errors.As(err, &validation) {
+		writeError(w, http.StatusBadRequest, &ErrorResponse{
+			Error: validation.Msg,
+			Code:  validation.Code,
+		})
+		return
+	}
 	var unsupported *UnsupportedRuntimeError
 	if errors.As(err, &unsupported) {
 		writeError(w, http.StatusUnprocessableEntity, &ErrorResponse{

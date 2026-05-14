@@ -41,13 +41,14 @@ func ObjectSetBytes(g *snapshotgraph.Graph, set map[snapshotgraph.ObjectID]struc
 	if g == nil {
 		return 0
 	}
-	var n uint64
+	n := uint64(len(g.Objects))
+	var bytes uint64
 	for id := range set {
-		if int(id) < len(g.Objects) {
-			n += g.Objects[id].Size
+		if uint64(id) < n {
+			bytes += g.Objects[id].Size
 		}
 	}
-	return n
+	return bytes
 }
 
 // IntersectCountBytes returns the size of a∩b and the sum of shallow
@@ -59,6 +60,7 @@ func IntersectCountBytes(g *snapshotgraph.Graph, a, b map[snapshotgraph.ObjectID
 	if len(b) < len(a) {
 		a, b = b, a
 	}
+	n := uint64(len(g.Objects))
 	var (
 		count int
 		bytes uint64
@@ -68,7 +70,7 @@ func IntersectCountBytes(g *snapshotgraph.Graph, a, b map[snapshotgraph.ObjectID
 			continue
 		}
 		count++
-		if int(id) < len(g.Objects) {
+		if uint64(id) < n {
 			bytes += g.Objects[id].Size
 		}
 	}
@@ -128,6 +130,16 @@ func (e *StringMissingError) Error() string {
 // ComputeFromAnalysis is the pure core of /debug/memusage: it takes an
 // already-built object graph, a precomputed labelsByGID map, and label
 // diagnostics, and returns the response payload.
+//
+// Validation runs first so direct callers (e.g. unit tests, future CLI
+// adapters) cannot bypass the same checks the HTTP handler applies.
+// Errors are reported via concrete types the handler can translate into
+// HTTP status codes:
+//
+//	*ValidationError       -> 400
+//	*UnsupportedRuntimeError -> 422
+//	*StringMissingError    -> 422
+//	other                  -> 500
 func ComputeFromAnalysis(
 	req Request,
 	analysis *snapshotgraph.Analysis,
@@ -135,6 +147,9 @@ func ComputeFromAnalysis(
 	diag Diagnostics,
 	opts Options,
 ) (*Response, error) {
+	if verr := ValidateRequest(&req, opts); verr != nil {
+		return nil, verr
+	}
 	if analysis == nil {
 		return nil, fmt.Errorf("memusage: analysis is nil")
 	}
@@ -164,10 +179,13 @@ func ComputeFromAnalysis(
 		matched = append(matched, gr)
 	}
 
-	// String-missing all the way down? If no labels at all could be
-	// decoded and at least one decode attempt failed with string_missing,
-	// surface a clear incomplete error.
-	if len(matched) == 0 && diag.StringMissingCount > 0 && len(labelsByGID) == 0 {
+	// If the selector matched zero goroutines AND at least one decode
+	// attempt failed with string_missing, surface a 422 string_missing
+	// instead of a misleading 200 "no match". Some unrelated goroutines
+	// may have decoded successfully, but the caller cannot tell whether
+	// "no match" is authoritative or merely incomplete — string_missing
+	// is the honest answer.
+	if len(matched) == 0 && diag.StringMissingCount > 0 {
 		return nil, &StringMissingError{
 			GoVersion: diag.GoVersion,
 			GOARCH:    diag.GOARCH,
