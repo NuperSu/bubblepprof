@@ -8,6 +8,7 @@ import (
 	"bubblepprof/internal/capture"
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heaplabels"
+	"bubblepprof/internal/runtimelayout"
 )
 
 func TestWrapperLiteralLabelsRecoverFromHeapDump(t *testing.T) {
@@ -39,14 +40,11 @@ func TestWrapperLiteralLabelsRecoverFromHeapDump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse heap dump: %v", err)
 	}
-	off, ok := heaplabels.LookupGLabelsOffset(snap)
+	layout, ok := runtimelayout.Lookup(heaplabels.LookupInputFromSnapshot(snap))
 	if !ok {
 		t.Skipf("no verified runtime.g.labels layout for %s %s", runtime.Version(), runtime.GOARCH)
 	}
-	res := heaplabels.DecodeAll(snap, heaplabels.Options{
-		GLabelsOffset:    off,
-		HasGLabelsOffset: true,
-	})
+	res := heaplabels.DecodeAll(snap, layout, heaplabels.Options{})
 	for _, labels := range res.LabelsByGID {
 		if labels["bubble"] == "alpha" {
 			if labels["job"] != "42" {

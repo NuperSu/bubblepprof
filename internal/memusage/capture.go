@@ -11,6 +11,7 @@ import (
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heaplabels"
 	"bubblepprof/internal/heapsnapshot"
+	"bubblepprof/internal/runtimelayout"
 	"bubblepprof/internal/snapshotgraph"
 )
 
@@ -66,7 +67,10 @@ type LabelRecoverer interface {
 }
 
 // DefaultLabelRecoverer recovers labels via internal/heaplabels using the
-// runtime.g.labels offset selected from the verified-layouts table.
+// runtime layout chosen by internal/runtimelayout. When the runtime
+// layout is unsupported, every goroutine is reported with
+// StatusUnsupportedRuntime so the compute layer can short-circuit before
+// the expensive graph build.
 type DefaultLabelRecoverer struct{}
 
 // Recover implements LabelRecoverer.
@@ -74,13 +78,12 @@ func (DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot) (heaplabel
 	if snap == nil {
 		return heaplabels.Result{}, fmt.Errorf("memusage: nil heap snapshot")
 	}
-	offset, ok := heaplabels.LookupGLabelsOffset(snap)
-	opts := heaplabels.Options{}
-	if ok {
-		opts.GLabelsOffset = offset
-		opts.HasGLabelsOffset = true
+	input := heaplabels.LookupInputFromSnapshot(snap)
+	layout, ok := runtimelayout.Lookup(input)
+	if !ok {
+		return heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input)), nil
 	}
-	return heaplabels.DecodeAll(snap, opts), nil
+	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{}), nil
 }
 
 // Computer captures, parses, and analyzes a heap dump to answer one
@@ -101,14 +104,15 @@ func NewComputer(opts Options) *Computer {
 	}
 }
 
-// Compute runs the full Phase 1 pipeline:
+// Compute runs the full /debug/memusage pipeline:
 //
 //  1. Capture a heap dump to a temp file.
 //  2. Parse it with KeepObjectContents=true (required for heap-native
 //     label recovery).
-//  3. Recover pprof labels via the configured LabelRecoverer.
-//  4. If the runtime layout is unsupported, return before paying the
-//     graph-build cost.
+//  3. Resolve the runtime layout via runtimelayout.Lookup and recover
+//     pprof labels via the configured LabelRecoverer.
+//  4. If the runtime layout is unsupported, return UnsupportedRuntimeError
+//     before paying the graph-build cost.
 //  5. Build the object graph and per-goroutine/global reachability.
 //  6. Hand off to ComputeFromAnalysis.
 //

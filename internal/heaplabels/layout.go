@@ -1,9 +1,8 @@
 package heaplabels
 
 import (
-	"encoding/binary"
-
 	"bubblepprof/internal/heapsnapshot"
+	"bubblepprof/internal/runtimelayout"
 )
 
 const (
@@ -11,103 +10,35 @@ const (
 	DefaultMaxStringLen = 1 << 20
 )
 
-type Layout struct {
-	GOARCH  string
-	PtrSize int
-	Order   binary.ByteOrder
-
-	GLabelsOffset uint64
-
-	LabelMapSetOffset uint64
-	SetListOffset     uint64
-
-	SliceDataOffset uint64
-	SliceLenOffset  uint64
-	SliceCapOffset  uint64
-
-	StringDataOffset uint64
-	StringLenOffset  uint64
-
-	LabelSize        uint64
-	LabelKeyOffset   uint64
-	LabelValueOffset uint64
-}
-
+// Options tunes decoding limits applied to every goroutine. Runtime
+// layout (offsets / pointer width) is supplied separately as a
+// runtimelayout.Layout argument.
 type Options struct {
-	GLabelsOffset    uint64
-	HasGLabelsOffset bool
-
 	MaxLabels    uint64
 	MaxStringLen uint64
 }
 
-type LayoutEntry struct {
-	VersionPrefix string
-	GOARCH        string
-	PtrSize       int
-	GLabelsOffset uint64
-}
-
-var verifiedLayouts = []LayoutEntry{
-	// Verified with cmd/labeloffsetprobe on linux/amd64:
-	// go version go1.26.3-X:nodwarf5 linux/amd64.
-	{
-		VersionPrefix: "go1.26.",
-		GOARCH:        "amd64",
-		PtrSize:       8,
-		GLabelsOffset: 0x160,
-	},
-}
-
-func LookupGLabelsOffset(snap *heapsnapshot.HeapSnapshot) (uint64, bool) {
+// LookupInputFromSnapshot extracts the runtime-layout lookup key from a
+// parsed heap snapshot. Callers pass the result to runtimelayout.Lookup
+// (or runtimelayout.Manual for debug CLIs).
+func LookupInputFromSnapshot(snap *heapsnapshot.HeapSnapshot) runtimelayout.LookupInput {
 	if snap == nil {
-		return 0, false
+		return runtimelayout.LookupInput{}
 	}
-	for _, e := range verifiedLayouts {
-		if e.GOARCH != snap.Params.GOARCH || e.PtrSize != snap.Params.PtrSize {
-			continue
-		}
-		if hasVersionPrefix(snap.Params.BuildVersion, e.VersionPrefix) {
-			return e.GLabelsOffset, true
-		}
+	return runtimelayout.LookupInput{
+		GoVersion: snap.Params.BuildVersion,
+		GOARCH:    snap.Params.GOARCH,
+		PtrSize:   snap.Params.PtrSize,
+		BigEndian: snap.Params.BigEndian,
 	}
-	return 0, false
 }
 
-func LayoutFromSnapshot(snap *heapsnapshot.HeapSnapshot, gLabelsOffset uint64) (Layout, bool) {
-	if snap == nil {
-		return Layout{}, false
-	}
-	ptrSize := snap.Params.PtrSize
-	if ptrSize != 4 && ptrSize != 8 {
-		return Layout{}, false
-	}
-	var order binary.ByteOrder = binary.LittleEndian
-	if snap.Params.BigEndian {
-		order = binary.BigEndian
-	}
-	ptr := uint64(ptrSize)
-	return Layout{
-		GOARCH:  snap.Params.GOARCH,
-		PtrSize: ptrSize,
-		Order:   order,
-
-		GLabelsOffset: gLabelsOffset,
-
-		LabelMapSetOffset: 0,
-		SetListOffset:     0,
-
-		SliceDataOffset: 0,
-		SliceLenOffset:  ptr,
-		SliceCapOffset:  2 * ptr,
-
-		StringDataOffset: 0,
-		StringLenOffset:  ptr,
-
-		LabelSize:        4 * ptr,
-		LabelKeyOffset:   0,
-		LabelValueOffset: 2 * ptr,
-	}, true
+// LookupLayout resolves a heap snapshot's runtime layout from the
+// verified-runtime table. Returns (zero, false) when the runtime is
+// unsupported; callers must surface unsupported_runtime rather than
+// fabricate a layout.
+func LookupLayout(snap *heapsnapshot.HeapSnapshot) (runtimelayout.Layout, bool) {
+	return runtimelayout.Lookup(LookupInputFromSnapshot(snap))
 }
 
 func normalizeOptions(opts Options) Options {
@@ -118,11 +49,4 @@ func normalizeOptions(opts Options) Options {
 		opts.MaxStringLen = DefaultMaxStringLen
 	}
 	return opts
-}
-
-func hasVersionPrefix(version, prefix string) bool {
-	if len(version) < len(prefix) {
-		return false
-	}
-	return version[:len(prefix)] == prefix
 }
