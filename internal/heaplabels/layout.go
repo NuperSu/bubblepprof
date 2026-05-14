@@ -1,6 +1,7 @@
 package heaplabels
 
 import (
+	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heapsnapshot"
 	"bubblepprof/internal/runtimelayout"
 )
@@ -16,6 +17,19 @@ const (
 type Options struct {
 	MaxLabels    uint64
 	MaxStringLen uint64
+
+	// ExtraMemory is an optional secondary address-space reader
+	// consulted when heap dump object contents do not cover the
+	// requested address. The decoder always tries heap memory first
+	// so structural reads (pointers, slice headers) see the
+	// stop-the-world snapshot exactly; ExtraMemory only fills in
+	// string bytes that live outside heap objects, typically pprof
+	// label string literals in the executable's read-only data.
+	//
+	// Set to addrspace.ProcessReader for the in-process
+	// /debug/memusage handler, or addrspace.ELFReader for offline
+	// `snapshot heap-labels --exe`. Nil disables the fallback.
+	ExtraMemory addrspace.Reader
 }
 
 // LookupInputFromSnapshot extracts the runtime-layout lookup key from a

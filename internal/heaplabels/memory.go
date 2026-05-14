@@ -7,10 +7,17 @@ import (
 	"bubblepprof/internal/heapsnapshot"
 )
 
+// Memory exposes a heap snapshot's per-object contents as an
+// address-indexed byte source. It implements addrspace.Reader (and
+// addrspace.NamedReader) so the decoder can read through a composite
+// of heap memory + process/executable memory when callers supply an
+// ExtraMemory reader.
 type Memory struct {
 	ranges []Range
 }
 
+// Range is a contiguous mapping of bytes at virtual addresses
+// [Start, End). End is exclusive: Start+len(Data) == End.
 type Range struct {
 	Start uint64
 	End   uint64
@@ -18,6 +25,9 @@ type Range struct {
 	Kind  string
 }
 
+// NewMemory builds a Memory from a parsed heap snapshot. Objects
+// without retained contents are skipped; ranges whose addr+size
+// overflows uint64 are skipped defensively.
 func NewMemory(snap *heapsnapshot.HeapSnapshot) *Memory {
 	m := &Memory{}
 	if snap == nil {
@@ -47,6 +57,9 @@ func NewMemory(snap *heapsnapshot.HeapSnapshot) *Memory {
 	return m
 }
 
+// Read returns the byte slice at [addr, addr+size). It returns ok=true
+// with an empty slice on size==0, and ok=false on addr==0 (size>0),
+// overflow, or a range that crosses a heap object boundary.
 func (m *Memory) Read(addr uint64, size uint64) ([]byte, bool) {
 	if m == nil {
 		return nil, false
@@ -73,6 +86,17 @@ func (m *Memory) Read(addr uint64, size uint64) ([]byte, bool) {
 	return nil, false
 }
 
+// ReadAtAddr implements addrspace.Reader.
+func (m *Memory) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
+	return m.Read(addr, size)
+}
+
+// Name implements addrspace.NamedReader. The diagnostic name "heap"
+// distinguishes this source from process/elf memory when a Composite
+// reports SourceFor.
+func (m *Memory) Name() string { return "heap" }
+
+// ReadUintptr decodes a ptrSize-wide unsigned integer at addr.
 func (m *Memory) ReadUintptr(addr uint64, ptrSize int, order binary.ByteOrder) (uint64, bool) {
 	b, ok := m.Read(addr, uint64(ptrSize))
 	if !ok {
@@ -88,6 +112,8 @@ func (m *Memory) ReadUintptr(addr uint64, ptrSize int, order binary.ByteOrder) (
 	}
 }
 
+// ReadString reads length bytes at addr as a Go string. length==0 is
+// always ok; otherwise the bytes must lie inside a single heap object.
 func (m *Memory) ReadString(addr uint64, length uint64) (string, bool) {
 	if length == 0 {
 		return "", true

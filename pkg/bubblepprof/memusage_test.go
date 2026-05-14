@@ -65,6 +65,16 @@ func TestMemUsageOptions_DefaultsKeepGCOn(t *testing.T) {
 	}
 }
 
+func TestMemUsageOptions_DisableProcessMemoryReaderFlows(t *testing.T) {
+	if got := (MemUsageOptions{}).toInternal(); got.DisableProcessMemoryReader {
+		t.Fatal("zero value must keep process memory reader enabled")
+	}
+	got := MemUsageOptions{DisableProcessMemoryReader: true}.toInternal()
+	if !got.DisableProcessMemoryReader {
+		t.Fatal("DisableProcessMemoryReader must propagate to internal Options")
+	}
+}
+
 func TestRegisterMemUsage(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterMemUsage(mux)

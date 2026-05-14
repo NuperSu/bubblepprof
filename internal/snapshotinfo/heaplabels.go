@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heaplabels"
 	"bubblepprof/internal/runtimelayout"
@@ -27,6 +28,12 @@ type heapLabelCLIOptions struct {
 
 	FindLabels map[string]string
 	ShowFailed bool
+
+	// ExePath, when set, is opened as an ELF executable and used as a
+	// secondary address-space reader so the decoder can recover label
+	// string bytes that live outside heap object contents (e.g. ordinary
+	// pprof.Labels("job","42") string literals in rodata).
+	ExePath string
 }
 
 const (
@@ -106,9 +113,25 @@ func PrintHeapLabels(out io.Writer, path string, cli heapLabelCLIOptions) error 
 	}
 	fmt.Fprintln(out)
 
+	decodeOpts := cli.DecodeOptions
+	if cli.ExePath != "" {
+		fmt.Fprintf(out, "extra memory source: elf %s\n", cli.ExePath)
+		er, err := addrspace.OpenELFReader(cli.ExePath)
+		if err != nil {
+			return fmt.Errorf("open --exe %q: %w", cli.ExePath, err)
+		}
+		defer er.Close()
+		decodeOpts.ExtraMemory = er
+		fmt.Fprintf(out, "extra memory segments: %d\n", len(er.Segments()))
+		fmt.Fprintln(out, "extra memory caveat: PIE/ASLR binaries may not match heap dump virtual addresses without a load bias")
+	} else {
+		fmt.Fprintln(out, "extra memory source: (none)")
+	}
+	fmt.Fprintln(out)
+
 	var decoded heaplabels.Result
 	if ok {
-		decoded = heaplabels.DecodeAll(snap, layout, cli.DecodeOptions)
+		decoded = heaplabels.DecodeAll(snap, layout, decodeOpts)
 	} else {
 		decoded = heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input))
 	}
@@ -206,6 +229,7 @@ func runHeapLabels(out, errOut io.Writer, program string, args []string) int {
 	maxLabels := fs.Uint64("max-labels", heaplabels.DefaultMaxLabels, "maximum labels accepted in one pprof label map")
 	maxString := fs.Uint64("max-string", heaplabels.DefaultMaxStringLen, "maximum decoded label string length")
 	showFailed := fs.Bool("show-failed", false, "show non-decoded goroutine statuses")
+	exePath := fs.String("exe", "", "executable ELF file to read label string literals from (offline rodata fallback)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -221,6 +245,7 @@ func runHeapLabels(out, errOut io.Writer, program string, args []string) int {
 			MaxStringLen: *maxString,
 		},
 		ShowFailed: *showFailed,
+		ExePath:    strings.TrimSpace(*exePath),
 	}
 	if *offsetText != "" {
 		off, err := strconv.ParseUint(*offsetText, 0, 64)

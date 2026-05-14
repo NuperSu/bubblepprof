@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heaplabels"
 	"bubblepprof/internal/heapsnapshot"
 )
@@ -40,7 +41,7 @@ type fakeRecoverer struct {
 	err    error
 }
 
-func (f fakeRecoverer) Recover(snap *heapsnapshot.HeapSnapshot) (heaplabels.Result, error) {
+func (f fakeRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error) {
 	return f.result, f.err
 }
 

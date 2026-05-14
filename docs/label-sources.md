@@ -192,18 +192,30 @@ pprof.Labels("job", "42")
 
 The resulting label map may contain string headers pointing to
 read-only program data rather than heap-allocated bytes. Heap-native
-recovery therefore needs a memory reader that can resolve string bytes
-from:
+recovery therefore reads string bytes through a composite address-space
+reader (`internal/addrspace`) that tries the following sources in order:
 
 1. retained heap dump object contents (where the bytes are heap-owned),
-2. the current process's memory mappings (for the in-process endpoint),
-3. the executable's load segments (for offline CLI debugging).
+2. the current process's memory mappings (for the in-process endpoint:
+   `addrspace.ProcessReader` parses `/proc/self/maps` and reads via
+   `/proc/self/mem` on Linux),
+3. the executable's load segments (for offline CLI debugging:
+   `addrspace.ELFReader`, exposed as `snapshot heap-labels --exe`).
 
-The current prototype only reads heap object contents. The wrapper APIs
-clone label strings onto the heap as a workaround so existing examples
-work, but this is a wrapper-side hack, not a property of the main
-profiler contract. Removing the workaround is a future-phase task that
-depends on the memory reader above.
+Phase 3 introduced these readers. `/debug/memusage` opens the process
+memory reader by default on Linux; callers may disable it with
+`MemUsageOptions.DisableProcessMemoryReader` (typically only in tests).
+When the process reader is unavailable (non-Linux host, denied
+`/proc/self/mem`, or `DisableProcessMemoryReader=true`) the endpoint
+degrades honestly: decode failures surface as `string_missing` /
+`heap_native_incomplete` with a descriptive warning, never as a silent
+fallback to `labels.json` or `goroutine.pprof`.
+
+The offline `--exe` ELF reader covers non-PIE binaries reliably; for
+PIE/ASLR binaries the runtime virtual addresses may differ from the
+on-disk Vaddrs and require a load bias the snapshot does not yet
+record. This limitation is documented and explicit; for the in-process
+endpoint, prefer the process reader.
 
 ## Snapshot artifact roles
 
@@ -270,8 +282,9 @@ bubblepprof snapshot bubbles --require-heap-labels    snapshot.tar
 ```
 
 `snapshot heap-labels` is the validation tool for heap-native recovery
-and supports `--g-labels-offset`, `--find-offset key=value`, and
-`--show-failed` for layout debugging.
+and supports `--g-labels-offset`, `--find-offset key=value`,
+`--show-failed`, and `--exe ./binary` for layout/string-literal
+debugging.
 
 The thesis-facing target is the in-process `POST /debug/memusage`
 endpoint, which will reuse the same parser, graph builder, and
@@ -306,13 +319,15 @@ once a process-memory reader exists.
 
 - `runtime.g` layout is private; supported (Go version, GOARCH)
   combinations are narrow.
-- Label key/value bytes from string literals may live outside heap
-  objects and are not readable from `heap.dump` alone.
+- Label key/value bytes from string literals are read from the running
+  process address space via `/proc/self/mem` on Linux; on other hosts
+  (or when `DisableProcessMemoryReader` is set), literal-allocated
+  labels return `string_missing`.
 - The current verified prototype layout covers a single Go release
   (see above).
 - `goroutine.pprof` is not exact and must remain opt-in.
-- A `/debug/memusage` endpoint is not implemented yet; the current
-  offline CLI is the only working entry point.
+- Offline `--exe` ELF reading covers non-PIE binaries; PIE/ASLR
+  binaries require a load bias that the snapshot does not yet record.
 
 ## What NOT to do
 
