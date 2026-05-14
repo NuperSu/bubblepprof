@@ -25,14 +25,14 @@ func PrintLabels(out io.Writer, path string, opts labelresolve.Options) error {
 	}
 
 	prof, profErr := parseProfile(res.GoroutineProfile)
-	if profErr != nil && opts.ProfileOnly {
+	if profErr != nil && opts.Source == labelresolve.SourceModeProfile {
 		return fmt.Errorf("parse goroutine profile: %w", profErr)
 	}
 
 	resolution := labelresolve.ResolveLabels(res.Snapshot, res.Labels, prof, opts)
 	if profErr != nil {
 		resolution.Warnings = append(resolution.Warnings,
-			fmt.Sprintf("goroutine.pprof parse error (ignored because labels.json is present): %v", profErr))
+			fmt.Sprintf("goroutine.pprof parse error (ignored): %v", profErr))
 	}
 
 	fmt.Fprintf(out, "snapshot format: %s\n", res.Metadata.Format)
@@ -40,14 +40,9 @@ func PrintLabels(out io.Writer, path string, opts labelresolve.Options) error {
 	fmt.Fprintf(out, "profile samples: %d\n", resolution.ProfileSamples)
 	fmt.Fprintf(out, "labels.json entries: %d\n", resolution.ManifestSize)
 	printHeapMemoryMode(out, opts)
+	printSourcePriority(out, opts)
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "label resolution:")
-	fmt.Fprintf(out, "  heap dump matches: %d\n", resolution.MatchedFromHeap)
-	fmt.Fprintf(out, "  exact labels.json matches: %d\n", resolution.MatchedFromManifest)
-	fmt.Fprintf(out, "  profile matches: %d\n", resolution.MatchedFromProfile)
-	fmt.Fprintf(out, "  unmatched user goroutines: %d\n", resolution.UnmatchedHeap)
-	fmt.Fprintf(out, "  unmatched profile samples: %d\n", resolution.UnmatchedProfile)
-	fmt.Fprintf(out, "  ambiguous matches: %d\n", resolution.AmbiguousMatches)
+	printLabelResolution(out, resolution)
 	fmt.Fprintln(out)
 
 	bySource := map[labelresolve.Source]int{}
@@ -58,11 +53,16 @@ func PrintLabels(out io.Writer, path string, opts labelresolve.Options) error {
 	for _, s := range []labelresolve.Source{labelresolve.SourceHeap, labelresolve.SourceManifest, labelresolve.SourceProfileID, labelresolve.SourceProfileStack} {
 		fmt.Fprintf(out, "  %s: %d\n", s, bySource[s])
 	}
+	fmt.Fprintf(out, "  unmatched heap goroutines: %d\n", resolution.UnmatchedHeap)
+	fmt.Fprintf(out, "  unsupported heap layout: %t\n", resolution.Diagnostics.UnsupportedHeapLayout)
 	fmt.Fprintln(out)
 
 	keyVals := map[string]map[string]struct{}{}
 	for _, labels := range resolution.LabelsByGID {
 		for k, v := range labels {
+			if labelresolve.IsCorrelationLabelKey(k) {
+				continue
+			}
 			if keyVals[k] == nil {
 				keyVals[k] = make(map[string]struct{})
 			}
@@ -88,6 +88,9 @@ func PrintLabels(out io.Writer, path string, opts labelresolve.Options) error {
 		}
 	}
 
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "attribution mode: %s\n", resolution.Diagnostics.Attribution.Description())
+
 	if len(resolution.Warnings) > 0 {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "warnings:")
@@ -107,7 +110,7 @@ func PrintBubbles(out io.Writer, path string, resOpts labelresolve.Options, repO
 	}
 
 	prof, profErr := parseProfile(res.GoroutineProfile)
-	if profErr != nil && resOpts.ProfileOnly {
+	if profErr != nil && resOpts.Source == labelresolve.SourceModeProfile {
 		return fmt.Errorf("parse goroutine profile: %w", profErr)
 	}
 
@@ -135,12 +138,8 @@ func PrintBubbles(out io.Writer, path string, resOpts labelresolve.Options, repO
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "label resolution:")
 	printHeapMemoryMode(out, resOpts)
-	fmt.Fprintf(out, "  heap dump matches: %d\n", resolution.MatchedFromHeap)
-	fmt.Fprintf(out, "  exact labels.json matches: %d\n", resolution.MatchedFromManifest)
-	fmt.Fprintf(out, "  profile matches: %d\n", resolution.MatchedFromProfile)
-	fmt.Fprintf(out, "  unmatched user goroutines: %d\n", resolution.UnmatchedHeap)
-	fmt.Fprintf(out, "  unmatched profile samples: %d\n", resolution.UnmatchedProfile)
-	fmt.Fprintf(out, "  ambiguous matches: %d\n", resolution.AmbiguousMatches)
+	printSourcePriority(out, resOpts)
+	printLabelResolution(out, resolution)
 	fmt.Fprintln(out)
 
 	bySource := map[labelresolve.Source]int{}
@@ -151,6 +150,8 @@ func PrintBubbles(out io.Writer, path string, resOpts labelresolve.Options, repO
 	for _, s := range []labelresolve.Source{labelresolve.SourceHeap, labelresolve.SourceManifest, labelresolve.SourceProfileID, labelresolve.SourceProfileStack} {
 		fmt.Fprintf(out, "  %s: %d\n", s, bySource[s])
 	}
+	fmt.Fprintf(out, "  unmatched heap goroutines: %d\n", resolution.UnmatchedHeap)
+	fmt.Fprintf(out, "  unsupported heap layout: %t\n", resolution.Diagnostics.UnsupportedHeapLayout)
 	if len(resolution.Warnings) > 0 {
 		fmt.Fprintln(out, "label recovery warnings:")
 		for _, w := range resolution.Warnings {
@@ -162,19 +163,35 @@ func PrintBubbles(out io.Writer, path string, resOpts labelresolve.Options, repO
 	report.PrintSummary(out)
 
 	fmt.Fprintln(out, "bubble attribution source:")
-	switch {
-	case resolution.MatchedFromHeap > 0:
-		fmt.Fprintln(out, "  heap.dump runtime.g.labels + fallback")
-	case res.Labels != nil && prof != nil:
-		fmt.Fprintln(out, "  labels.json + pprof fallback")
-	case res.Labels != nil:
-		fmt.Fprintln(out, "  labels.json exact")
-	case prof != nil:
-		fmt.Fprintln(out, "  pprof best-effort")
-	default:
-		fmt.Fprintln(out, "  (no label source available)")
-	}
+	fmt.Fprintf(out, "  %s\n", resolution.Diagnostics.Attribution.Description())
 	return nil
+}
+
+func printLabelResolution(out io.Writer, resolution labelresolve.Resolution) {
+	fmt.Fprintln(out, "label resolution:")
+	fmt.Fprintf(out, "  heap dump matches: %d\n", resolution.MatchedFromHeap)
+	fmt.Fprintf(out, "  exact labels.json matches: %d\n", resolution.MatchedFromManifest)
+	fmt.Fprintf(out, "  profile matches: %d\n", resolution.MatchedFromProfile)
+	fmt.Fprintf(out, "  unmatched user goroutines: %d\n", resolution.UnmatchedHeap)
+	fmt.Fprintf(out, "  unmatched profile samples: %d\n", resolution.UnmatchedProfile)
+	fmt.Fprintf(out, "  ambiguous matches: %d\n", resolution.AmbiguousMatches)
+}
+
+func printSourcePriority(out io.Writer, opts labelresolve.Options) {
+	switch opts.Source {
+	case labelresolve.SourceModeHeap:
+		fmt.Fprintln(out, "label source priority: heap-native only")
+	case labelresolve.SourceModeManifest:
+		fmt.Fprintln(out, "label source priority: labels.json only")
+	case labelresolve.SourceModeProfile:
+		fmt.Fprintln(out, "label source priority: goroutine.pprof only (best effort)")
+	default:
+		if opts.AllowProfileFallback {
+			fmt.Fprintln(out, "label source priority: heap-native, labels.json fallback, goroutine.pprof best-effort fallback enabled")
+		} else {
+			fmt.Fprintln(out, "label source priority: heap-native, labels.json fallback, goroutine.pprof disabled (pass --allow-profile-fallback to opt in)")
+		}
+	}
 }
 
 func loadForBubbles(path string, keepHeapContents bool) (*snapshotparse.BubbleResult, error) {
@@ -198,6 +215,8 @@ func runLabels(out, errOut io.Writer, program string, args []string) int {
 	fs := flag.NewFlagSet("snapshot labels", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	labelsSource := fs.String("labels-source", "auto", "label source: auto|heap|manifest|profile; auto and heap retain heap object contents and may use more memory")
+	allowProfile := fs.Bool("allow-profile-fallback", false, "in auto mode, allow goroutine.pprof best-effort fallback for goroutines not covered by heap-native or labels.json")
+	requireHeap := fs.Bool("require-heap-labels", false, "warn loudly when heap-native recovery is unavailable")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -206,7 +225,7 @@ func runLabels(out, errOut io.Writer, program string, args []string) int {
 		usage(errOut, program)
 		return 2
 	}
-	opts, err := labelOptionsFromFlag(*labelsSource)
+	opts, err := labelOptionsFromFlag(*labelsSource, *allowProfile, *requireHeap)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 2
@@ -226,6 +245,8 @@ func runBubbles(out, errOut io.Writer, program string, args []string) int {
 	includeSystem := fs.Bool("include-system", false, "include system/background goroutines in user bubbles")
 	includeUnlabeled := fs.Bool("include-unlabeled", false, "include unlabeled user goroutines as an <unlabeled> bubble")
 	labelsSource := fs.String("labels-source", "auto", "label source: auto|heap|manifest|profile; auto and heap retain heap object contents and may use more memory")
+	allowProfile := fs.Bool("allow-profile-fallback", false, "in auto mode, allow goroutine.pprof best-effort fallback for goroutines not covered by heap-native or labels.json")
+	requireHeap := fs.Bool("require-heap-labels", false, "warn loudly when heap-native recovery is unavailable")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -234,7 +255,7 @@ func runBubbles(out, errOut io.Writer, program string, args []string) int {
 		usage(errOut, program)
 		return 2
 	}
-	resOpts, err := labelOptionsFromFlag(*labelsSource)
+	resOpts, err := labelOptionsFromFlag(*labelsSource, *allowProfile, *requireHeap)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 2
@@ -251,26 +272,38 @@ func runBubbles(out, errOut io.Writer, program string, args []string) int {
 	return 0
 }
 
-func labelOptionsFromFlag(src string) (labelresolve.Options, error) {
+func labelOptionsFromFlag(src string, allowProfileFallback, requireHeap bool) (labelresolve.Options, error) {
+	opts := labelresolve.Options{
+		AllowProfileFallback: allowProfileFallback,
+		RequireHeapLabels:    requireHeap,
+	}
 	switch src {
 	case "", "auto":
-		return labelresolve.Options{}, nil
+		opts.Source = labelresolve.SourceModeAuto
 	case "heap":
-		return labelresolve.Options{HeapOnly: true}, nil
+		opts.Source = labelresolve.SourceModeHeap
 	case "manifest":
-		return labelresolve.Options{ManifestOnly: true}, nil
+		opts.Source = labelresolve.SourceModeManifest
 	case "profile":
-		return labelresolve.Options{ProfileOnly: true}, nil
+		opts.Source = labelresolve.SourceModeProfile
 	default:
 		return labelresolve.Options{}, fmt.Errorf("unknown --labels-source %q", src)
 	}
+	return opts, nil
 }
 
+// shouldKeepHeapContents reports whether heap-native recovery can use
+// retained object contents in this resolution. Only auto and heap modes
+// need the contents.
 func shouldKeepHeapContents(opts labelresolve.Options) bool {
-	if opts.DisableHeap || opts.ManifestOnly || opts.ProfileOnly {
+	if opts.DisableHeap {
 		return false
 	}
-	return true
+	switch opts.Source {
+	case labelresolve.SourceModeAuto, labelresolve.SourceModeHeap:
+		return true
+	}
+	return false
 }
 
 func printHeapMemoryMode(out io.Writer, opts labelresolve.Options) {

@@ -11,37 +11,50 @@ import (
 
 const snapshotPath = "/debug/bubblepprof/snapshot"
 
+// Options configures the snapshot HTTP handler.
+//
+// The zero value is a sensible default: heap.dump + metadata.json are
+// always emitted; labels.json is emitted whenever the bubblepprof
+// Registry has entries; goroutine.pprof and goroutine.stacks diagnostics
+// are emitted. Set the Disable* fields to opt out.
+//
+// goroutine.pprof and goroutine.stacks are diagnostics — they are
+// captured separately from the stop-the-world heap dump and therefore
+// only support best-effort label attribution. Exact bubble reports come
+// from heap-native recovery (and labels.json fallback).
 type Options struct {
+	// GCBeforeHeapDump runs runtime.GC() before WriteHeapDump. Default
+	// false (zero value); Handler() enables it.
 	GCBeforeHeapDump bool
 
-	// IncludeGoroutineStacks toggles whether the snapshot tar embeds a
-	// debug=2 goroutine stack dump alongside the protobuf goroutine
-	// profile. Default true.
-	IncludeGoroutineStacks bool
+	// DisableLabelManifest skips the labels.json fallback even when the
+	// Registry has entries. Default false.
+	DisableLabelManifest bool
 
-	// IncludeLabelsManifest toggles whether the snapshot embeds a
-	// labels.json built from the bubblepprof Registry. Default true;
-	// has no effect if the registry is empty.
-	IncludeLabelsManifest bool
+	// DisableDiagnostics skips the goroutine.stacks diagnostic entry.
+	// Default false.
+	DisableDiagnostics bool
 }
 
+// Handler returns an http.Handler with a sensible default configuration:
+// runtime.GC() before the heap dump, labels.json emitted when the
+// Registry has entries, and diagnostics (goroutine.stacks) enabled.
 func Handler() http.Handler {
-	return HandlerWithOptions(Options{
-		GCBeforeHeapDump:       true,
-		IncludeGoroutineStacks: true,
-		IncludeLabelsManifest:  true,
-	})
+	return HandlerWithOptions(Options{GCBeforeHeapDump: true})
 }
 
+// HandlerWithOptions returns an http.Handler with the supplied Options.
+// Options{} is a sensible default (labels.json + diagnostics on,
+// GCBeforeHeapDump off).
 func HandlerWithOptions(opts Options) http.Handler {
 	captureOpts := capture.CaptureOptions{GCBeforeHeapDump: opts.GCBeforeHeapDump}
-	if opts.IncludeLabelsManifest {
+	if !opts.DisableLabelManifest {
 		captureOpts.LabelManifestProvider = capture.RegistryLabelManifestProvider{
 			Registry: defaultRegistry,
 			Source:   registrySourceID,
 		}
 	}
-	if opts.IncludeGoroutineStacks {
+	if !opts.DisableDiagnostics {
 		captureOpts.GoroutineStacksWriter = capture.RuntimeGoroutineStacksWriter{}
 	}
 	return handler(captureOpts)

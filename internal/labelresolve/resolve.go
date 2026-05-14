@@ -1,8 +1,16 @@
-// Package labelresolve combines an exact bubblelabels.Manifest and a
-// best-effort goroutineprofile.Profile into a final goroutine ID -> pprof
-// labels mapping. The resolver never invents labels: a heap goroutine
-// that cannot be matched conservatively stays unlabeled, and the
-// diagnostics record the reason.
+// Package labelresolve attributes pprof labels to heap goroutines.
+//
+// The label source priority is:
+//
+//  1. heap-native labels — runtime.g.labels decoded from the same heap.dump
+//     used to build the object graph. Exact and stop-the-world coherent
+//     for supported Go runtime layouts.
+//  2. manifest labels — labels.json emitted by the bubblepprof wrapper /
+//     Registry. Exact, but requires application instrumentation.
+//  3. profile labels — goroutine.pprof. Best-effort only: the profile is
+//     captured at a different runtime moment, so goroutines may not
+//     align. Disabled by default; opt in via Options.AllowProfileFallback
+//     or Source=SourceModeProfile.
 package labelresolve
 
 import (
@@ -50,6 +58,146 @@ func (s Source) String() string {
 	}
 }
 
+// SourceMode picks the high-level label source policy. Use SourceModeAuto
+// (the zero value) unless the caller knows it wants to restrict resolution
+// to a single source.
+type SourceMode string
+
+const (
+	// SourceModeAuto uses heap-native first, falls back to labels.json
+	// for goroutines not covered by heap-native, and only consults the
+	// goroutine profile when Options.AllowProfileFallback is true.
+	SourceModeAuto SourceMode = ""
+	// SourceModeHeap uses only heap-native recovery. If the runtime
+	// layout is unsupported, no labels are assigned (and an explicit
+	// error is returned when RequireHeapLabels is set).
+	SourceModeHeap SourceMode = "heap"
+	// SourceModeManifest uses only labels.json.
+	SourceModeManifest SourceMode = "manifest"
+	// SourceModeProfile uses only the goroutine pprof profile as a
+	// best-effort source. Reports built from this source must be flagged
+	// as best-effort.
+	SourceModeProfile SourceMode = "profile"
+)
+
+// Options tunes ResolveLabels.
+type Options struct {
+	// Source picks the label-source policy. See SourceMode.
+	Source SourceMode
+
+	// AllowProfileFallback is consulted only in SourceModeAuto. When
+	// true, the resolver may attach labels from the goroutine pprof
+	// profile to goroutines still unmatched after heap and manifest
+	// resolution. Reports built with profile fallback are best-effort.
+	AllowProfileFallback bool
+
+	// RequireHeapLabels causes ResolveLabels to record a strong warning
+	// (and report it via Diagnostics.UnsupportedHeapLayout) if heap-native
+	// recovery is unavailable. Useful for SourceModeHeap callers that
+	// want to surface an actionable error.
+	RequireHeapLabels bool
+
+	// DisableHeap turns off runtime.g.labels heap-dump-native recovery
+	// even when the requested source would otherwise enable it. Provided
+	// as an escape hatch for diagnostics; prefer Source.
+	DisableHeap bool
+	// DisableManifest turns off labels.json. Prefer Source.
+	DisableManifest bool
+	// DisableProfile turns off pprof correlation entirely. Prefer Source
+	// and AllowProfileFallback.
+	DisableProfile bool
+
+	// HeapLabels configures heap-dump-native decoding. If no explicit
+	// GLabelsOffset is provided, ResolveLabels uses the verified layout
+	// table in internal/heaplabels.
+	HeapLabels heaplabels.Options
+}
+
+// effectivePolicy resolves the per-source booleans the rest of the
+// function uses. The returned values describe whether each source is
+// allowed to contribute labels in the current call.
+type effectivePolicy struct {
+	useHeap    bool
+	useManifest bool
+	useProfile bool
+	// profileBestEffort marks that any profile match must be reported
+	// as best-effort attribution.
+	profileBestEffort bool
+}
+
+func (o Options) policy() effectivePolicy {
+	p := effectivePolicy{}
+	switch o.Source {
+	case SourceModeHeap:
+		p.useHeap = !o.DisableHeap
+	case SourceModeManifest:
+		p.useManifest = !o.DisableManifest
+	case SourceModeProfile:
+		p.useProfile = !o.DisableProfile
+		p.profileBestEffort = true
+	default: // SourceModeAuto
+		p.useHeap = !o.DisableHeap
+		p.useManifest = !o.DisableManifest
+		if o.AllowProfileFallback && !o.DisableProfile {
+			p.useProfile = true
+			p.profileBestEffort = true
+		}
+	}
+	return p
+}
+
+// AttributionMode is a short label describing the source mix that
+// produced the resolution. It is suitable for printing in summaries.
+type AttributionMode string
+
+const (
+	AttributionNone             AttributionMode = "no_labels"
+	AttributionHeapNative       AttributionMode = "heap_native_exact"
+	AttributionManifest         AttributionMode = "manifest_exact"
+	AttributionMixedExact       AttributionMode = "mixed_exact_heap_and_manifest"
+	AttributionBestEffortProfile AttributionMode = "best_effort_profile_fallback"
+)
+
+func (m AttributionMode) Description() string {
+	switch m {
+	case AttributionHeapNative:
+		return "heap-native exact (runtime.g.labels from heap.dump)"
+	case AttributionManifest:
+		return "labels.json exact"
+	case AttributionMixedExact:
+		return "mixed exact: heap-native + labels.json"
+	case AttributionBestEffortProfile:
+		return "best effort: goroutine.pprof fallback used"
+	default:
+		return "no labels available"
+	}
+}
+
+// Diagnostics summarizes how a Resolution was produced. Designed for
+// printing alongside bubble reports so users can tell exact attribution
+// from best-effort attribution at a glance.
+type Diagnostics struct {
+	Mode SourceMode
+
+	HeapNativeMatches int
+	ManifestMatches   int
+	ProfileMatches    int
+
+	ProfileFallbackAllowed bool
+	ProfileFallbackUsed    bool
+
+	UnsupportedHeapLayout bool
+	HeapLayoutReason      string
+	MissingStringBytes    int
+
+	AmbiguousProfileMatches int
+
+	UnmatchedHeapGoroutines int
+	UnmatchedProfileSamples int
+
+	Attribution AttributionMode
+}
+
 // Resolution is the final per-goroutine label decision plus enough
 // auxiliary information to build diagnostics and bubble reports.
 type Resolution struct {
@@ -68,45 +216,35 @@ type Resolution struct {
 	UnmatchedProfile    int
 	AmbiguousMatches    int
 
+	Diagnostics Diagnostics
+
 	Warnings []string
 }
 
-// Options tunes ResolveLabels.
-type Options struct {
-	// DisableHeap turns off runtime.g.labels heap-dump-native recovery.
-	DisableHeap bool
-	// HeapOnly refuses all non-heap label sources.
-	HeapOnly bool
-	// DisableProfile turns off best-effort pprof correlation entirely.
-	DisableProfile bool
-	// ManifestOnly is a stronger flag: refuse all non-manifest sources.
-	ManifestOnly bool
-	// ProfileOnly refuses heap and manifest labels and uses only
-	// best-effort pprof profile correlation.
-	ProfileOnly bool
-	// HeapLabels configures heap-dump-native decoding. If no explicit
-	// GLabelsOffset is provided, ResolveLabels uses the verified layout
-	// table in internal/heaplabels.
-	HeapLabels heaplabels.Options
-}
-
-// ResolveLabels attaches labels to heap goroutines using the manifest as
-// the primary source and the goroutine pprof profile as a conservative
-// fallback. The function never panics on nil inputs; missing inputs are
-// reported through Warnings and the diagnostic counters.
+// ResolveLabels attaches labels to heap goroutines using heap-native
+// recovery as the primary exact source, labels.json as an exact fallback,
+// and the goroutine pprof profile as an opt-in best-effort fallback.
+//
+// The function never panics on nil inputs; missing inputs are reported
+// through Warnings and the diagnostic counters.
 func ResolveLabels(
 	snap *heapsnapshot.HeapSnapshot,
 	manifest *bubblelabels.Manifest,
 	prof *goroutineprofile.Profile,
 	opts Options,
 ) Resolution {
+	policy := opts.policy()
 	res := Resolution{
 		LabelsByGID:   make(map[uint64]map[string]string),
 		SourcesByGID:  make(map[uint64]Source),
 		AmbiguousGIDs: make(map[uint64]struct{}),
 	}
+	res.Diagnostics.Mode = opts.Source
+	res.Diagnostics.ProfileFallbackAllowed = policy.useProfile
+
 	if snap == nil {
 		res.Warnings = append(res.Warnings, "labelresolve: nil heap snapshot")
+		res.Diagnostics.Attribution = AttributionNone
 		return res
 	}
 	res.HeapGoroutines = len(snap.Goroutines)
@@ -115,7 +253,7 @@ func ResolveLabels(
 		heapIDs[g.ID] = struct{}{}
 	}
 
-	if !opts.DisableHeap && !opts.ManifestOnly && !opts.ProfileOnly {
+	if policy.useHeap {
 		heapRes, attempted, reason := resolveHeapLabels(snap, opts.HeapLabels)
 		if attempted {
 			for gid, labels := range heapRes.LabelsByGID {
@@ -126,6 +264,7 @@ func ResolveLabels(
 				res.SourcesByGID[gid] = SourceHeap
 				res.MatchedFromHeap++
 			}
+			res.Diagnostics.MissingStringBytes = heapRes.Stats.StringsMissing
 			if heapRes.Stats.GoroutinesFailed > 0 || heapRes.Stats.StringsMissing > 0 {
 				res.Warnings = append(res.Warnings,
 					fmt.Sprintf("heap label recovery decoded %d goroutines, failed %d, string bytes missing %d",
@@ -133,12 +272,20 @@ func ResolveLabels(
 						heapRes.Stats.GoroutinesFailed,
 						heapRes.Stats.StringsMissing))
 			}
-		} else if reason != "" {
-			res.Warnings = append(res.Warnings, reason)
+		} else {
+			res.Diagnostics.UnsupportedHeapLayout = true
+			res.Diagnostics.HeapLayoutReason = reason
+			if reason != "" {
+				res.Warnings = append(res.Warnings, reason)
+			}
+			if opts.RequireHeapLabels {
+				res.Warnings = append(res.Warnings,
+					"heap-native labels required but unavailable; no labels were assigned from heap.dump")
+			}
 		}
 	}
 
-	if manifest != nil && !opts.HeapOnly && !opts.ProfileOnly {
+	if policy.useManifest && manifest != nil {
 		res.ManifestSize = len(manifest.Goroutines)
 		for _, e := range manifest.Goroutines {
 			if _, ok := heapIDs[e.ID]; !ok {
@@ -160,32 +307,37 @@ func ResolveLabels(
 			res.LabelsByGID[e.ID] = copyLabels(e.Labels)
 			res.SourcesByGID[e.ID] = SourceManifest
 		}
+	} else if manifest != nil {
+		res.ManifestSize = len(manifest.Goroutines)
 	}
 
 	if prof != nil {
 		res.ProfileSamples = len(prof.Goroutines)
 	}
-	if prof == nil || opts.ManifestOnly || opts.DisableProfile || opts.HeapOnly {
-		// All remaining heap goroutines stay unlabeled.
+
+	if !policy.useProfile || prof == nil {
+		if opts.Source == SourceModeAuto && !opts.AllowProfileFallback && prof != nil && hasLabeledSamples(prof) {
+			res.Warnings = append(res.Warnings,
+				"goroutine.pprof contains labeled samples but profile fallback is disabled (pass --allow-profile-fallback or --labels-source=profile to opt in; it is best-effort because the profile is not stop-the-world coherent with heap.dump)")
+		}
 		for id := range heapIDs {
 			if _, ok := res.LabelsByGID[id]; !ok {
 				res.UnmatchedHeap++
 			}
 		}
+		finalizeDiagnostics(&res, policy)
 		return res
 	}
 
-	// Step 1: try direct goroutine ID labels in the pprof profile. The
-	// Go runtime does not currently emit one, but third-party
-	// instrumentation may. This step costs almost nothing and is exact
-	// when present.
+	// Profile fallback path.
+	res.Diagnostics.ProfileFallbackUsed = true
 	matchedSamples := make(map[int]bool, len(prof.Goroutines))
 	for idx, sample := range prof.Goroutines {
 		if id, ok := sampleGoroutineID(sample); ok {
 			if _, inHeap := heapIDs[id]; !inHeap {
 				continue
 			}
-			if _, alreadyManifest := res.LabelsByGID[id]; alreadyManifest {
+			if _, alreadyResolved := res.LabelsByGID[id]; alreadyResolved {
 				matchedSamples[idx] = true
 				continue
 			}
@@ -196,9 +348,6 @@ func ResolveLabels(
 		}
 	}
 
-	// Step 2: bucket unlabeled heap goroutines by stack signature, and
-	// labeled profile samples by stack signature, then match
-	// conservatively.
 	type heapBucket struct{ ids []uint64 }
 	heapBySig := make(map[string]*heapBucket)
 	for _, g := range snap.Goroutines {
@@ -250,8 +399,6 @@ func ResolveLabels(
 		if !ok {
 			continue
 		}
-		// Combine label sets into a single canonical map if they all
-		// agree. If they disagree we mark the bucket ambiguous.
 		if !sameLabelSets(pb.labelSets) {
 			for _, gid := range hb.ids {
 				res.AmbiguousGIDs[gid] = struct{}{}
@@ -260,9 +407,6 @@ func ResolveLabels(
 			continue
 		}
 		labels := pb.labelSets[0]
-		// Conservative rule: either one heap goroutine and one
-		// profile sample with count==1, or N heap goroutines and a
-		// profile total of N with one consistent label set.
 		switch {
 		case len(hb.ids) == 1 && pb.count == 1:
 			res.LabelsByGID[hb.ids[0]] = copyLabels(labels)
@@ -277,8 +421,6 @@ func ResolveLabels(
 			}
 			pb.matchedAlready = true
 		default:
-			// Counts disagree: do not guess. Mark heap goroutines
-			// ambiguous so diagnostics surface the case.
 			for _, gid := range hb.ids {
 				res.AmbiguousGIDs[gid] = struct{}{}
 			}
@@ -296,8 +438,49 @@ func ResolveLabels(
 			res.UnmatchedProfile += len(b.sampleIdxs)
 		}
 	}
+	if res.MatchedFromProfile > 0 {
+		res.Warnings = append(res.Warnings,
+			"goroutine.pprof fallback used: profile is best-effort and may not correspond to heap-dump goroutine state")
+	}
 
+	finalizeDiagnostics(&res, policy)
 	return res
+}
+
+func finalizeDiagnostics(res *Resolution, policy effectivePolicy) {
+	d := &res.Diagnostics
+	d.HeapNativeMatches = res.MatchedFromHeap
+	d.ManifestMatches = res.MatchedFromManifest
+	d.ProfileMatches = res.MatchedFromProfile
+	d.AmbiguousProfileMatches = res.AmbiguousMatches
+	d.UnmatchedHeapGoroutines = res.UnmatchedHeap
+	d.UnmatchedProfileSamples = res.UnmatchedProfile
+
+	switch {
+	case res.MatchedFromProfile > 0:
+		d.Attribution = AttributionBestEffortProfile
+	case res.MatchedFromHeap > 0 && res.MatchedFromManifest > 0:
+		d.Attribution = AttributionMixedExact
+	case res.MatchedFromHeap > 0:
+		d.Attribution = AttributionHeapNative
+	case res.MatchedFromManifest > 0:
+		d.Attribution = AttributionManifest
+	default:
+		d.Attribution = AttributionNone
+	}
+	_ = policy
+}
+
+func hasLabeledSamples(prof *goroutineprofile.Profile) bool {
+	if prof == nil {
+		return false
+	}
+	for _, s := range prof.Goroutines {
+		if len(s.Labels) > 0 || len(s.Numeric) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveHeapLabels(snap *heapsnapshot.HeapSnapshot, opts heaplabels.Options) (heaplabels.Result, bool, string) {
@@ -374,8 +557,11 @@ func normalizeFuncName(name string) string {
 // sampleGoroutineID returns the goroutine ID encoded in the sample's
 // labels under a small set of well-known keys. It returns (0, false)
 // when no such label is present.
+//
+// These keys are correlation-only; callers must drop them before
+// exposing labels as bubble identity.
 func sampleGoroutineID(s goroutineprofile.GoroutineSample) (uint64, bool) {
-	for _, k := range [...]string{"goid", "goroutine_id", "goroutine"} {
+	for _, k := range correlationLabelKeys {
 		if v, ok := s.Labels[k]; ok {
 			if id, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil && id != 0 {
 				return id, true
@@ -386,6 +572,21 @@ func sampleGoroutineID(s goroutineprofile.GoroutineSample) (uint64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// correlationLabelKeys are profile-only label keys that identify the
+// goroutine itself. They must not be exposed as bubble identity.
+var correlationLabelKeys = [...]string{"goid", "goroutine_id", "goroutine"}
+
+// IsCorrelationLabelKey reports whether a label key is a profile
+// correlation marker (e.g. "goid") rather than a real bubble label.
+func IsCorrelationLabelKey(key string) bool {
+	for _, k := range correlationLabelKeys {
+		if key == k {
+			return true
+		}
+	}
+	return false
 }
 
 func sameLabelSets(sets []map[string]string) bool {
