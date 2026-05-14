@@ -219,6 +219,57 @@ func TestParseGoroutineAndStackFrames(t *testing.T) {
 	}
 }
 
+// Stack frame pointer slot addresses must be recorded as sp + offset so
+// downstream tooling can attribute roots to specific stack locations.
+func TestParseStackFrameRecordsPointerSlots(t *testing.T) {
+	buf := newSyntheticBuffer()
+
+	writeUvarint(buf, tagGoroutine)
+	writeUvarint(buf, 0xaa00) // addr
+	writeUvarint(buf, 0xbb00) // sp
+	writeUvarint(buf, 1)      // goid
+	writeUvarint(buf, 0)
+	writeUvarint(buf, 0)
+	writeBool(buf, false)
+	writeBool(buf, false)
+	writeUvarint(buf, 0)
+	writeString(buf, "")
+	writeUvarint(buf, 0)
+	writeUvarint(buf, 0)
+	writeUvarint(buf, 0)
+	writeUvarint(buf, 0)
+
+	frameContents := make([]byte, 24)
+	binary.LittleEndian.PutUint64(frameContents[0:8], 0x3000)
+	binary.LittleEndian.PutUint64(frameContents[16:24], 0x4000)
+	writeUvarint(buf, tagStackFrame)
+	writeUvarint(buf, 0xbb00) // sp — anchor for slot addresses
+	writeUvarint(buf, 0)
+	writeUvarint(buf, 0)
+	writeBytes(buf, frameContents)
+	writeUvarint(buf, 0)
+	writeUvarint(buf, 0)
+	writeUvarint(buf, 0)
+	writeString(buf, "main.f")
+	writeFieldList(buf, []heapsnapshot.Field{
+		{Kind: heapsnapshot.FieldKindPtr, Offset: 0},
+		{Kind: heapsnapshot.FieldKindPtr, Offset: 16},
+	})
+	writeUvarint(buf, tagEOF)
+
+	snap, err := Parse(buf, Options{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	frame := snap.Goroutines[0].Frames[0]
+	if got, want := frame.PointerAddrs, []uint64{0x3000, 0x4000}; !equalUint64(got, want) {
+		t.Fatalf("PointerAddrs = %v, want %v", got, want)
+	}
+	if got, want := frame.PointerSlots, []uint64{0xbb00, 0xbb10}; !equalUint64(got, want) {
+		t.Fatalf("PointerSlots = %v, want %v (sp + offset)", got, want)
+	}
+}
+
 func TestParseDataAndBSSGlobals(t *testing.T) {
 	buf := newSyntheticBuffer()
 
@@ -257,7 +308,7 @@ func TestParseDataAndBSSGlobals(t *testing.T) {
 	if snap.Globals[0].Kind != "data" || snap.Globals[0].Addr != 0xd000 || snap.Globals[0].PointerAddr != 0x9100 {
 		t.Fatalf("data root = %+v", snap.Globals[0])
 	}
-	if snap.Globals[2].Kind != "bss" || snap.Globals[2].Addr != 0xe000 {
+	if snap.Globals[2].Kind != "bss" || snap.Globals[2].Addr != 0xe000 || snap.Globals[2].PointerAddr != 0x9100 {
 		t.Fatalf("bss root = %+v", snap.Globals[2])
 	}
 }
@@ -338,12 +389,51 @@ func TestParseTypeAndItab(t *testing.T) {
 	}
 }
 
-func TestParseUnknownTagFails(t *testing.T) {
+// In strict mode an unknown tag is a hard error.
+func TestParseUnknownTagStrictFails(t *testing.T) {
 	buf := newSyntheticBuffer()
 	writeUvarint(buf, 99) // unknown
-	_, err := Parse(buf, Options{})
+	_, err := Parse(buf, Options{Strict: true})
 	if err == nil || !strings.Contains(err.Error(), "unknown record tag") {
 		t.Fatalf("got err=%v, want unknown record tag", err)
+	}
+}
+
+// In non-strict mode an unknown tag stops parsing but returns the partial
+// snapshot with a warning and an UnknownRecords counter increment. This
+// keeps the tool usable when a future Go runtime adds a new heap-dump
+// record type.
+func TestParseUnknownTagNonStrictWarns(t *testing.T) {
+	buf := newSyntheticBuffer()
+
+	// One real object, then an unknown tag, then content the parser will
+	// never reach.
+	writeUvarint(buf, tagObject)
+	writeUvarint(buf, 0x1000)
+	writeBytes(buf, make([]byte, 8))
+	writeFieldList(buf, nil)
+
+	writeUvarint(buf, 99) // unknown
+	writeUvarint(buf, 0xdead)
+
+	snap, err := Parse(buf, Options{})
+	if err != nil {
+		t.Fatalf("non-strict parse should not error on unknown tag: %v", err)
+	}
+	if len(snap.Objects) != 1 {
+		t.Fatalf("expected the pre-unknown-tag object to be preserved, got %d objects", len(snap.Objects))
+	}
+	if snap.Stats.UnknownRecords != 1 {
+		t.Fatalf("UnknownRecords = %d, want 1", snap.Stats.UnknownRecords)
+	}
+	found := false
+	for _, w := range snap.Warnings {
+		if strings.Contains(w, "unknown record tag 99") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected unknown-tag warning, got %v", snap.Warnings)
 	}
 }
 
@@ -360,8 +450,8 @@ func TestParseOutOfBoundsPointerWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(snap.Warnings) == 0 {
-		t.Fatalf("expected at least one warning, got none")
+	if !hasParseWarning(snap.Warnings, "out of bounds") {
+		t.Fatalf("expected out-of-bounds warning, got %v", snap.Warnings)
 	}
 }
 
@@ -378,8 +468,8 @@ func TestParsePointerOffsetOverflowWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(snap.Warnings) == 0 {
-		t.Fatalf("expected at least one warning, got none")
+	if !hasParseWarning(snap.Warnings, "out of bounds") {
+		t.Fatalf("expected out-of-bounds warning, got %v", snap.Warnings)
 	}
 }
 

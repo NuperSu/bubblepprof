@@ -44,11 +44,17 @@ type Graph struct {
 	ranges []ObjectRange
 }
 
-// FindObjectContaining resolves a pointer value to the object that
-// contains it. The lookup supports interior pointers: a pointer somewhere
-// inside an object's payload still resolves to that object.
+// validID reports whether id is a valid index into g.Objects.
+func (g *Graph) validID(id ObjectID) bool {
+	return g != nil && int(id) < len(g.Objects)
+}
+
+// FindObjectContaining resolves a non-zero pointer value to the object
+// that contains it. The lookup supports interior pointers: a pointer
+// somewhere inside an object's payload still resolves to that object.
+// Address zero is treated as nil and never resolves.
 func (g *Graph) FindObjectContaining(ptr uint64) (ObjectID, bool) {
-	if g == nil {
+	if g == nil || ptr == 0 {
 		return 0, false
 	}
 	if id, ok := g.ByAddr[ptr]; ok {
@@ -71,16 +77,20 @@ func (g *Graph) FindObjectContaining(ptr uint64) (ObjectID, bool) {
 }
 
 // AddEdge records a child edge from -> to. Duplicate edges are dropped.
-// Self-edges are allowed (the runtime can produce self-referential
-// objects, e.g. via cycles).
-func (g *Graph) AddEdge(from, to ObjectID) {
+// Self-edges are allowed. Returns true when a new edge was actually
+// appended. Returns false on invalid IDs (no panic) or duplicates.
+func (g *Graph) AddEdge(from, to ObjectID) bool {
+	if !g.validID(from) || !g.validID(to) {
+		return false
+	}
 	children := g.Objects[from].Children
 	for _, existing := range children {
 		if existing == to {
-			return
+			return false
 		}
 	}
 	g.Objects[from].Children = append(children, to)
+	return true
 }
 
 // RootRef is one resolved pointer from a stack frame, global root, or
@@ -95,10 +105,18 @@ type RootRef struct {
 
 // GoroutineReachability is the reachability set rooted at a single
 // goroutine's stack roots.
+//
+// IsSystem and IsBackground are forwarded from the parsed goroutine
+// record. Runtime-internal goroutines (g0, GC workers, the finalizer
+// goroutine, etc.) hold pointers into runtime metadata that can pollute
+// per-goroutine attribution if folded into user-visible bubbles. Phase 4
+// keeps them in the analysis but tags them so later phases can filter.
 type GoroutineReachability struct {
-	GoroutineID uint64
-	Roots       []RootRef
-	Reachable   map[ObjectID]struct{}
+	GoroutineID  uint64
+	IsSystem     bool
+	IsBackground bool
+	Roots        []RootRef
+	Reachable    map[ObjectID]struct{}
 }
 
 // GlobalReachability is the reachability set rooted at process-wide
@@ -120,17 +138,46 @@ type Analysis struct {
 }
 
 // Stats aggregates counters across the analysis.
+//
+// Pointer accounting (object pointer slots):
+//
+//	RawObjectPointers       = total pointer values seen in object slots,
+//	                          including zero pointers
+//	ZeroObjectPointers      = how many of those were zero (nil)
+//	ResolvedObjectPointers  = non-zero pointers that resolved to a heap
+//	                          object (pre-dedup)
+//	UnresolvedObjectPointers = non-zero pointers that did not resolve
+//	Edges                   = deduplicated child edges in the graph
+//
+// Invariant:
+//
+//	RawObjectPointers = ZeroObjectPointers + ResolvedObjectPointers + UnresolvedObjectPointers
+//
+// (Iface/eface fields are tracked at the parser level — see
+// ParseStats.InterfaceFieldsSkipped / EfaceFieldsSkipped — and never reach
+// the graph builder, so they do not appear in this equation.)
+//
+// Root accounting tracks unresolved root pointers separately by source
+// category so it is clear whether missing reachability is due to objects,
+// goroutine stacks, globals, or finalizers.
 type Stats struct {
-	Objects             int
-	ObjectBytes         uint64
-	Edges               int
-	RawObjectPointers   int
-	ResolvedObjectEdges int
-	UnresolvedPointers  int
+	Objects                int
+	ObjectBytes            uint64
+	Edges                  int
+	RawObjectPointers      int
+	ZeroObjectPointers     int
+	ResolvedObjectPointers int
 
-	Goroutines     int
-	GoroutineRoots int
-	GlobalRoots    int
+	UnresolvedPointers       int
+	UnresolvedObjectPointers int
+	UnresolvedGoroutineRoots int
+	UnresolvedGlobalRoots    int
+	UnresolvedFinalizerRoots int
+
+	Goroutines            int
+	SystemGoroutines      int
+	GoroutineRootPointers int
+	GlobalRoots           int
 
 	GoroutineReachableObjects int
 	GlobalReachableObjects    int

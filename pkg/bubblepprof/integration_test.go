@@ -14,6 +14,7 @@ import (
 
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/snapshot"
+	"bubblepprof/internal/snapshotgraph"
 	"bubblepprof/internal/snapshotparse"
 )
 
@@ -108,5 +109,47 @@ func TestRuntimeSnapshotCaptureIntegration(t *testing.T) {
 	}
 	if snap.Stats.StackFrameCount == 0 {
 		t.Fatal("expected at least one stack frame")
+	}
+
+	// Phase 4: building the snapshot graph must succeed and expose
+	// non-degenerate counters. Exact reachability counts are runtime
+	// version dependent and are not asserted.
+	analysis, err := snapshotgraph.Build(snap, snapshotgraph.Options{})
+	if err != nil {
+		t.Fatalf("build snapshot graph: %v", err)
+	}
+	if analysis.Stats.Objects == 0 {
+		t.Fatal("graph has no objects")
+	}
+	if analysis.Stats.Goroutines == 0 {
+		t.Fatal("graph has no goroutines")
+	}
+	hasRootsOrFrames := false
+	for _, gr := range analysis.Goroutines {
+		if len(gr.Roots) > 0 {
+			hasRootsOrFrames = true
+			break
+		}
+	}
+	if !hasRootsOrFrames {
+		// fall back to checking the parsed snapshot, in case the runtime
+		// emitted frames without typed pointer slots.
+		for _, gr := range snap.Goroutines {
+			if len(gr.Frames) > 0 {
+				hasRootsOrFrames = true
+				break
+			}
+		}
+	}
+	if !hasRootsOrFrames {
+		t.Fatal("expected at least one goroutine with roots or frames")
+	}
+	if got, want := analysis.Stats.UnreachableObjects+analysis.Stats.GoroutineReachableObjects, analysis.Stats.Objects; got < want-analysis.Stats.GlobalReachableObjects {
+		// sanity: unreachable + any reachable should account for all objects
+		t.Fatalf("reachable accounting is degenerate: objects=%d unreachable=%d goroutine-reachable=%d global-reachable=%d",
+			analysis.Stats.Objects,
+			analysis.Stats.UnreachableObjects,
+			analysis.Stats.GoroutineReachableObjects,
+			analysis.Stats.GlobalReachableObjects)
 	}
 }

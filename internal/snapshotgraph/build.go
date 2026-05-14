@@ -12,6 +12,10 @@ import (
 // pointer values to object IDs (supporting interior pointers), builds
 // graph edges with deduplication, extracts goroutine and global roots,
 // and computes per-goroutine and process-global reachability.
+//
+// Parser-level warnings from snap.Warnings are forwarded to
+// Analysis.Warnings with a "parse: " prefix so downstream consumers see
+// every recoverable problem in one place.
 func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	if snap == nil {
 		return nil, fmt.Errorf("snapshotgraph: snapshot is nil")
@@ -22,18 +26,57 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	}
 	a := &Analysis{Graph: g}
 
+	for _, w := range snap.Warnings {
+		a.Warnings = append(a.Warnings, "parse: "+w)
+	}
+	if iface, eface := snap.Stats.InterfaceFieldsSkipped, snap.Stats.EfaceFieldsSkipped; iface+eface > 0 {
+		a.Warnings = append(a.Warnings,
+			fmt.Sprintf("parse: %d interface and %d eface fields were preserved but not decoded into graph edges",
+				iface, eface))
+	}
+
+	zeroAddrWarned := false
 	zeroSizedWarned := false
 	for i := range snap.Objects {
 		src := &snap.Objects[i]
-		if existing, ok := g.ByAddr[src.Addr]; ok && src.Addr != 0 {
+
+		// Address 0 cannot be used for lookup (would alias with nil
+		// pointers). Keep the object in the graph for completeness, but
+		// do not add it to ByAddr or ranges.
+		if src.Addr == 0 {
+			id := ObjectID(len(g.Objects))
+			ptrs := append([]uint64(nil), src.PointerAddrs...)
+			g.Objects = append(g.Objects, Object{
+				ID:           id,
+				Addr:         0,
+				Size:         src.Size,
+				PointerAddrs: ptrs,
+			})
+			if !zeroAddrWarned {
+				a.Warnings = append(a.Warnings, "object with address 0 ignored for direct lookup")
+				zeroAddrWarned = true
+			}
+			continue
+		}
+
+		if existing, ok := g.ByAddr[src.Addr]; ok {
 			a.Warnings = append(a.Warnings,
 				fmt.Sprintf("duplicate object address 0x%x (existing ID %d)",
 					src.Addr, existing))
 			if opts.Strict {
 				return nil, fmt.Errorf("duplicate object address 0x%x", src.Addr)
 			}
+			id := ObjectID(len(g.Objects))
+			ptrs := append([]uint64(nil), src.PointerAddrs...)
+			g.Objects = append(g.Objects, Object{
+				ID:           id,
+				Addr:         src.Addr,
+				Size:         src.Size,
+				PointerAddrs: ptrs,
+			})
 			continue
 		}
+
 		id := ObjectID(len(g.Objects))
 		ptrs := append([]uint64(nil), src.PointerAddrs...)
 		g.Objects = append(g.Objects, Object{
@@ -68,14 +111,20 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	sort.Slice(g.ranges, func(i, j int) bool {
 		return g.ranges[i].Start < g.ranges[j].Start
 	})
-	for i := 1; i < len(g.ranges); i++ {
-		prev, cur := g.ranges[i-1], g.ranges[i]
-		if cur.Start < prev.End {
-			a.Warnings = append(a.Warnings,
-				fmt.Sprintf("overlapping object ranges: 0x%x..0x%x and 0x%x..0x%x",
-					prev.Start, prev.End, cur.Start, cur.End))
-			if opts.Strict {
-				return nil, fmt.Errorf("overlapping object ranges at 0x%x", cur.Start)
+	if len(g.ranges) > 0 {
+		maxEndRange := g.ranges[0]
+		for i := 1; i < len(g.ranges); i++ {
+			cur := g.ranges[i]
+			if cur.Start < maxEndRange.End {
+				a.Warnings = append(a.Warnings,
+					fmt.Sprintf("overlapping object ranges: 0x%x..0x%x and 0x%x..0x%x",
+						maxEndRange.Start, maxEndRange.End, cur.Start, cur.End))
+				if opts.Strict {
+					return nil, fmt.Errorf("overlapping object ranges at 0x%x", cur.Start)
+				}
+			}
+			if cur.End > maxEndRange.End {
+				maxEndRange = cur
 			}
 		}
 	}
@@ -85,14 +134,15 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		for _, ptr := range obj.PointerAddrs {
 			a.Stats.RawObjectPointers++
 			if ptr == 0 {
+				a.Stats.ZeroObjectPointers++
 				continue
 			}
 			targetID, ok := g.FindObjectContaining(ptr)
 			if !ok {
-				a.Stats.UnresolvedPointers++
+				a.Stats.UnresolvedObjectPointers++
 				continue
 			}
-			a.Stats.ResolvedObjectEdges++
+			a.Stats.ResolvedObjectPointers++
 			g.AddEdge(obj.ID, targetID)
 		}
 	}
@@ -107,53 +157,84 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		var roots []RootRef
 		for fi := range gr.Frames {
 			fr := &gr.Frames[fi]
-			for _, ptr := range fr.PointerAddrs {
+			for pi, ptr := range fr.PointerAddrs {
 				if ptr == 0 {
 					continue
 				}
 				targetID, ok := g.FindObjectContaining(ptr)
 				if !ok {
-					a.Stats.UnresolvedPointers++
+					a.Stats.UnresolvedGoroutineRoots++
 					continue
+				}
+				var slot uint64
+				if pi < len(fr.PointerSlots) {
+					slot = fr.PointerSlots[pi]
 				}
 				roots = append(roots, RootRef{
 					ObjectID: targetID,
 					Ptr:      ptr,
+					SlotAddr: slot,
 					Kind:     "stack",
 					Detail:   fr.FuncName,
 				})
 			}
 		}
 		a.Goroutines = append(a.Goroutines, GoroutineReachability{
-			GoroutineID: gr.ID,
-			Roots:       roots,
+			GoroutineID:  gr.ID,
+			IsSystem:     gr.IsSystem,
+			IsBackground: gr.IsBackground,
+			Roots:        roots,
 		})
-		a.Stats.GoroutineRoots += len(roots)
+		if gr.IsSystem {
+			a.Stats.SystemGoroutines++
+		}
+		a.Stats.GoroutineRootPointers += len(roots)
 	}
 	a.Stats.Goroutines = len(a.Goroutines)
 
 	var globalRoots []RootRef
-	for _, r := range snap.Globals {
-		ptr := r.PointerAddr
+	type globalRootKey struct {
+		kind   string
+		ptr    uint64
+		slot   uint64
+		detail string
+	}
+	seenGlobalRoots := map[globalRootKey]struct{}{}
+	resolveGlobalRoot := func(kind string, ptr, slot uint64, detail string) {
 		if ptr == 0 {
-			continue
+			return
 		}
-		targetID, ok := g.FindObjectContaining(ptr)
-		if !ok {
-			a.Stats.UnresolvedPointers++
-			continue
-		}
-		kind := r.Kind
 		if kind == "" {
 			kind = "otherroot"
+		}
+		key := globalRootKey{kind: kind, ptr: ptr, slot: slot, detail: detail}
+		if _, ok := seenGlobalRoots[key]; ok {
+			return
+		}
+		seenGlobalRoots[key] = struct{}{}
+
+		targetID, ok := g.FindObjectContaining(ptr)
+		if !ok {
+			a.Stats.UnresolvedGlobalRoots++
+			return
 		}
 		globalRoots = append(globalRoots, RootRef{
 			ObjectID: targetID,
 			Ptr:      ptr,
-			SlotAddr: r.Addr,
+			SlotAddr: slot,
 			Kind:     kind,
-			Detail:   r.Description,
+			Detail:   detail,
 		})
+	}
+
+	for _, r := range snap.Globals {
+		resolveGlobalRoot(r.Kind, r.PointerAddr, r.Addr, r.Description)
+	}
+	for _, seg := range snap.Data {
+		addSegmentGlobalRoots(seg, "data", resolveGlobalRoot)
+	}
+	for _, seg := range snap.BSS {
+		addSegmentGlobalRoots(seg, "bss", resolveGlobalRoot)
 	}
 	for _, fin := range snap.Finalizers {
 		ptr := fin.ObjectAddr
@@ -162,7 +243,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		}
 		targetID, ok := g.FindObjectContaining(ptr)
 		if !ok {
-			a.Stats.UnresolvedPointers++
+			a.Stats.UnresolvedFinalizerRoots++
 			continue
 		}
 		globalRoots = append(globalRoots, RootRef{
@@ -178,7 +259,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		}
 		targetID, ok := g.FindObjectContaining(ptr)
 		if !ok {
-			a.Stats.UnresolvedPointers++
+			a.Stats.UnresolvedFinalizerRoots++
 			continue
 		}
 		globalRoots = append(globalRoots, RootRef{
@@ -194,6 +275,12 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		a.Goroutines[i].Reachable = ReachableFrom(g, a.Goroutines[i].Roots)
 	}
 	a.Globals.Reachable = ReachableFrom(g, a.Globals.Roots)
+
+	a.Stats.UnresolvedPointers =
+		a.Stats.UnresolvedObjectPointers +
+			a.Stats.UnresolvedGoroutineRoots +
+			a.Stats.UnresolvedGlobalRoots +
+			a.Stats.UnresolvedFinalizerRoots
 
 	a.Stats.Objects = len(g.Objects)
 	var bytes uint64
@@ -230,4 +317,36 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	a.Stats.UnreachableObjects = unreachable
 
 	return a, nil
+}
+
+func addSegmentGlobalRoots(seg heapsnapshot.DataSegment, defaultKind string, add func(kind string, ptr, slot uint64, detail string)) {
+	kind := seg.Kind
+	if kind == "" {
+		kind = defaultKind
+	}
+	slots := dataSegmentPointerSlots(seg)
+	for i, ptr := range seg.PointerAddrs {
+		var slot uint64
+		if i < len(slots) {
+			slot = slots[i]
+		}
+		add(kind, ptr, slot, "")
+	}
+}
+
+func dataSegmentPointerSlots(seg heapsnapshot.DataSegment) []uint64 {
+	if len(seg.Fields) == 0 {
+		return nil
+	}
+	slots := make([]uint64, 0, len(seg.PointerAddrs))
+	for _, f := range seg.Fields {
+		if f.Kind != heapsnapshot.FieldKindPtr {
+			continue
+		}
+		slots = append(slots, seg.Addr+f.Offset)
+		if len(slots) == len(seg.PointerAddrs) {
+			break
+		}
+	}
+	return slots
 }

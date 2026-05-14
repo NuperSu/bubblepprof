@@ -121,6 +121,13 @@ type Goroutine struct {
 }
 
 // StackFrame is one frame within a goroutine's stack.
+//
+// PointerAddrs holds the decoded pointer values; PointerSlots holds the
+// stack slot address (SP + field offset) where each pointer was read.
+// The two slices are parallel and have equal length when the parser
+// recorded slot addresses; consumers should range over PointerAddrs and
+// only read PointerSlots[i] if i is in bounds, in case a future parser
+// stops emitting slots for some frames.
 type StackFrame struct {
 	SP         uint64
 	Depth      uint64
@@ -133,6 +140,7 @@ type StackFrame struct {
 	Size         uint64
 	Fields       []Field
 	PointerAddrs []uint64
+	PointerSlots []uint64
 }
 
 // Root represents a single root pointer attribution. The address is the
@@ -203,4 +211,11 @@ type ParseStats struct {
 	MemProfCount     int
 	AllocSampleCount int
 	UnknownRecords   int
+
+	// Iface/eface fields the parser saw but did not decode into
+	// PointerAddrs because their data word is type-tag dependent. These
+	// counters surface a confidence gap before higher phases build bubble
+	// reports.
+	InterfaceFieldsSkipped int
+	EfaceFieldsSkipped     int
 }
