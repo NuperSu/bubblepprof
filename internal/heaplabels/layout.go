@@ -41,6 +41,39 @@ type Options struct {
 	MaxStringLen uint64
 }
 
+type LayoutEntry struct {
+	VersionPrefix string
+	GOARCH        string
+	PtrSize       int
+	GLabelsOffset uint64
+}
+
+var verifiedLayouts = []LayoutEntry{
+	// Verified with cmd/labeloffsetprobe on linux/amd64:
+	// go version go1.26.3-X:nodwarf5 linux/amd64.
+	{
+		VersionPrefix: "go1.26.",
+		GOARCH:        "amd64",
+		PtrSize:       8,
+		GLabelsOffset: 0x160,
+	},
+}
+
+func LookupGLabelsOffset(snap *heapsnapshot.HeapSnapshot) (uint64, bool) {
+	if snap == nil {
+		return 0, false
+	}
+	for _, e := range verifiedLayouts {
+		if e.GOARCH != snap.Params.GOARCH || e.PtrSize != snap.Params.PtrSize {
+			continue
+		}
+		if hasVersionPrefix(snap.Params.BuildVersion, e.VersionPrefix) {
+			return e.GLabelsOffset, true
+		}
+	}
+	return 0, false
+}
+
 func LayoutFromSnapshot(snap *heapsnapshot.HeapSnapshot, gLabelsOffset uint64) (Layout, bool) {
 	if snap == nil {
 		return Layout{}, false
@@ -85,4 +118,11 @@ func normalizeOptions(opts Options) Options {
 		opts.MaxStringLen = DefaultMaxStringLen
 	}
 	return opts
+}
+
+func hasVersionPrefix(version, prefix string) bool {
+	if len(version) < len(prefix) {
+		return false
+	}
+	return version[:len(prefix)] == prefix
 }

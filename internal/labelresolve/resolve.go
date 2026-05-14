@@ -12,6 +12,7 @@ import (
 
 	"bubblepprof/internal/bubblelabels"
 	"bubblepprof/internal/goroutineprofile"
+	"bubblepprof/internal/heaplabels"
 	"bubblepprof/internal/heapsnapshot"
 )
 
@@ -23,6 +24,9 @@ const (
 	SourceNone Source = iota
 	// SourceManifest means labels came from labels.json.
 	SourceManifest
+	// SourceHeap means labels came from runtime.g.labels decoded out of
+	// the same heap.dump used for reachability.
+	SourceHeap
 	// SourceProfileID means labels came from a pprof sample carrying a
 	// "goid"/"goroutine" numeric or string label.
 	SourceProfileID
@@ -33,6 +37,8 @@ const (
 
 func (s Source) String() string {
 	switch s {
+	case SourceHeap:
+		return "heap.dump"
 	case SourceManifest:
 		return "labels.json"
 	case SourceProfileID:
@@ -56,6 +62,7 @@ type Resolution struct {
 	ManifestSize   int
 
 	MatchedFromManifest int
+	MatchedFromHeap     int
 	MatchedFromProfile  int
 	UnmatchedHeap       int
 	UnmatchedProfile    int
@@ -66,10 +73,21 @@ type Resolution struct {
 
 // Options tunes ResolveLabels.
 type Options struct {
+	// DisableHeap turns off runtime.g.labels heap-dump-native recovery.
+	DisableHeap bool
+	// HeapOnly refuses all non-heap label sources.
+	HeapOnly bool
 	// DisableProfile turns off best-effort pprof correlation entirely.
 	DisableProfile bool
 	// ManifestOnly is a stronger flag: refuse all non-manifest sources.
 	ManifestOnly bool
+	// ProfileOnly refuses heap and manifest labels and uses only
+	// best-effort pprof profile correlation.
+	ProfileOnly bool
+	// HeapLabels configures heap-dump-native decoding. If no explicit
+	// GLabelsOffset is provided, ResolveLabels uses the verified layout
+	// table in internal/heaplabels.
+	HeapLabels heaplabels.Options
 }
 
 // ResolveLabels attaches labels to heap goroutines using the manifest as
@@ -97,12 +115,40 @@ func ResolveLabels(
 		heapIDs[g.ID] = struct{}{}
 	}
 
-	if manifest != nil {
+	if !opts.DisableHeap && !opts.ManifestOnly && !opts.ProfileOnly {
+		heapRes, attempted, reason := resolveHeapLabels(snap, opts.HeapLabels)
+		if attempted {
+			for gid, labels := range heapRes.LabelsByGID {
+				if _, ok := heapIDs[gid]; !ok {
+					continue
+				}
+				res.LabelsByGID[gid] = copyLabels(labels)
+				res.SourcesByGID[gid] = SourceHeap
+				res.MatchedFromHeap++
+			}
+			if heapRes.Stats.GoroutinesFailed > 0 || heapRes.Stats.StringsMissing > 0 {
+				res.Warnings = append(res.Warnings,
+					fmt.Sprintf("heap label recovery decoded %d goroutines, failed %d, string bytes missing %d",
+						heapRes.Stats.GoroutinesDecoded,
+						heapRes.Stats.GoroutinesFailed,
+						heapRes.Stats.StringsMissing))
+			}
+		} else if reason != "" {
+			res.Warnings = append(res.Warnings, reason)
+		}
+	}
+
+	if manifest != nil && !opts.HeapOnly && !opts.ProfileOnly {
 		res.ManifestSize = len(manifest.Goroutines)
 		for _, e := range manifest.Goroutines {
 			if _, ok := heapIDs[e.ID]; !ok {
 				res.Warnings = append(res.Warnings,
 					fmt.Sprintf("manifest goroutine %d not present in heap dump", e.ID))
+				continue
+			}
+			if source, dup := res.SourcesByGID[e.ID]; dup {
+				res.Warnings = append(res.Warnings,
+					fmt.Sprintf("manifest entry for goroutine %d ignored; labels already resolved from %s", e.ID, source))
 				continue
 			}
 			if _, dup := res.LabelsByGID[e.ID]; dup {
@@ -119,7 +165,7 @@ func ResolveLabels(
 	if prof != nil {
 		res.ProfileSamples = len(prof.Goroutines)
 	}
-	if prof == nil || opts.ManifestOnly || opts.DisableProfile {
+	if prof == nil || opts.ManifestOnly || opts.DisableProfile || opts.HeapOnly {
 		// All remaining heap goroutines stay unlabeled.
 		for id := range heapIDs {
 			if _, ok := res.LabelsByGID[id]; !ok {
@@ -172,9 +218,9 @@ func ResolveLabels(
 	}
 
 	type profileBucket struct {
-		count        int64
-		labelSets    []map[string]string
-		sampleIdxs   []int
+		count          int64
+		labelSets      []map[string]string
+		sampleIdxs     []int
 		matchedAlready bool
 	}
 	profBySig := make(map[string]*profileBucket)
@@ -252,6 +298,34 @@ func ResolveLabels(
 	}
 
 	return res
+}
+
+func resolveHeapLabels(snap *heapsnapshot.HeapSnapshot, opts heaplabels.Options) (heaplabels.Result, bool, string) {
+	if snap == nil {
+		return heaplabels.Result{}, false, "heap label recovery skipped: nil heap snapshot"
+	}
+	if !hasObjectContents(snap) {
+		return heaplabels.Result{}, false, "heap label recovery skipped: heap object contents were not retained"
+	}
+	if !opts.HasGLabelsOffset {
+		off, ok := heaplabels.LookupGLabelsOffset(snap)
+		if !ok {
+			return heaplabels.Result{}, false, fmt.Sprintf("heap label recovery unsupported for build=%q goarch=%q ptrSize=%d",
+				snap.Params.BuildVersion, snap.Params.GOARCH, snap.Params.PtrSize)
+		}
+		opts.GLabelsOffset = off
+		opts.HasGLabelsOffset = true
+	}
+	return heaplabels.DecodeAll(snap, opts), true, ""
+}
+
+func hasObjectContents(snap *heapsnapshot.HeapSnapshot) bool {
+	for _, obj := range snap.Objects {
+		if len(obj.Contents) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // HeapStackSignature builds a normalized signature from a heap dump
