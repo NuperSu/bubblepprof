@@ -1,72 +1,41 @@
+// Package capture writes the calling process's heap dump to a temp file
+// and returns it positioned at offset 0. It is used by dev tools and
+// tests that need a live heap dump without the snapshot-tar bundle format.
 package capture
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
-
-	"bubblepprof/internal/snapshot"
 )
 
+// HeapDumpWriter writes the calling process heap dump to the file
+// identified by fd.
 type HeapDumpWriter interface {
 	WriteHeapDump(fd uintptr) error
 }
 
-type GoroutineProfileWriter interface {
-	WriteGoroutineProfile(w io.Writer) error
-}
-
-type MetadataProvider interface {
-	Metadata(gcBeforeHeapDump bool) snapshot.SnapshotMetadata
-}
-
-// LabelManifestProvider produces the optional labels.json payload that
-// accompanies a snapshot. Returning nil bytes omits the entry.
-type LabelManifestProvider interface {
-	LabelManifest() ([]byte, error)
-}
-
-// GoroutineStacksWriter produces the optional debug=2 goroutine stack
-// dump. It writes nothing when the implementation chooses to skip it.
-type GoroutineStacksWriter interface {
-	WriteGoroutineStacks(w io.Writer) error
-}
-
+// CaptureOptions configures Capture. The zero value is useful: it
+// selects RuntimeHeapDumpWriter and skips the GC.
 type CaptureOptions struct {
+	// GCBeforeHeapDump runs runtime.GC() before WriteHeapDump.
 	GCBeforeHeapDump bool
 
-	HeapDumpWriter         HeapDumpWriter
-	GoroutineProfileWriter GoroutineProfileWriter
-	MetadataProvider       MetadataProvider
-	GC                     func()
+	// HeapDumpWriter writes the heap dump. Defaults to
+	// RuntimeHeapDumpWriter when nil.
+	HeapDumpWriter HeapDumpWriter
 
-	// LabelManifestProvider is optional. When set, the capture path
-	// asks it for labels.json bytes and embeds them in the snapshot if
-	// the returned payload is non-empty.
-	LabelManifestProvider LabelManifestProvider
-	// GoroutineStacksWriter is optional. When set, the capture path
-	// asks it to emit debug=2 stacks and embeds the result if non-empty.
-	GoroutineStacksWriter GoroutineStacksWriter
+	// GC is the GC trigger. Defaults to runtime.GC when nil.
+	GC func()
 }
 
-// Captured holds the output of Capture: a heap dump open as a temp file
-// (positioned at offset 0), the goroutine profile in memory, and the
-// metadata. Callers must invoke Cleanup when done.
+// Captured holds a heap dump open as a seeked-to-zero temp file.
+// Call Cleanup when done.
 type Captured struct {
-	HeapDump         *os.File
-	HeapDumpSize     int64
-	GoroutineProfile []byte
-	Metadata         snapshot.SnapshotMetadata
-
-	// Labels is the optional labels.json payload. nil if no provider
-	// was configured or the provider returned empty.
-	Labels []byte
-	// GoroutineStacks is the optional goroutine.stacks payload. nil if
-	// no writer was configured or it produced no bytes.
-	GoroutineStacks []byte
+	HeapDump     *os.File
+	HeapDumpSize int64
 
 	cleanup func()
 }
@@ -81,13 +50,8 @@ func (c *Captured) Cleanup() {
 	c.cleanup = nil
 }
 
-// Capture performs the expensive parts of snapshot capture (heap dump and
-// goroutine profile collection) and returns the result without writing it
-// out as a tar bundle. Use BundleSource() + snapshot.WriteSnapshotBundle
-// to stream the result to a writer.
-//
-// Splitting capture from bundle-write lets HTTP handlers fail with a
-// proper status code before they commit to a 200 response body.
+// Capture writes a heap dump to a temp file and returns it positioned
+// at offset 0. The caller must invoke Cleanup when done.
 func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -95,7 +59,7 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 
 	opts = withDefaults(opts)
 
-	tmpDir, err := os.MkdirTemp("", "bubblepprof-snapshot-*")
+	tmpDir, err := os.MkdirTemp("", "bubblepprof-capture-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
@@ -133,63 +97,12 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 		return nil, fmt.Errorf("stat heap dump: %w", err)
 	}
 
-	if err := ctx.Err(); err != nil {
-		_ = heapFile.Close()
-		return nil, err
-	}
-
-	var goroutines bytes.Buffer
-	if err := opts.GoroutineProfileWriter.WriteGoroutineProfile(&goroutines); err != nil {
-		_ = heapFile.Close()
-		return nil, fmt.Errorf("write goroutine profile: %w", err)
-	}
-
-	var labelsPayload []byte
-	if opts.LabelManifestProvider != nil {
-		b, err := opts.LabelManifestProvider.LabelManifest()
-		if err != nil {
-			_ = heapFile.Close()
-			return nil, fmt.Errorf("collect labels manifest: %w", err)
-		}
-		if len(b) > 0 {
-			labelsPayload = b
-		}
-	}
-
-	var stacksPayload []byte
-	if opts.GoroutineStacksWriter != nil {
-		var buf bytes.Buffer
-		if err := opts.GoroutineStacksWriter.WriteGoroutineStacks(&buf); err != nil {
-			_ = heapFile.Close()
-			return nil, fmt.Errorf("write goroutine stacks: %w", err)
-		}
-		if buf.Len() > 0 {
-			stacksPayload = buf.Bytes()
-		}
-	}
-
-	metadata := opts.MetadataProvider.Metadata(opts.GCBeforeHeapDump)
-	metadata.Format = snapshot.FormatV1
-	metadata.HeapDumpFile = snapshot.HeapDumpFile
-	metadata.GoroutineProfileFile = snapshot.GoroutineProfileFile
-	metadata.GCBeforeHeapDump = opts.GCBeforeHeapDump
-	if labelsPayload != nil {
-		metadata.LabelsFile = snapshot.LabelsFile
-	}
-	if stacksPayload != nil {
-		metadata.GoroutineStacksFile = snapshot.GoroutineStacksFile
-	}
-
 	c := &Captured{
-		HeapDump:         heapFile,
-		HeapDumpSize:     heapInfo.Size(),
-		GoroutineProfile: goroutines.Bytes(),
-		Metadata:         metadata,
-		Labels:           labelsPayload,
-		GoroutineStacks:  stacksPayload,
+		HeapDump:     heapFile,
+		HeapDumpSize: heapInfo.Size(),
 	}
 	rmTmp := cleanup
-	cleanup = nil // success — defer must not delete tmpDir
+	cleanup = nil
 	c.cleanup = func() {
 		_ = heapFile.Close()
 		rmTmp()
@@ -197,48 +110,9 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 	return c, nil
 }
 
-// BundleSource returns a snapshot.BundleSource pointing at the captured
-// data so callers can hand it directly to snapshot.WriteSnapshotBundle.
-func (c *Captured) BundleSource() snapshot.BundleSource {
-	return snapshot.BundleSource{
-		HeapDump:         c.HeapDump,
-		HeapDumpSize:     c.HeapDumpSize,
-		GoroutineProfile: c.GoroutineProfile,
-		Metadata:         c.Metadata,
-		Labels:           c.Labels,
-		GoroutineStacks:  c.GoroutineStacks,
-	}
-}
-
-// WriteSnapshot is a convenience that captures and writes the bundle in
-// one shot. Prefer Capture + snapshot.WriteSnapshotBundle when you need
-// to commit a response status before streaming.
-func WriteSnapshot(ctx context.Context, w io.Writer, opts CaptureOptions) error {
-	c, err := Capture(ctx, opts)
-	if err != nil {
-		return err
-	}
-	defer c.Cleanup()
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	if err := snapshot.WriteSnapshotBundle(w, c.BundleSource()); err != nil {
-		return fmt.Errorf("write snapshot bundle: %w", err)
-	}
-	return nil
-}
-
 func withDefaults(opts CaptureOptions) CaptureOptions {
 	if opts.HeapDumpWriter == nil {
 		opts.HeapDumpWriter = RuntimeHeapDumpWriter{}
-	}
-	if opts.GoroutineProfileWriter == nil {
-		opts.GoroutineProfileWriter = RuntimeGoroutineProfileWriter{}
-	}
-	if opts.MetadataProvider == nil {
-		opts.MetadataProvider = RuntimeMetadataProvider{}
 	}
 	if opts.GC == nil {
 		opts.GC = runtime.GC

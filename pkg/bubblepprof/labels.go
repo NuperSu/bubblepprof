@@ -86,8 +86,7 @@ func SnapshotLabels() bubblelabels.Manifest {
 
 // Do runs f within a goroutine labeled with the supplied LabelSet. It
 // behaves like runtime/pprof.Do and additionally records the labels in
-// bubblepprof's per-goroutine registry so the offline bubble report can
-// recover them from snapshot.tar.
+// bubblepprof's per-goroutine registry as a fallback label source.
 //
 // Nested Do calls restore the outer labels on exit (the registry uses a
 // per-goroutine stack), matching pprof.Do semantics.
