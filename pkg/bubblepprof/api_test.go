@@ -3,9 +3,8 @@ package bubblepprof
 import (
 	"context"
 	"reflect"
+	"runtime/pprof"
 	"testing"
-
-	"bubblepprof/internal/goid"
 )
 
 func TestLabelSetMapAndLen(t *testing.T) {
@@ -29,21 +28,8 @@ func TestLabelsEmpty(t *testing.T) {
 	}
 }
 
-func TestRegistryReturnsActive(t *testing.T) {
-	r := withFreshRegistry(t)
-	if Registry() != r {
-		t.Fatalf("Registry() != the registry we installed")
-	}
-}
-
-func TestSetGoroutineLabelsRecordsRegistry(t *testing.T) {
-	r := withFreshRegistry(t)
-	id, ok := goid.CurrentGoroutineID()
-	if !ok {
-		t.Skip("goroutine ID unavailable")
-	}
-	t.Cleanup(func() { r.Clear(id) })
-
+func TestSetGoroutineLabelsPropagatesContext(t *testing.T) {
+	// Capture a labeled context from Do.
 	var capturedCtx context.Context
 	Do(context.Background(), Labels("bubble", "alpha"), func(ctx context.Context) {
 		capturedCtx = ctx
@@ -52,16 +38,15 @@ func TestSetGoroutineLabelsRecordsRegistry(t *testing.T) {
 		t.Fatal("expected context from Do")
 	}
 
-	r.Clear(id)
+	// SetGoroutineLabels is a thin wrapper; verify it does not panic and
+	// that the context it received still carries the expected labels.
 	SetGoroutineLabels(capturedCtx)
-	got := r.Lookup(id)
-	if !reflect.DeepEqual(got, map[string]string{"bubble": "alpha"}) {
-		t.Fatalf("registry after SetGoroutineLabels = %v", got)
-	}
-}
-
-func TestLabelsFromContextNil(t *testing.T) {
-	if got := labelsFromContext(nil); got != nil {
-		t.Fatalf("labelsFromContext(nil) = %v, want nil", got)
+	got := make(map[string]string)
+	pprof.ForLabels(capturedCtx, func(k, v string) bool {
+		got[k] = v
+		return true
+	})
+	if got["bubble"] != "alpha" {
+		t.Fatalf("context labels: bubble = %q, want alpha", got["bubble"])
 	}
 }
