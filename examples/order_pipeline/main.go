@@ -220,12 +220,15 @@ func main() {
 	)
 }
 
-// goWithLabels stamps pprof labels on a fresh goroutine via
-// bubblepprof.Go. bubblepprof.Go calls runtime/pprof.SetGoroutineLabels
-// so heap-native label recovery sees the labels on the child goroutine.
+// goWithLabels stamps pprof labels on a fresh goroutine. It calls
+// pprof.SetGoroutineLabels so heap-native label recovery sees the labels
+// on the child goroutine.
 func goWithLabels(parent context.Context, labels pprof.LabelSet, fn func(context.Context)) {
 	ctx := pprof.WithLabels(parent, labels)
-	bubblepprof.Go(ctx, fn)
+	go func() {
+		pprof.SetGoroutineLabels(ctx)
+		fn(ctx)
+	}()
 }
 
 func (a *App) statsHandler(w http.ResponseWriter, r *http.Request) {
@@ -312,11 +315,9 @@ func (a *App) ingestWorker(ctx context.Context, workerID int) {
 func (a *App) handleOrder(workerCtx context.Context, workerID int, order Order) {
 	a.started.Add(1)
 
-	// Do not label by order_id: that would create extremely high
-	// cardinality. Instead, label by dimensions you actually want to
-	// group into bubbles. bubblepprof.Do pushes onto the goroutine's
-	// label stack and pops on return, mirroring runtime/pprof.Do.
-	bubblepprof.Do(workerCtx, bubblepprof.Labels(
+	// Label by dimensions you actually want to group into bubbles.
+	// pprof.Do pushes onto the goroutine's label stack and pops on return.
+	pprof.Do(workerCtx, pprof.Labels(
 		"work", "order_checkout",
 		"tenant", order.Tenant,
 		"region", order.Region,
@@ -387,7 +388,7 @@ func (a *App) handleOrder(workerCtx context.Context, workerID int, order Order) 
 		}
 
 		approved := false
-		bubblepprof.Do(orderCtx, bubblepprof.Labels(
+		pprof.Do(orderCtx, pprof.Labels(
 			"service", "payment",
 			"stage", "authorize",
 			"gateway", paymentGateway(order),
@@ -408,7 +409,7 @@ func (a *App) handleOrder(workerCtx context.Context, workerID int, order Order) 
 		}
 
 		var receiptPayload []byte
-		bubblepprof.Do(orderCtx, bubblepprof.Labels(
+		pprof.Do(orderCtx, pprof.Labels(
 			"service", "fulfillment",
 			"stage", "pack",
 			"format", "gzip_receipt",
@@ -788,7 +789,7 @@ func (a *App) tenantAggregator(ctx context.Context, tenant string, inbox <-chan 
 }
 
 func (a *App) publishNotification(ctx context.Context, notification Notification) {
-	bubblepprof.Do(ctx, bubblepprof.Labels(
+	pprof.Do(ctx, pprof.Labels(
 		"service", "notifications",
 		"stage", "enqueue",
 		"channel", notification.Channel,
@@ -809,7 +810,7 @@ func (a *App) notificationWorker(ctx context.Context, workerID int) {
 			return
 
 		case notification := <-a.notifications:
-			bubblepprof.Do(ctx, bubblepprof.Labels(
+			pprof.Do(ctx, pprof.Labels(
 				"service", "notifications",
 				"stage", "deliver",
 				"channel", notification.Channel,
