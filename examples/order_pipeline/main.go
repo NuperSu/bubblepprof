@@ -221,10 +221,8 @@ func main() {
 }
 
 // goWithLabels stamps pprof labels on a fresh goroutine via
-// bubblepprof.Go. bubblepprof.Go reads the labels off ctx and both sets
-// runtime/pprof labels (so the standard goroutine profile carries
-// them) and records the new goroutine ID in the bubblepprof Registry
-// so /debug/memusage can match it by label.
+// bubblepprof.Go. bubblepprof.Go calls runtime/pprof.SetGoroutineLabels
+// so heap-native label recovery sees the labels on the child goroutine.
 func goWithLabels(parent context.Context, labels pprof.LabelSet, fn func(context.Context)) {
 	ctx := pprof.WithLabels(parent, labels)
 	bubblepprof.Go(ctx, fn)
@@ -239,7 +237,6 @@ func (a *App) statsHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "dropped=%d\n", a.dropped.Load())
 	fmt.Fprintf(w, "sink=%d\n", a.sink.Load())
 	fmt.Fprintf(w, "goroutines=%d\n", runtime.NumGoroutine())
-	fmt.Fprintf(w, "registered labels: %d\n", len(bubblepprof.SnapshotLabels().Goroutines))
 }
 
 func (a *App) generateTraffic(ctx context.Context, rate int) {

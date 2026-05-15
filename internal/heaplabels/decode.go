@@ -87,8 +87,8 @@ func DecodeAllAuto(snap *heapsnapshot.HeapSnapshot, opts Options) Result {
 }
 
 // UnsupportedResult builds a Result that reports every goroutine as
-// unsupported_runtime with the supplied diagnostic. /debug/memusage and
-// labelresolve use this so the unsupported message is consistent.
+// unsupported_runtime with the supplied diagnostic. /debug/memusage uses
+// this so the unsupported message is consistent across callers.
 func UnsupportedResult(snap *heapsnapshot.HeapSnapshot, message string) Result {
 	res := Result{
 		LabelsByGID: make(map[uint64]map[string]string),
@@ -342,8 +342,7 @@ func FindOffsetCandidates(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map
 }
 
 // FindCandidateGLabelsOffsets returns just the offset values from
-// FindOffsetCandidates. Kept for compatibility with the offline CLI test
-// surface.
+// FindOffsetCandidates.
 func FindCandidateGLabelsOffsets(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map[string]string, opts Options) []uint64 {
 	candidates := FindOffsetCandidates(snap, mem, want, opts)
 	out := make([]uint64, 0, len(candidates))
