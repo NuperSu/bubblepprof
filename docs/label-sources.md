@@ -41,17 +41,14 @@ pprof.Do(ctx, pprof.Labels("job", "42"), func(ctx context.Context) {
 
 The main profiler path does **not** require any of the following:
 
-- `bubblepprof.Do`
-- `bubblepprof.Labels`
+- a custom labeling wrapper
 - a `dynamicString(...)` helper around label literals
 - a `labels.json` manifest
 - correlation against a separately captured `goroutine.pprof`
 - a modified Go toolchain
 
-`pkg/bubblepprof` keeps a few optional wrapper helpers (`Do`, `Labels`,
-`SetGoroutineLabels`, `Go`). They call `runtime/pprof` internally and
-do not define a separate labeling system. They are not part of the
-required path.
+`pkg/bubblepprof` exposes only the `/debug/memusage` endpoint. It does
+not provide or require a custom labeling API.
 
 ## Label source
 
@@ -179,24 +176,6 @@ the product interface.
 ```bash
 go run ./cmd/labeloffsetprobe
 ```
-
-## Wrapper API (optional)
-
-`pkg/bubblepprof` exposes a small wrapper layer:
-
-```go
-bubblepprof.Labels("bubble", "alpha", "job", "42")
-bubblepprof.Do(ctx, bubblepprof.Labels("bubble", "alpha"), fn)
-bubblepprof.SetGoroutineLabels(ctx)
-bubblepprof.Go(ctx, fn)
-```
-
-These are **optional convenience helpers**. They call `runtime/pprof`
-internally so labels are visible to other Go tooling, and they clone
-label strings so string bytes live on the heap and are recoverable by
-the heap-native decoder without the process memory reader.
-
-They are not required for the main profiler path.
 
 ## Known limitations
 
