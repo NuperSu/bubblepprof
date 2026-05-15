@@ -20,6 +20,22 @@ type reachabilityPayload struct {
 	Pad []byte
 }
 
+type reachabilityMapCarrier struct {
+	M map[int]*reachabilityPayload
+}
+
+// newReachabilityMapCarrier constructs the map fixture through a noinline
+// helper so the carrier and runtime map header are heap objects. The test is
+// about heap traversal through map storage, not compiler placement of a tiny
+// local variable at a blocking receive.
+//
+//go:noinline
+func newReachabilityMapCarrier(capHint int) *reachabilityMapCarrier {
+	return &reachabilityMapCarrier{
+		M: make(map[int]*reachabilityPayload, capHint),
+	}
+}
+
 // reachabilityCarrier holds an any field on the heap. Using a heap-resident
 // struct ensures the interface data pointer is part of the object's GC
 // pointer bitmap (FieldKindPtr), not a stack eface record.
@@ -37,8 +53,8 @@ const (
 // goroutines through real Go runtime data structures:
 //
 //   - Slice backing arrays with len < cap (hidden elements must be counted).
-//   - Map values (values pointed to from map buckets).
-//   - Map overflow buckets (values across bucket chains).
+//   - Map values (values pointed to from runtime map storage).
+//   - Large maps (values across multi-object map backing storage).
 //   - Buffered channels (objects queued in channel buffers).
 //   - Interface values (data pointer inside a heap-resident eface struct).
 //
@@ -80,27 +96,38 @@ func TestMemUsageHandler_ReachabilityThroughRuntimeDataStructures(t *testing.T) 
 		runtime.KeepAlive(xs) // must be here so xs is live at <-stop above
 	})
 
-	// Map values reachable through map bucket pointer slots.
-	// Uses int keys (same as map-overflow) to avoid a string-key-specific
-	// liveness-bitmap issue with a single-entry map.
+	// Map values reachable through runtime map storage pointer slots.
+	// Keep the map inside a heap-resident carrier. This makes the intended root
+	// path explicit:
+	//
+	//   goroutine stack root -> carrier -> runtime map -> map storage -> payloads
+	//
+	// and avoids depending on the compiler's representation of a bare local map
+	// variable around the blocking receive.
 	startReachabilityWorker(t, "map-values", stop, func(ready chan<- struct{}, stop <-chan struct{}) {
-		m := make(map[int]*reachabilityPayload)
-		m[0] = &reachabilityPayload{Pad: make([]byte, reachabilityPayloadSize)}
-		close(ready)
-		<-stop
-		runtime.KeepAlive(m)
-	})
-
-	// Map overflow buckets: 10,000 entries forces the runtime to allocate
-	// overflow buckets. The full ~10 MiB across all buckets must be reachable.
-	startReachabilityWorker(t, "map-overflow", stop, func(ready chan<- struct{}, stop <-chan struct{}) {
-		m := make(map[int]*reachabilityPayload, 0)
-		for i := 0; i < 10000; i++ {
-			m[i] = &reachabilityPayload{Pad: make([]byte, 1<<10)} // 1 KiB each
+		carrier := newReachabilityMapCarrier(128)
+		for i := 0; i < 128; i++ {
+			carrier.M[i] = &reachabilityPayload{
+				Pad: make([]byte, 16<<10), // 16 KiB each, total ~2 MiB
+			}
 		}
 		close(ready)
 		<-stop
-		runtime.KeepAlive(m)
+		runtime.KeepAlive(carrier)
+	})
+
+	// Large map storage: 10,000 entries forces the runtime to allocate
+	// multi-object backing storage (overflow buckets on older runtimes,
+	// table/group storage on newer runtimes). The full ~10 MiB must be
+	// reachable through the map.
+	startReachabilityWorker(t, "map-overflow", stop, func(ready chan<- struct{}, stop <-chan struct{}) {
+		carrier := newReachabilityMapCarrier(10000)
+		for i := 0; i < 10000; i++ {
+			carrier.M[i] = &reachabilityPayload{Pad: make([]byte, 1<<10)} // 1 KiB each
+		}
+		close(ready)
+		<-stop
+		runtime.KeepAlive(carrier)
 	})
 
 	// Buffered channel: payload is queued in the channel buffer (hchan
