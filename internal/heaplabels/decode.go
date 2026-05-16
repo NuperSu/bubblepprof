@@ -298,7 +298,7 @@ type unnamedReader struct{ addrspace.Reader }
 func (unnamedReader) Name() string { return "extra" }
 
 // FindOffsetCandidates is a debug/diagnostic helper used by the
-// labeloffsetprobe and the `snapshot heap-labels --find-offset` command.
+// labeloffsetprobe binary and offline offset probes.
 // It scans each goroutine's runtime.g object contents for a pointer that,
 // when interpreted as a labelMap address, yields a label map containing
 // the requested label key/value pairs.

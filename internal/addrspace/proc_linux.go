@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -97,6 +98,9 @@ func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 			continue
 		}
 		if addr >= m.Start && end <= m.End {
+			if addr > math.MaxInt64 {
+				return nil, false
+			}
 			buf := make([]byte, size)
 			if _, err := r.mem.ReadAt(buf, int64(addr)); err != nil {
 				return nil, false
