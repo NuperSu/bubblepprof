@@ -13,6 +13,7 @@ func TestVerifiedTableShape(t *testing.T) {
 	want := []wantEntry{
 		{"go1.26.", 0x160},
 		{"go1.25.", 0x158},
+		{"go1.24.", 0x160},
 	}
 	if len(verifiedTable) != len(want) {
 		t.Fatalf("verifiedTable size = %d, want %d; add a regression test if expanding", len(verifiedTable), len(want))

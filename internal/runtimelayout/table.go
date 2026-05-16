@@ -48,6 +48,23 @@ var verifiedTable = []TableEntry{
 			Description:   "verified go1.25.* amd64 runtime.g.labels layout",
 		}),
 	},
+	// Verified with cmd/labeloffsetprobe on linux/amd64
+	// (go version go1.24.0 linux/amd64).
+	// go1.24 introduced internal/runtime/pprof and the struct-based label
+	// format ([]label.Label). go1.23 and earlier used map[string]string and
+	// are not supported by this decoder.
+	{
+		VersionPrefix: "go1.24.",
+		GOARCH:        "amd64",
+		PtrSize:       8,
+		BigEndian:     false,
+		Layout: with64BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "amd64",
+			GLabelsOffset: 0x160,
+			Description:   "verified go1.24.* amd64 runtime.g.labels layout",
+		}),
+	},
 }
 
 // Lookup returns the verified runtime layout that matches the input, or
