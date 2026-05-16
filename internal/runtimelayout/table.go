@@ -103,8 +103,8 @@ var verifiedTable = []TableEntry{
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GOARCH:        "arm",
-			GLabelsOffset: 0xd0,
-			Description:   "verified go1.24 linux/arm runtime.g.labels offset 0xd0",
+			GLabelsOffset: 0xd4,
+			Description:   "verified go1.24 linux/arm runtime.g.labels offset 0xd4",
 		}),
 	},
 }
