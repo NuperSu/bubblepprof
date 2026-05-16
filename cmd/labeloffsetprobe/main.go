@@ -8,6 +8,7 @@ import (
 	"runtime/pprof"
 	"time"
 
+	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/capture"
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heaplabels"
@@ -55,8 +56,22 @@ func realMain() int {
 		return 1
 	}
 	mem := heaplabels.NewMemory(snap)
+
+	opts := heaplabels.Options{}
+	if pr, err := addrspace.OpenSelfProcessReader(); err == nil {
+		defer pr.Close()
+		opts.ExtraStringMemory = pr
+	}
+
+	inHeap := 0
+	for _, g := range snap.Goroutines {
+		if _, ok := mem.Read(g.Addr, 8); ok {
+			inHeap++
+		}
+	}
+
 	want := map[string]string{key: value}
-	candidates := heaplabels.FindOffsetCandidates(snap, mem, want, heaplabels.Options{})
+	candidates := heaplabels.FindOffsetCandidates(snap, mem, want, opts)
 
 	input := heaplabels.LookupInputFromSnapshot(snap)
 	fmt.Printf("go version: %s\n", runtime.Version())
@@ -65,6 +80,7 @@ func realMain() int {
 	fmt.Printf("ptr size: %d\n", input.PtrSize)
 	fmt.Printf("big endian: %t\n", input.BigEndian)
 	fmt.Printf("goroutines: %d\n", len(snap.Goroutines))
+	fmt.Printf("goroutines with g in heap: %d\n", inHeap)
 	fmt.Printf("expected labels: %s=%s\n", key, value)
 	fmt.Printf("candidate offsets: %d\n", len(candidates))
 	for _, c := range candidates {
@@ -87,7 +103,7 @@ func realMain() int {
 	fmt.Printf("  BigEndian:     %t\n", input.BigEndian)
 	fmt.Printf("  GLabelsOffset: 0x%x\n", manual.GLabelsOffset)
 
-	res := heaplabels.DecodeAll(snap, manual, heaplabels.Options{})
+	res := heaplabels.DecodeAll(snap, manual, opts)
 	fmt.Println()
 	res.PrintSummary(os.Stdout)
 	for _, gr := range res.Goroutines {

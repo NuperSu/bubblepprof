@@ -104,8 +104,19 @@ type LookupInput struct {
 // Verified table entries and Manual layouts both go through this helper so
 // the constants are defined exactly once.
 func with64BitLittleEndianDefaults(l Layout) Layout {
-	const ptr = uint64(8)
-	l.PtrSize = 8
+	return withLittleEndianDefaults(l, 8)
+}
+
+// with32BitLittleEndianDefaults is the 32-bit equivalent of
+// with64BitLittleEndianDefaults. Slice/string/label headers are the same
+// structure but every pointer and int field is 4 bytes wide.
+func with32BitLittleEndianDefaults(l Layout) Layout {
+	return withLittleEndianDefaults(l, 4)
+}
+
+func withLittleEndianDefaults(l Layout, ptrSize int) Layout {
+	ptr := uint64(ptrSize)
+	l.PtrSize = ptrSize
 	l.BigEndian = false
 	l.SliceDataOffset = 0
 	l.SliceLenOffset = ptr

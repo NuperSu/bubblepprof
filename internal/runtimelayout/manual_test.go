@@ -41,8 +41,32 @@ func TestManualPtrSize8LittleEndian(t *testing.T) {
 	}
 }
 
+func TestManualPtrSize4LittleEndian(t *testing.T) {
+	layout, err := Manual(LookupInput{
+		GoVersion: "go1.26.3",
+		GOARCH:    "arm",
+		PtrSize:   4,
+		BigEndian: false,
+	}, 0xc0)
+	if err != nil {
+		t.Fatalf("Manual: %v", err)
+	}
+	if layout.PtrSize != 4 {
+		t.Fatalf("PtrSize = %d", layout.PtrSize)
+	}
+	if layout.SliceLenOffset != 4 || layout.SliceCapOffset != 8 {
+		t.Fatalf("slice offsets = %d/%d", layout.SliceLenOffset, layout.SliceCapOffset)
+	}
+	if layout.StringLenOffset != 4 {
+		t.Fatalf("string len offset = %d", layout.StringLenOffset)
+	}
+	if layout.LabelValueOffset != 8 || layout.LabelSize != 16 {
+		t.Fatalf("label value offset/size = %d/%d", layout.LabelValueOffset, layout.LabelSize)
+	}
+}
+
 func TestManualRejectsUnsupportedPtrSize(t *testing.T) {
-	for _, ps := range []int{0, 4, 16} {
+	for _, ps := range []int{0, 16} {
 		if _, err := Manual(LookupInput{PtrSize: ps}, 0x10); err == nil {
 			t.Errorf("Manual ptrSize %d: expected error", ps)
 		}
