@@ -348,7 +348,7 @@ func TestDecodeLabelsForGoroutineGAddrOverflow(t *testing.T) {
 	})
 	layout := mustManualLayout(t, ^uint64(0)) // huge offset
 	g := heapsnapshot.Goroutine{ID: 1, Addr: 0x100}
-	gr := DecodeLabelsForGoroutine(mem, layout, Options{}, g)
+	gr := DecodeLabelsForGoroutine(mem, mem, layout, Options{}, g)
 	if gr.Status != StatusMalformed {
 		t.Fatalf("status = %v error = %s", gr.Status, gr.Error)
 	}

@@ -90,7 +90,7 @@ func (DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addr
 	if !ok {
 		return heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input)), nil
 	}
-	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{ExtraMemory: extra}), nil
+	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{ExtraStringMemory: extra}), nil
 }
 
 // Computer captures, parses, and analyzes a heap dump to answer one

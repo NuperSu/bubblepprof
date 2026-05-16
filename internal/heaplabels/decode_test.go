@@ -11,8 +11,9 @@ import (
 func TestDecodeLabelMap(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}, {"job", "42"}})
 	layout := mustManualLayout(t, 0x18)
+	mem := NewMemory(snap)
 
-	labels, err := DecodeLabelMap(NewMemory(snap), layout, Options{}, 0x1000)
+	labels, err := DecodeLabelMap(mem, mem, layout, Options{}, 0x1000)
 	if err != nil {
 		t.Fatalf("DecodeLabelMap: %v", err)
 	}
@@ -24,8 +25,9 @@ func TestDecodeLabelMap(t *testing.T) {
 func TestDecodeLabelMapDuplicateKeysLastWins(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "old"}, {"bubble", "new"}})
 	layout := mustManualLayout(t, 0x18)
+	mem := NewMemory(snap)
 
-	labels, err := DecodeLabelMap(NewMemory(snap), layout, Options{}, 0x1000)
+	labels, err := DecodeLabelMap(mem, mem, layout, Options{}, 0x1000)
 	if err != nil {
 		t.Fatalf("DecodeLabelMap: %v", err)
 	}
@@ -41,7 +43,7 @@ func TestDecodeLabelMapMalformedLenGreaterThanCap(t *testing.T) {
 	writePtr(snap.Objects[1].Contents, 8, 2)
 	writePtr(snap.Objects[1].Contents, 16, 1)
 
-	_, err := DecodeLabelMap(mem, layout, Options{}, 0x1000)
+	_, err := DecodeLabelMap(mem, mem, layout, Options{}, 0x1000)
 	if err == nil || statusOf(err) != StatusMalformed {
 		t.Fatalf("err = %v, want malformed", err)
 	}
@@ -51,8 +53,9 @@ func TestDecodeLabelMapStringMissing(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}})
 	snap.Objects = snap.Objects[:3] // drop string objects
 	layout := mustManualLayout(t, 0x18)
+	mem := NewMemory(snap)
 
-	_, err := DecodeLabelMap(NewMemory(snap), layout, Options{}, 0x1000)
+	_, err := DecodeLabelMap(mem, mem, layout, Options{}, 0x1000)
 	if err == nil || statusOf(err) != StatusStringMissing {
 		t.Fatalf("err = %v, want string missing", err)
 	}
