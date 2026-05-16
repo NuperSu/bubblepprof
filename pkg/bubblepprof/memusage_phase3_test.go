@@ -30,15 +30,15 @@ import (
 //
 // We skip only when:
 //
-//   - The runtime layout table has no entry for this Go version /
-//     GOARCH (422 unsupported_runtime).
 //   - The process memory reader could not be opened on this host
 //     (e.g. /proc/self/mem permission denied), which the response
 //     reports via a warning.
 //
-// A 422 string_missing without that warning would mean the Phase 3
-// in-process reader did NOT fill in the literal label bytes — that is
-// the regression this test exists to catch.
+// A 422 unsupported_runtime is a hard failure: the Go version must be in
+// the verified layout table for this test to run.  A 422 string_missing
+// without the reader-unavailable warning means the Phase 3 in-process
+// reader did NOT fill in the literal label bytes — that is the regression
+// this test exists to catch.
 func TestMemUsageHandler_Phase3_LiteralLabelsRecovered(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live heap-dump integration test in short mode")
@@ -104,7 +104,7 @@ func TestMemUsageHandler_Phase3_LiteralLabelsRecovered(t *testing.T) {
 		}
 		switch er.Code {
 		case "unsupported_runtime":
-			t.Skipf("runtime not in verified layout table: go=%s arch=%s", er.GoVersion, er.GOARCH)
+			t.Fatalf("runtime not in verified layout table: go=%s arch=%s", er.GoVersion, er.GOARCH)
 		case "string_missing":
 			if processReaderUnavailable(er.Warnings) {
 				t.Skipf("process memory reader unavailable on this host: warnings=%v", er.Warnings)
@@ -168,7 +168,7 @@ func TestMemUsageHandler_Phase3_DisablingReaderBreaksLiterals(t *testing.T) {
 			t.Fatalf("decode error: %v\n%s", err, rr.Body.String())
 		}
 		if er.Code == "unsupported_runtime" {
-			t.Skipf("runtime not in verified layout table: go=%s arch=%s", er.GoVersion, er.GOARCH)
+			t.Fatalf("runtime not in verified layout table: go=%s arch=%s", er.GoVersion, er.GOARCH)
 		}
 		if er.Code != "string_missing" {
 			t.Fatalf("expected string_missing, got %q: %s", er.Code, rr.Body.String())

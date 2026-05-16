@@ -20,16 +20,9 @@ import (
 // runtime/pprof API — no bubblepprof wrapper, no labels.json, no
 // goroutine.pprof correlation.
 //
-// Phase 1's heap-native decoder is verified only for a narrow runtime
-// family (Go 1.26.x / amd64 / ptr size 8). On other runtimes the
-// endpoint must return honest diagnostics. This test accepts:
-//
-//   - 200 with matched_goroutines >= 1 and reachable_bytes > 0
-//   - 422 unsupported_runtime
-//   - 422 string_missing
-//
-// In every case the response must be coherent JSON; silent fallback to
-// labels.json or goroutine.pprof is a regression.
+// The endpoint must return coherent JSON; silent fallback to labels.json
+// or goroutine.pprof is a regression. 422 unsupported_runtime is a hard
+// failure — the Go version must be in the verified layout table.
 func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live heap-dump integration test in short mode")
@@ -104,8 +97,11 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
 			t.Fatalf("decode error response: %v\n%s", err, rr.Body.String())
 		}
-		if er.Code != "unsupported_runtime" && er.Code != "string_missing" {
-			t.Fatalf("unexpected error code %q for 422; want unsupported_runtime or string_missing", er.Code)
+		if er.Code == "unsupported_runtime" {
+			t.Fatalf("runtime not in verified layout table: go=%s arch=%s", er.GoVersion, er.GOARCH)
+		}
+		if er.Code != "string_missing" {
+			t.Fatalf("unexpected error code %q for 422; want string_missing", er.Code)
 		}
 		t.Logf("memusage returned honest diagnostics: code=%q go_version=%q goarch=%q",
 			er.Code, er.GoVersion, er.GOARCH)
@@ -121,9 +117,9 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 // stricter end-to-end assertions live in
 // TestMemUsageHandler_Phase3_LiteralLabelsRecovered.
 //
-// This older test stays tolerant of 422 string_missing /
-// unsupported_runtime so it still passes on hosts where /proc/self/mem
-// cannot be opened or the runtime layout is unknown. It must NEVER
+// This test tolerates 422 string_missing (platform limitation when
+// /proc/self/mem is unavailable) but fails on unsupported_runtime —
+// the Go version must be in the verified layout table. It must NEVER
 // silently fall back to labels.json or goroutine.pprof.
 func TestMemUsageHandler_RuntimePprofLiteralLabels(t *testing.T) {
 	if testing.Short() {
@@ -180,8 +176,11 @@ func TestMemUsageHandler_RuntimePprofLiteralLabels(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
 			t.Fatalf("decode error response: %v\n%s", err, rr.Body.String())
 		}
-		if er.Code != "unsupported_runtime" && er.Code != "string_missing" {
-			t.Fatalf("422 code = %q; want unsupported_runtime or string_missing", er.Code)
+		if er.Code == "unsupported_runtime" {
+			t.Fatalf("runtime not in verified layout table: go=%s arch=%s", er.GoVersion, er.GOARCH)
+		}
+		if er.Code != "string_missing" {
+			t.Fatalf("422 code = %q; want string_missing", er.Code)
 		}
 		t.Logf("literal labels not recoverable yet (Phase 3 target): code=%q", er.Code)
 	default:

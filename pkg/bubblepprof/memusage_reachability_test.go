@@ -60,8 +60,8 @@ const (
 //
 // Each subtest starts a goroutine labeled with case=<label> that holds
 // ≥2 MiB of memory, then posts to /debug/memusage and asserts
-// reachable_bytes ≥ 1 MiB. A 422 response skips (not fails) the subtest
-// because 422 indicates a label-recovery limitation, not a reachability bug.
+// reachable_bytes ≥ 1 MiB. A 422 unsupported_runtime fails the subtest;
+// 422 string_missing skips it (platform limitation, not a reachability bug).
 //
 // Workers use plain runtime/pprof label literals — no bubblepprof wrappers,
 // no strings.Clone, no dynamicString.
@@ -194,9 +194,10 @@ func startReachabilityWorker(t *testing.T, label string, stop <-chan struct{}, f
 // assertReachableAtLeast posts {"labels":{"case":label}} to /debug/memusage
 // and asserts reachable_bytes >= minBytes.
 //
-// A 422 response (unsupported_runtime or string_missing) is treated as a
-// skip, not a failure: it means label recovery could not select the goroutine,
-// so reachability could not be exercised.
+// A 422 string_missing response skips the subtest: it is a platform
+// limitation (e.g. no /proc/self/mem), not a reachability bug. A 422
+// unsupported_runtime is a hard failure — the Go version must be in the
+// verified layout table for this test to run.
 func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64) {
 	t.Helper()
 	body := bytes.NewReader([]byte(`{"labels":{"case":"` + label + `"}}`))
@@ -229,6 +230,10 @@ func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64
 		var er memusage.ErrorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
 			t.Fatalf("decode 422 response: %v", err)
+		}
+		if er.Code == "unsupported_runtime" {
+			t.Fatalf("label=%q: runtime not in verified layout table: go=%s arch=%s",
+				label, er.GoVersion, er.GOARCH)
 		}
 		t.Skipf("label=%q: label recovery returned %q — skipping reachability assertion (not a reachability bug): %s",
 			label, er.Code, er.Error)
