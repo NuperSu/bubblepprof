@@ -5,14 +5,12 @@ import (
 	"testing"
 
 	"bubblepprof/internal/heapsnapshot"
+	"bubblepprof/internal/runtimelayout"
 )
 
 func TestDecodeLabelMap(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}, {"job", "42"}})
-	layout, ok := LayoutFromSnapshot(snap, 0x18)
-	if !ok {
-		t.Fatal("LayoutFromSnapshot failed")
-	}
+	layout := mustManualLayout(t, 0x18)
 
 	labels, err := DecodeLabelMap(NewMemory(snap), layout, Options{}, 0x1000)
 	if err != nil {
@@ -25,7 +23,7 @@ func TestDecodeLabelMap(t *testing.T) {
 
 func TestDecodeLabelMapDuplicateKeysLastWins(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "old"}, {"bubble", "new"}})
-	layout, _ := LayoutFromSnapshot(snap, 0x18)
+	layout := mustManualLayout(t, 0x18)
 
 	labels, err := DecodeLabelMap(NewMemory(snap), layout, Options{}, 0x1000)
 	if err != nil {
@@ -39,7 +37,7 @@ func TestDecodeLabelMapDuplicateKeysLastWins(t *testing.T) {
 func TestDecodeLabelMapMalformedLenGreaterThanCap(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}})
 	mem := NewMemory(snap)
-	layout, _ := LayoutFromSnapshot(snap, 0x18)
+	layout := mustManualLayout(t, 0x18)
 	writePtr(snap.Objects[1].Contents, 8, 2)
 	writePtr(snap.Objects[1].Contents, 16, 1)
 
@@ -52,7 +50,7 @@ func TestDecodeLabelMapMalformedLenGreaterThanCap(t *testing.T) {
 func TestDecodeLabelMapStringMissing(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}})
 	snap.Objects = snap.Objects[:3] // drop string objects
-	layout, _ := LayoutFromSnapshot(snap, 0x18)
+	layout := mustManualLayout(t, 0x18)
 
 	_, err := DecodeLabelMap(NewMemory(snap), layout, Options{}, 0x1000)
 	if err == nil || statusOf(err) != StatusStringMissing {
@@ -62,7 +60,8 @@ func TestDecodeLabelMapStringMissing(t *testing.T) {
 
 func TestDecodeLabelsForGoroutine(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}})
-	got := DecodeAll(snap, Options{GLabelsOffset: 0x18, HasGLabelsOffset: true})
+	layout := mustManualLayout(t, 0x18)
+	got := DecodeAll(snap, layout, Options{})
 
 	if got.Stats.GoroutinesDecoded != 1 {
 		t.Fatalf("decoded goroutines = %d", got.Stats.GoroutinesDecoded)
@@ -72,21 +71,39 @@ func TestDecodeLabelsForGoroutine(t *testing.T) {
 	}
 }
 
-func TestDecodeLabelsNoOffsetUnsupported(t *testing.T) {
+func TestDecodeAllAutoUnsupportedRuntime(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}})
-	got := DecodeAll(snap, Options{})
+	// Default snapshot has no BuildVersion → no table match → unsupported.
+	got := DecodeAllAuto(snap, Options{})
 	if got.Stats.GoroutinesUnsupported != 1 {
-		t.Fatalf("unsupported = %d", got.Stats.GoroutinesUnsupported)
+		t.Fatalf("unsupported = %d, stats=%+v", got.Stats.GoroutinesUnsupported, got.Stats)
 	}
 	if got.Goroutines[0].Status != StatusUnsupportedRuntime {
 		t.Fatalf("status = %s", got.Goroutines[0].Status)
+	}
+	if len(got.Warnings) == 0 {
+		t.Fatal("expected unsupported warning")
+	}
+}
+
+func TestDecodeAllAutoMatchesVerifiedTable(t *testing.T) {
+	snap := syntheticLabelSnapshot(0x160, []kv{{"bubble", "alpha"}})
+	snap.Params.BuildVersion = "go1.26.3-X:nodwarf5"
+
+	got := DecodeAllAuto(snap, Options{})
+	if got.Stats.GoroutinesDecoded != 1 {
+		t.Fatalf("decoded = %d (auto lookup should match go1.26.* amd64)", got.Stats.GoroutinesDecoded)
+	}
+	if got.LabelsByGID[123]["bubble"] != "alpha" {
+		t.Fatalf("labelsByGID = %#v", got.LabelsByGID)
 	}
 }
 
 func TestDecodeLabelsNoLabels(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}})
 	writePtr(snap.Objects[0].Contents, 0x18, 0)
-	got := DecodeAll(snap, Options{GLabelsOffset: 0x18, HasGLabelsOffset: true})
+	layout := mustManualLayout(t, 0x18)
+	got := DecodeAll(snap, layout, Options{})
 	if got.Stats.GoroutinesNoLabels != 1 || got.Goroutines[0].Status != StatusNoLabels {
 		t.Fatalf("result = %#v", got)
 	}
@@ -114,6 +131,20 @@ type kv struct {
 	v string
 }
 
+func mustManualLayout(t *testing.T, gLabelsOffset uint64) runtimelayout.Layout {
+	t.Helper()
+	layout, err := runtimelayout.Manual(runtimelayout.LookupInput{
+		GoVersion: "go1.test",
+		GOARCH:    "amd64",
+		PtrSize:   8,
+		BigEndian: false,
+	}, gLabelsOffset)
+	if err != nil {
+		t.Fatalf("runtimelayout.Manual: %v", err)
+	}
+	return layout
+}
+
 func syntheticLabelSnapshot(gLabelsOffset uint64, labels []kv) *heapsnapshot.HeapSnapshot {
 	ptrSize := 8
 	labelMap := make([]byte, 24)
@@ -123,7 +154,7 @@ func syntheticLabelSnapshot(gLabelsOffset uint64, labels []kv) *heapsnapshot.Hea
 	writePtr(labelMap, 16, uint64(len(labels)))
 
 	objects := []heapsnapshot.Object{
-		{Addr: 0x5000, Contents: make([]byte, 0x80)},
+		{Addr: 0x5000, Contents: make([]byte, 0x200)},
 		{Addr: 0x1000, Contents: labelMap},
 		{Addr: 0x2000, Contents: labelArray},
 	}

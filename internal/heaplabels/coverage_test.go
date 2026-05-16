@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"bubblepprof/internal/heapsnapshot"
+	"bubblepprof/internal/runtimelayout"
 )
 
 func TestMemoryNilReceiver(t *testing.T) {
@@ -76,7 +77,7 @@ func TestRangeContainingNilAndZeroAddr(t *testing.T) {
 	}
 }
 
-func TestLookupGLabelsOffsetMisses(t *testing.T) {
+func TestLookupLayoutMisses(t *testing.T) {
 	cases := []*heapsnapshot.HeapSnapshot{
 		nil,
 		{Params: heapsnapshot.DumpParams{GOARCH: "arm64", PtrSize: 8, BuildVersion: "go1.26.0"}},
@@ -84,50 +85,9 @@ func TestLookupGLabelsOffsetMisses(t *testing.T) {
 		{Params: heapsnapshot.DumpParams{GOARCH: "amd64", PtrSize: 8, BuildVersion: "go9.99-future"}},
 	}
 	for i, snap := range cases {
-		if _, ok := LookupGLabelsOffset(snap); ok {
+		if _, ok := LookupLayout(snap); ok {
 			t.Errorf("case %d: expected no match", i)
 		}
-	}
-}
-
-func TestLayoutFromSnapshotRejectsBadPtrSize(t *testing.T) {
-	if _, ok := LayoutFromSnapshot(nil, 0); ok {
-		t.Fatal("nil snapshot should fail")
-	}
-	if _, ok := LayoutFromSnapshot(&heapsnapshot.HeapSnapshot{
-		Params: heapsnapshot.DumpParams{PtrSize: 2},
-	}, 0); ok {
-		t.Fatal("ptrSize 2 should fail")
-	}
-}
-
-func TestLayoutFromSnapshotPtrSize4BigEndian(t *testing.T) {
-	layout, ok := LayoutFromSnapshot(&heapsnapshot.HeapSnapshot{
-		Params: heapsnapshot.DumpParams{PtrSize: 4, BigEndian: true},
-	}, 0)
-	if !ok {
-		t.Fatal("ptrSize 4 should succeed")
-	}
-	if layout.PtrSize != 4 {
-		t.Fatalf("PtrSize = %d", layout.PtrSize)
-	}
-	if layout.Order != binary.BigEndian {
-		t.Fatal("Order should be BigEndian")
-	}
-	if layout.SliceLenOffset != 4 || layout.SliceCapOffset != 8 {
-		t.Fatalf("slice offsets = %d/%d", layout.SliceLenOffset, layout.SliceCapOffset)
-	}
-}
-
-func TestHasVersionPrefixShortString(t *testing.T) {
-	if hasVersionPrefix("go", "go1.26.") {
-		t.Fatal("short version should not match")
-	}
-	if !hasVersionPrefix("go1.26.3", "go1.26.") {
-		t.Fatal("matching version should match")
-	}
-	if hasVersionPrefix("go1.25.0", "go1.26.") {
-		t.Fatal("non-matching version should not match")
 	}
 }
 
@@ -144,29 +104,45 @@ type otherErr struct{}
 
 func (otherErr) Error() string { return "x" }
 
-func TestDecodeAllNoLayoutFallback(t *testing.T) {
-	// PtrSize 2 -> LayoutFromSnapshot fails -> every goroutine flagged
-	// unsupported_runtime.
+func TestDecodeAllAutoUnsupportedReportsEveryGoroutine(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{PtrSize: 2, GOARCH: "amd64"},
 		Goroutines: []heapsnapshot.Goroutine{
 			{ID: 1, Addr: 0x100},
 		},
 	}
-	res := DecodeAll(snap, Options{GLabelsOffset: 0x10, HasGLabelsOffset: true})
+	res := DecodeAllAuto(snap, Options{})
 	if res.Stats.GoroutinesUnsupported != 1 {
 		t.Fatalf("expected 1 unsupported, got stats %+v", res.Stats)
 	}
 }
 
-func TestDecodeAllNoOffsetConfigured(t *testing.T) {
+func TestDecodeAllUnsupportedPtrSizeFromManualImpossible(t *testing.T) {
+	// runtimelayout.Manual refuses non-8-byte pointers; passing such a
+	// layout into DecodeAll is therefore only possible via a hand-crafted
+	// Layout. Verify DecodeAll still surfaces unsupported_runtime rather
+	// than panicking.
+	snap := &heapsnapshot.HeapSnapshot{
+		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x100}},
+	}
+	layout := runtimelayout.Layout{PtrSize: 2}
+	res := DecodeAll(snap, layout, Options{})
+	if res.Stats.GoroutinesUnsupported != 1 {
+		t.Fatalf("expected 1 unsupported, got %+v", res.Stats)
+	}
+	if res.Goroutines[0].Status != StatusUnsupportedRuntime {
+		t.Fatalf("status = %s", res.Goroutines[0].Status)
+	}
+}
+
+func TestDecodeAllAutoNoBuildVersionReturnsUnsupported(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64"},
 		Goroutines: []heapsnapshot.Goroutine{
 			{ID: 7, Addr: 0x500},
 		},
 	}
-	res := DecodeAll(snap, Options{}) // no HasGLabelsOffset
+	res := DecodeAllAuto(snap, Options{})
 	if res.Stats.GoroutinesUnsupported != 1 {
 		t.Fatalf("expected 1 unsupported, got %+v", res.Stats)
 	}
@@ -175,20 +151,39 @@ func TestDecodeAllNoOffsetConfigured(t *testing.T) {
 	}
 }
 
-func TestDecodeAllNilSnapshot(t *testing.T) {
-	res := DecodeAll(nil, Options{HasGLabelsOffset: true, GLabelsOffset: 0})
+func TestDecodeAllAutoNilSnapshot(t *testing.T) {
+	res := DecodeAllAuto(nil, Options{})
 	if !strings.Contains(strings.Join(res.Warnings, "|"), "nil") {
 		t.Fatalf("expected nil warning, got %v", res.Warnings)
 	}
 }
 
+func TestDecodeAllNilSnapshot(t *testing.T) {
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(nil, layout, Options{})
+	if !strings.Contains(strings.Join(res.Warnings, "|"), "nil") {
+		t.Fatalf("expected nil warning, got %v", res.Warnings)
+	}
+}
+
+func TestUnsupportedResultIncludesWarning(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x100}},
+	}
+	res := UnsupportedResult(snap, "unsupported test")
+	if res.Stats.GoroutinesUnsupported != 1 || res.Goroutines[0].Status != StatusUnsupportedRuntime {
+		t.Fatalf("unexpected: %+v", res)
+	}
+	if len(res.Warnings) != 1 || res.Warnings[0] != "unsupported test" {
+		t.Fatalf("warnings = %v", res.Warnings)
+	}
+}
+
 func TestDecodeLabelMapMalformedHeader(t *testing.T) {
-	// Build a snapshot where the labelMap pointer leads to bytes with
-	// len > cap — DecodeLabelMap should reject as malformed.
 	mapBytes := make([]byte, 24)
 	binary.LittleEndian.PutUint64(mapBytes[0:8], 0x2000) // data ptr
-	binary.LittleEndian.PutUint64(mapBytes[8:16], 5)    // len
-	binary.LittleEndian.PutUint64(mapBytes[16:24], 2)   // cap < len
+	binary.LittleEndian.PutUint64(mapBytes[8:16], 5)     // len
+	binary.LittleEndian.PutUint64(mapBytes[16:24], 2)    // cap < len
 
 	gObj := make([]byte, 0x20)
 	binary.LittleEndian.PutUint64(gObj[0x10:0x18], 0x1000) // labels ptr at offset 0x10
@@ -201,7 +196,8 @@ func TestDecodeLabelMapMalformedHeader(t *testing.T) {
 		},
 		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
 	}
-	res := DecodeAll(snap, Options{GLabelsOffset: 0x10, HasGLabelsOffset: true})
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{})
 	if res.Stats.GoroutinesFailed != 1 {
 		t.Fatalf("expected 1 failed, got %+v", res.Stats)
 	}
@@ -226,10 +222,9 @@ func TestDecodeLabelMapExceedsMaxLabels(t *testing.T) {
 		},
 		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
 	}
-	res := DecodeAll(snap, Options{
-		GLabelsOffset:    0x10,
-		HasGLabelsOffset: true,
-		MaxLabels:        2,
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{
+		MaxLabels: 2,
 	})
 	if res.Goroutines[0].Status != StatusMalformed {
 		t.Fatalf("expected malformed, got %v (%s)", res.Goroutines[0].Status, res.Goroutines[0].Error)
@@ -237,9 +232,7 @@ func TestDecodeLabelMapExceedsMaxLabels(t *testing.T) {
 }
 
 func TestDecodeLabelMapEmptyOK(t *testing.T) {
-	// len == 0 and dataPtr == 0 is the "no labels" map: function returns
-	// empty without trying to dereference.
-	mapBytes := make([]byte, 24) // all zeros
+	mapBytes := make([]byte, 24)
 	gObj := make([]byte, 0x20)
 	binary.LittleEndian.PutUint64(gObj[0x10:0x18], 0x1000)
 
@@ -251,7 +244,8 @@ func TestDecodeLabelMapEmptyOK(t *testing.T) {
 		},
 		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
 	}
-	res := DecodeAll(snap, Options{GLabelsOffset: 0x10, HasGLabelsOffset: true})
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{})
 	if res.Goroutines[0].Status != StatusDecoded {
 		t.Fatalf("status = %v err = %s", res.Goroutines[0].Status, res.Goroutines[0].Error)
 	}
@@ -276,24 +270,23 @@ func TestDecodeLabelMapNilDataPtrWithNonZeroLen(t *testing.T) {
 		},
 		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
 	}
-	res := DecodeAll(snap, Options{GLabelsOffset: 0x10, HasGLabelsOffset: true})
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{})
 	if res.Goroutines[0].Status != StatusLabelArrayMissing {
 		t.Fatalf("status = %v err = %s", res.Goroutines[0].Status, res.Goroutines[0].Error)
 	}
 }
 
 func TestDecodeStringExceedsMaxLen(t *testing.T) {
-	// Build a labelMap with a single label whose key string length
-	// exceeds MaxStringLen.
 	mapBytes := make([]byte, 24)
 	binary.LittleEndian.PutUint64(mapBytes[0:8], 0x2000)
 	binary.LittleEndian.PutUint64(mapBytes[8:16], 1)
 	binary.LittleEndian.PutUint64(mapBytes[16:24], 1)
 	labelArray := make([]byte, 32)
-	binary.LittleEndian.PutUint64(labelArray[0:8], 0x3000)    // key data
-	binary.LittleEndian.PutUint64(labelArray[8:16], 99999)    // key len huge
-	binary.LittleEndian.PutUint64(labelArray[16:24], 0x4000)  // val data
-	binary.LittleEndian.PutUint64(labelArray[24:32], 0)       // val len 0
+	binary.LittleEndian.PutUint64(labelArray[0:8], 0x3000)   // key data
+	binary.LittleEndian.PutUint64(labelArray[8:16], 99999)   // key len huge
+	binary.LittleEndian.PutUint64(labelArray[16:24], 0x4000) // val data
+	binary.LittleEndian.PutUint64(labelArray[24:32], 0)      // val len 0
 
 	gObj := make([]byte, 0x20)
 	binary.LittleEndian.PutUint64(gObj[0x10:0x18], 0x1000)
@@ -307,10 +300,9 @@ func TestDecodeStringExceedsMaxLen(t *testing.T) {
 		},
 		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
 	}
-	res := DecodeAll(snap, Options{
-		GLabelsOffset:    0x10,
-		HasGLabelsOffset: true,
-		MaxStringLen:     32,
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{
+		MaxStringLen: 32,
 	})
 	if res.Goroutines[0].Status != StatusMalformed {
 		t.Fatalf("status = %v err = %s", res.Goroutines[0].Status, res.Goroutines[0].Error)
@@ -318,8 +310,6 @@ func TestDecodeStringExceedsMaxLen(t *testing.T) {
 }
 
 func TestDecodeStringMissingBytes(t *testing.T) {
-	// Label refers to a string at 0x3000 with non-zero length, but no
-	// object covers that range -> string_missing.
 	mapBytes := make([]byte, 24)
 	binary.LittleEndian.PutUint64(mapBytes[0:8], 0x2000)
 	binary.LittleEndian.PutUint64(mapBytes[8:16], 1)
@@ -339,11 +329,11 @@ func TestDecodeStringMissingBytes(t *testing.T) {
 			{Addr: 0x500, Contents: gObj},
 			{Addr: 0x1000, Contents: mapBytes},
 			{Addr: 0x2000, Contents: labelArray},
-			// 0x3000 absent: string bytes missing.
 		},
 		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
 	}
-	res := DecodeAll(snap, Options{GLabelsOffset: 0x10, HasGLabelsOffset: true})
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{})
 	if res.Goroutines[0].Status != StatusStringMissing {
 		t.Fatalf("status = %v err = %s", res.Goroutines[0].Status, res.Goroutines[0].Error)
 	}
@@ -356,12 +346,7 @@ func TestDecodeLabelsForGoroutineGAddrOverflow(t *testing.T) {
 	mem := NewMemory(&heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64", BuildVersion: "go1.26.3"},
 	})
-	layout, ok := LayoutFromSnapshot(&heapsnapshot.HeapSnapshot{
-		Params: heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64"},
-	}, ^uint64(0)) // huge offset
-	if !ok {
-		t.Fatal("LayoutFromSnapshot failed unexpectedly")
-	}
+	layout := mustManualLayout(t, ^uint64(0)) // huge offset
 	g := heapsnapshot.Goroutine{ID: 1, Addr: 0x100}
 	gr := DecodeLabelsForGoroutine(mem, layout, Options{}, g)
 	if gr.Status != StatusMalformed {
@@ -370,7 +355,6 @@ func TestDecodeLabelsForGoroutineGAddrOverflow(t *testing.T) {
 }
 
 func TestDecodeLabelsForGoroutineNoLabels(t *testing.T) {
-	// labels ptr is zero -> no labels.
 	gObj := make([]byte, 0x20)
 	snap := &heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64", BuildVersion: "go1.26.3"},
@@ -379,7 +363,8 @@ func TestDecodeLabelsForGoroutineNoLabels(t *testing.T) {
 		},
 		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
 	}
-	res := DecodeAll(snap, Options{GLabelsOffset: 0x10, HasGLabelsOffset: true})
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{})
 	if res.Goroutines[0].Status != StatusNoLabels {
 		t.Fatalf("status = %v", res.Goroutines[0].Status)
 	}

@@ -8,6 +8,12 @@ import (
 )
 
 // Build produces a Report from the provided input.
+//
+// The caller is responsible for filling per-goroutine and global
+// reachability before calling Build — i.e. running
+// snapshotgraph.ComputeReachability on the Analysis (or otherwise
+// populating Reachable sets in unit tests). Build itself is a pure
+// transform from Analysis to Report.
 func Build(in Input) (*Report, error) {
 	if in.Analysis == nil {
 		return nil, fmt.Errorf("bubblereport: analysis is nil")

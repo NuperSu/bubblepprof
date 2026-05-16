@@ -11,14 +11,30 @@ import (
 
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heaplabels"
+	"bubblepprof/internal/runtimelayout"
 	"bubblepprof/internal/snapshotparse"
 )
 
+// heapLabelCLIOptions mirrors the user-facing flags of the
+// `snapshot heap-labels` debug command. Only one of ManualOffset and the
+// automatic table lookup is used per run; --find-offset is a separate
+// discovery path that may seed ManualOffset when unambiguous.
 type heapLabelCLIOptions struct {
 	DecodeOptions heaplabels.Options
-	FindLabels    map[string]string
-	ShowFailed    bool
+
+	ManualOffset    uint64
+	HasManualOffset bool
+
+	FindLabels map[string]string
+	ShowFailed bool
 }
+
+const (
+	layoutSourceTable     = "table"
+	layoutSourceManual    = "manual"
+	layoutSourceDebugScan = "debug-scan"
+	layoutSourceNone      = "none"
+)
 
 func PrintHeapLabels(out io.Writer, path string, cli heapLabelCLIOptions) error {
 	f, err := os.Open(path)
@@ -42,10 +58,19 @@ func PrintHeapLabels(out io.Writer, path string, cli heapLabelCLIOptions) error 
 	fmt.Fprintf(out, "ptr size: %d\n", snap.Params.PtrSize)
 	fmt.Fprintln(out)
 
-	opts := cli.DecodeOptions
+	input := heaplabels.LookupInputFromSnapshot(snap)
+
+	// --find-offset is a debug-scan path. When a single unambiguous
+	// candidate is found and no manual offset was supplied, the CLI may
+	// use it for the subsequent decode, but the layout source is reported
+	// as debug-scan, not as verified.
+	var (
+		scanOffset    uint64
+		haveScanMatch bool
+	)
 	if len(cli.FindLabels) > 0 {
 		mem := heaplabels.NewMemory(snap)
-		candidates := heaplabels.FindOffsetCandidates(snap, mem, cli.FindLabels, opts)
+		candidates := heaplabels.FindOffsetCandidates(snap, mem, cli.FindLabels, cli.DecodeOptions)
 		fmt.Fprintln(out, "offset discovery:")
 		fmt.Fprintf(out, "  expected labels: %s\n", strings.Join(heaplabels.FormatLabels(cli.FindLabels), ", "))
 		fmt.Fprintf(out, "  candidates: %d\n", len(candidates))
@@ -53,24 +78,40 @@ func PrintHeapLabels(out io.Writer, path string, cli heapLabelCLIOptions) error 
 			fmt.Fprintf(out, "  runtime.g.labels offset: 0x%x (matches: %d, goroutines: %v)\n",
 				c.Offset, c.Matches, c.GoroutineIDs)
 		}
-		if !opts.HasGLabelsOffset && len(candidates) == 1 {
-			opts.GLabelsOffset = candidates[0].Offset
-			opts.HasGLabelsOffset = true
-			fmt.Fprintf(out, "  using discovered offset: 0x%x\n", opts.GLabelsOffset)
-		} else if !opts.HasGLabelsOffset && len(candidates) > 1 {
+		if !cli.HasManualOffset && len(candidates) == 1 {
+			scanOffset, haveScanMatch = candidates[0].Offset, true
+			fmt.Fprintf(out, "  using discovered offset: 0x%x\n", scanOffset)
+		} else if !cli.HasManualOffset && len(candidates) > 1 {
 			fmt.Fprintln(out, "  ambiguous offset discovery; provide --g-labels-offset to decode")
 		}
 		fmt.Fprintln(out)
 	}
 
-	if opts.HasGLabelsOffset {
-		fmt.Fprintf(out, "runtime.g.labels offset: 0x%x\n", opts.GLabelsOffset)
+	layout, layoutSource, ok := resolveCLILayout(input, cli, scanOffset, haveScanMatch)
+
+	fmt.Fprintf(out, "layout source: %s\n", layoutSource)
+	if input.GoVersion != "" {
+		fmt.Fprintf(out, "go version: %s\n", input.GoVersion)
+	}
+	fmt.Fprintf(out, "goarch: %s\n", input.GOARCH)
+	fmt.Fprintf(out, "ptr size: %d\n", input.PtrSize)
+	if ok {
+		fmt.Fprintf(out, "runtime.g.labels offset: 0x%x\n", layout.GLabelsOffset)
+		if layout.Description != "" {
+			fmt.Fprintf(out, "layout description: %s\n", layout.Description)
+		}
 	} else {
 		fmt.Fprintln(out, "runtime.g.labels offset: (not configured)")
+		fmt.Fprintf(out, "diagnostic: %s\n", runtimelayout.UnsupportedMessage(input))
 	}
 	fmt.Fprintln(out)
 
-	decoded := heaplabels.DecodeAll(snap, opts)
+	var decoded heaplabels.Result
+	if ok {
+		decoded = heaplabels.DecodeAll(snap, layout, cli.DecodeOptions)
+	} else {
+		decoded = heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input))
+	}
 	decoded.PrintSummary(out)
 
 	printGoroutineHeapLabels(out, decoded, cli.ShowFailed)
@@ -82,6 +123,42 @@ func PrintHeapLabels(out io.Writer, path string, cli heapLabelCLIOptions) error 
 		}
 	}
 	return nil
+}
+
+// resolveCLILayout picks the runtime layout for `snapshot heap-labels`.
+// Resolution order:
+//
+//  1. --g-labels-offset (manual) — debug-only, never used by
+//     /debug/memusage.
+//  2. --find-offset single candidate — debug-scan source.
+//  3. runtimelayout.Lookup — verified table.
+//
+// When all three fail, the function returns ok=false so callers can emit
+// an unsupported_runtime diagnostic instead of decoding with a guess.
+func resolveCLILayout(
+	input runtimelayout.LookupInput,
+	cli heapLabelCLIOptions,
+	scanOffset uint64,
+	haveScanMatch bool,
+) (runtimelayout.Layout, string, bool) {
+	if cli.HasManualOffset {
+		layout, err := runtimelayout.Manual(input, cli.ManualOffset)
+		if err != nil {
+			return runtimelayout.Layout{}, layoutSourceNone, false
+		}
+		return layout, layoutSourceManual, true
+	}
+	if haveScanMatch {
+		layout, err := runtimelayout.Manual(input, scanOffset)
+		if err != nil {
+			return runtimelayout.Layout{}, layoutSourceNone, false
+		}
+		return layout, layoutSourceDebugScan, true
+	}
+	if layout, ok := runtimelayout.Lookup(input); ok {
+		return layout, layoutSourceTable, true
+	}
+	return runtimelayout.Layout{}, layoutSourceNone, false
 }
 
 func printGoroutineHeapLabels(out io.Writer, res heaplabels.Result, showFailed bool) {
@@ -124,7 +201,7 @@ func printGoroutineHeapLabels(out io.Writer, res heaplabels.Result, showFailed b
 func runHeapLabels(out, errOut io.Writer, program string, args []string) int {
 	fs := flag.NewFlagSet("snapshot heap-labels", flag.ContinueOnError)
 	fs.SetOutput(errOut)
-	offsetText := fs.String("g-labels-offset", "", "runtime.g.labels offset, decimal or 0x-prefixed hex")
+	offsetText := fs.String("g-labels-offset", "", "runtime.g.labels offset, decimal or 0x-prefixed hex (debug only)")
 	findOffset := fs.String("find-offset", "", "expected labels to scan for, e.g. bubble=alpha or bubble=alpha,job=42")
 	maxLabels := fs.Uint64("max-labels", heaplabels.DefaultMaxLabels, "maximum labels accepted in one pprof label map")
 	maxString := fs.Uint64("max-string", heaplabels.DefaultMaxStringLen, "maximum decoded label string length")
@@ -138,9 +215,12 @@ func runHeapLabels(out, errOut io.Writer, program string, args []string) int {
 		return 2
 	}
 
-	opts := heaplabels.Options{
-		MaxLabels:    *maxLabels,
-		MaxStringLen: *maxString,
+	cli := heapLabelCLIOptions{
+		DecodeOptions: heaplabels.Options{
+			MaxLabels:    *maxLabels,
+			MaxStringLen: *maxString,
+		},
+		ShowFailed: *showFailed,
 	}
 	if *offsetText != "" {
 		off, err := strconv.ParseUint(*offsetText, 0, 64)
@@ -148,20 +228,17 @@ func runHeapLabels(out, errOut io.Writer, program string, args []string) int {
 			fmt.Fprintf(errOut, "invalid --g-labels-offset %q: %v\n", *offsetText, err)
 			return 2
 		}
-		opts.GLabelsOffset = off
-		opts.HasGLabelsOffset = true
+		cli.ManualOffset = off
+		cli.HasManualOffset = true
 	}
 	findLabels, err := parseFindLabels(*findOffset)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 2
 	}
+	cli.FindLabels = findLabels
 
-	if err := PrintHeapLabels(out, rest[0], heapLabelCLIOptions{
-		DecodeOptions: opts,
-		FindLabels:    findLabels,
-		ShowFailed:    *showFailed,
-	}); err != nil {
+	if err := PrintHeapLabels(out, rest[0], cli); err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}

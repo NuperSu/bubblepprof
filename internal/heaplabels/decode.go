@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"bubblepprof/internal/heapsnapshot"
+	"bubblepprof/internal/runtimelayout"
 )
 
 type decodeError struct {
@@ -21,7 +22,14 @@ func statusOf(err error) DecodeStatus {
 	return StatusMalformed
 }
 
-func DecodeAll(snap *heapsnapshot.HeapSnapshot, opts Options) Result {
+// DecodeAll decodes pprof labels for every goroutine in snap using the
+// supplied runtime layout. The layout must come from runtimelayout.Lookup
+// (verified) or runtimelayout.Manual (debug CLI / test); the decoder
+// itself never guesses offsets.
+//
+// Use DecodeAllAuto for the common case where the caller wants the
+// verified-table lookup applied implicitly.
+func DecodeAll(snap *heapsnapshot.HeapSnapshot, layout runtimelayout.Layout, opts Options) Result {
 	opts = normalizeOptions(opts)
 	res := Result{
 		LabelsByGID: make(map[uint64]map[string]string),
@@ -31,35 +39,6 @@ func DecodeAll(snap *heapsnapshot.HeapSnapshot, opts Options) Result {
 		return res
 	}
 	res.Stats.GoroutinesTotal = len(snap.Goroutines)
-
-	if !opts.HasGLabelsOffset {
-		for _, g := range snap.Goroutines {
-			gr := GoroutineResult{
-				GID:    g.ID,
-				GAddr:  g.Addr,
-				Status: StatusUnsupportedRuntime,
-				Error:  "runtime.g.labels offset is not configured",
-			}
-			res.Goroutines = append(res.Goroutines, gr)
-			res.Stats.GoroutinesUnsupported++
-		}
-		return res
-	}
-
-	layout, ok := LayoutFromSnapshot(snap, opts.GLabelsOffset)
-	if !ok {
-		for _, g := range snap.Goroutines {
-			gr := GoroutineResult{
-				GID:    g.ID,
-				GAddr:  g.Addr,
-				Status: StatusUnsupportedRuntime,
-				Error:  fmt.Sprintf("unsupported pointer size %d", snap.Params.PtrSize),
-			}
-			res.Goroutines = append(res.Goroutines, gr)
-			res.Stats.GoroutinesUnsupported++
-		}
-		return res
-	}
 
 	mem := NewMemory(snap)
 	for _, g := range snap.Goroutines {
@@ -86,11 +65,64 @@ func DecodeAll(snap *heapsnapshot.HeapSnapshot, opts Options) Result {
 	return res
 }
 
-func DecodeLabelsForGoroutine(mem *Memory, layout Layout, opts Options, g heapsnapshot.Goroutine) GoroutineResult {
+// DecodeAllAuto is the convenience wrapper that resolves the layout from
+// the verified-runtime table and then calls DecodeAll. When the snapshot
+// describes an unsupported runtime, every goroutine is reported with
+// StatusUnsupportedRuntime and the matching diagnostic warning.
+func DecodeAllAuto(snap *heapsnapshot.HeapSnapshot, opts Options) Result {
+	if snap == nil {
+		return Result{
+			LabelsByGID: make(map[uint64]map[string]string),
+			Warnings:    []string{"heaplabels: nil heap snapshot"},
+		}
+	}
+	input := LookupInputFromSnapshot(snap)
+	layout, ok := runtimelayout.Lookup(input)
+	if !ok {
+		return UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input))
+	}
+	return DecodeAll(snap, layout, opts)
+}
+
+// UnsupportedResult builds a Result that reports every goroutine as
+// unsupported_runtime with the supplied diagnostic. /debug/memusage and
+// labelresolve use this so the unsupported message is consistent.
+func UnsupportedResult(snap *heapsnapshot.HeapSnapshot, message string) Result {
+	res := Result{
+		LabelsByGID: make(map[uint64]map[string]string),
+	}
+	if snap == nil {
+		if message != "" {
+			res.Warnings = append(res.Warnings, message)
+		}
+		return res
+	}
+	res.Stats.GoroutinesTotal = len(snap.Goroutines)
+	for _, g := range snap.Goroutines {
+		res.Goroutines = append(res.Goroutines, GoroutineResult{
+			GID:    g.ID,
+			GAddr:  g.Addr,
+			Status: StatusUnsupportedRuntime,
+			Error:  message,
+		})
+		res.Stats.GoroutinesUnsupported++
+	}
+	if message != "" {
+		res.Warnings = append(res.Warnings, message)
+	}
+	return res
+}
+
+func DecodeLabelsForGoroutine(mem *Memory, layout runtimelayout.Layout, opts Options, g heapsnapshot.Goroutine) GoroutineResult {
 	opts = normalizeOptions(opts)
 	gr := GoroutineResult{
 		GID:   g.ID,
 		GAddr: g.Addr,
+	}
+	if layout.PtrSize != 4 && layout.PtrSize != 8 {
+		gr.Status = StatusUnsupportedRuntime
+		gr.Error = fmt.Sprintf("unsupported pointer size %d", layout.PtrSize)
+		return gr
 	}
 	labelsFieldAddr, ok := addUint64(g.Addr, layout.GLabelsOffset)
 	if !ok {
@@ -98,7 +130,7 @@ func DecodeLabelsForGoroutine(mem *Memory, layout Layout, opts Options, g heapsn
 		gr.Error = "runtime.g.labels field address overflows"
 		return gr
 	}
-	labelsPtr, ok := mem.ReadUintptr(labelsFieldAddr, layout.PtrSize, layout.Order)
+	labelsPtr, ok := mem.ReadUintptr(labelsFieldAddr, layout.PtrSize, layout.ByteOrder())
 	if !ok {
 		gr.Status = StatusGObjectMissing
 		gr.Error = "runtime.g object bytes are unavailable"
@@ -120,8 +152,9 @@ func DecodeLabelsForGoroutine(mem *Memory, layout Layout, opts Options, g heapsn
 	return gr
 }
 
-func DecodeLabelMap(mem *Memory, layout Layout, opts Options, addr uint64) (map[string]string, error) {
+func DecodeLabelMap(mem *Memory, layout runtimelayout.Layout, opts Options, addr uint64) (map[string]string, error) {
 	opts = normalizeOptions(opts)
+	order := layout.ByteOrder()
 	setAddr, ok := addUint64(addr, layout.LabelMapSetOffset)
 	if !ok {
 		return nil, decodeError{StatusMalformed, "labelMap set address overflows"}
@@ -131,15 +164,15 @@ func DecodeLabelMap(mem *Memory, layout Layout, opts Options, addr uint64) (map[
 		return nil, decodeError{StatusMalformed, "label.Set list address overflows"}
 	}
 
-	dataPtr, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceDataOffset, layout.PtrSize, layout.Order)
+	dataPtr, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceDataOffset, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "labelMap object bytes are unavailable"}
 	}
-	length, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceLenOffset, layout.PtrSize, layout.Order)
+	length, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceLenOffset, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "label.Set list length is unavailable"}
 	}
-	capacity, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceCapOffset, layout.PtrSize, layout.Order)
+	capacity, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceCapOffset, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "label.Set list capacity is unavailable"}
 	}
@@ -182,13 +215,14 @@ func DecodeLabelMap(mem *Memory, layout Layout, opts Options, addr uint64) (map[
 	return labels, nil
 }
 
-func DecodeString(mem *Memory, layout Layout, opts Options, headerAddr uint64) (string, error) {
+func DecodeString(mem *Memory, layout runtimelayout.Layout, opts Options, headerAddr uint64) (string, error) {
 	opts = normalizeOptions(opts)
-	dataPtr, ok := mem.ReadUintptr(headerAddr+layout.StringDataOffset, layout.PtrSize, layout.Order)
+	order := layout.ByteOrder()
+	dataPtr, ok := mem.ReadUintptr(headerAddr+layout.StringDataOffset, layout.PtrSize, order)
 	if !ok {
 		return "", decodeError{StatusStringMissing, "string header data pointer is unavailable"}
 	}
-	length, ok := mem.ReadUintptr(headerAddr+layout.StringLenOffset, layout.PtrSize, layout.Order)
+	length, ok := mem.ReadUintptr(headerAddr+layout.StringLenOffset, layout.PtrSize, order)
 	if !ok {
 		return "", decodeError{StatusStringMissing, "string header length is unavailable"}
 	}
@@ -205,27 +239,28 @@ func DecodeString(mem *Memory, layout Layout, opts Options, headerAddr uint64) (
 	return s, nil
 }
 
-func FindCandidateGLabelsOffsets(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map[string]string, opts Options) []uint64 {
-	candidates := FindOffsetCandidates(snap, mem, want, opts)
-	out := make([]uint64, 0, len(candidates))
-	for _, c := range candidates {
-		out = append(out, c.Offset)
-	}
-	return out
-}
-
+// FindOffsetCandidates is a debug/diagnostic helper used by the
+// labeloffsetprobe and the `snapshot heap-labels --find-offset` command.
+// It scans each goroutine's runtime.g object contents for a pointer that,
+// when interpreted as a labelMap address, yields a label map containing
+// the requested label key/value pairs.
+//
+// The scan only works on 64-bit little-endian targets; on others it
+// returns an empty slice. Callers must treat candidates as candidates,
+// never as verified offsets.
 func FindOffsetCandidates(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map[string]string, opts Options) []OffsetCandidate {
 	opts = normalizeOptions(opts)
 	if snap == nil || len(want) == 0 {
 		return nil
 	}
-	layout, ok := LayoutFromSnapshot(snap, 0)
-	if !ok {
+	probeLayout, err := runtimelayout.Manual(LookupInputFromSnapshot(snap), 0)
+	if err != nil {
 		return nil
 	}
 	if mem == nil {
 		mem = NewMemory(snap)
 	}
+	order := probeLayout.ByteOrder()
 	byOffset := map[uint64]*OffsetCandidate{}
 	for _, g := range snap.Goroutines {
 		gRange, ok := mem.rangeContaining(g.Addr)
@@ -233,12 +268,12 @@ func FindOffsetCandidates(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map
 			continue
 		}
 		size := gRange.End - g.Addr
-		for off := uint64(0); off+uint64(layout.PtrSize) <= size; off += uint64(layout.PtrSize) {
-			ptr, ok := mem.ReadUintptr(g.Addr+off, layout.PtrSize, layout.Order)
+		for off := uint64(0); off+uint64(probeLayout.PtrSize) <= size; off += uint64(probeLayout.PtrSize) {
+			ptr, ok := mem.ReadUintptr(g.Addr+off, probeLayout.PtrSize, order)
 			if !ok || ptr == 0 {
 				continue
 			}
-			labels, err := DecodeLabelMap(mem, layout, opts, ptr)
+			labels, err := DecodeLabelMap(mem, probeLayout, opts, ptr)
 			if err != nil || !containsLabels(labels, want) {
 				continue
 			}
@@ -256,6 +291,18 @@ func FindOffsetCandidates(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map
 		out = append(out, *c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Offset < out[j].Offset })
+	return out
+}
+
+// FindCandidateGLabelsOffsets returns just the offset values from
+// FindOffsetCandidates. Kept for compatibility with the offline CLI test
+// surface.
+func FindCandidateGLabelsOffsets(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map[string]string, opts Options) []uint64 {
+	candidates := FindOffsetCandidates(snap, mem, want, opts)
+	out := make([]uint64, 0, len(candidates))
+	for _, c := range candidates {
+		out = append(out, c.Offset)
+	}
 	return out
 }
 

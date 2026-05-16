@@ -26,13 +26,16 @@ func TestPrintHeapLabelsDecode(t *testing.T) {
 
 	var out bytes.Buffer
 	err := PrintHeapLabels(&out, path, heapLabelCLIOptions{
-		DecodeOptions: heaplabels.Options{GLabelsOffset: 0x18, HasGLabelsOffset: true},
+		DecodeOptions:   heaplabels.Options{},
+		ManualOffset:    0x18,
+		HasManualOffset: true,
 	})
 	if err != nil {
 		t.Fatalf("PrintHeapLabels: %v", err)
 	}
 	got := out.String()
 	for _, want := range []string{
+		"layout source: manual",
 		"runtime.g.labels offset: 0x18",
 		"decoded labels: 1",
 		"goroutine 123",

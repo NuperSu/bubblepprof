@@ -16,10 +16,15 @@ const MemUsagePath = "/debug/memusage"
 // Protect it the same way you protect /debug/pprof in production: it
 // triggers a full heap dump on each call and can expose sensitive
 // memory information.
+//
+// All bool fields use negative defaults (Disable*, Include*) so the
+// zero-value MemUsageOptions{} matches MemUsageHandler()'s defaults:
+// GC before the heap dump, exclude system goroutines.
 type MemUsageOptions struct {
-	// GCBeforeHeapDump runs runtime.GC() immediately before
-	// debug.WriteHeapDump. Default true via MemUsageHandler.
-	GCBeforeHeapDump bool
+	// DisableGCBeforeHeapDump turns off the runtime.GC() that
+	// MemUsageHandler runs immediately before debug.WriteHeapDump. The
+	// default (false) keeps the GC enabled.
+	DisableGCBeforeHeapDump bool
 
 	// IncludeSystemGoroutines lets system/background goroutines
 	// participate in label matching. Default false.
@@ -37,8 +42,9 @@ type MemUsageOptions struct {
 }
 
 // MemUsageHandler returns an http.Handler that serves
-// POST /debug/memusage with a sensible default configuration:
-// GCBeforeHeapDump=true and IncludeSystemGoroutines=false.
+// POST /debug/memusage with the default configuration: GC runs before
+// the heap dump and system/background goroutines are excluded from
+// matching.
 //
 // The handler captures a heap dump on each request, parses it with
 // object contents retained, builds a process-wide reachability graph,
@@ -50,29 +56,31 @@ type MemUsageOptions struct {
 // net/http/pprof's Index. It should not be exposed to untrusted
 // callers.
 func MemUsageHandler() http.Handler {
-	return MemUsageHandlerWithOptions(MemUsageOptions{GCBeforeHeapDump: true})
+	return MemUsageHandlerWithOptions(MemUsageOptions{})
 }
 
 // MemUsageHandlerWithOptions returns an http.Handler with the supplied
-// MemUsageOptions.
+// MemUsageOptions. The zero value mirrors MemUsageHandler().
 func MemUsageHandlerWithOptions(opts MemUsageOptions) http.Handler {
-	computer := memusage.NewComputer(memusage.Options{
-		GCBeforeHeapDump:        opts.GCBeforeHeapDump,
-		IncludeSystemGoroutines: opts.IncludeSystemGoroutines,
-		MaxLabels:               opts.MaxLabels,
-		MaxLabelKeyBytes:        opts.MaxLabelKeyBytes,
-		MaxLabelValueBytes:      opts.MaxLabelValueBytes,
-	})
+	internal := opts.toInternal()
+	computer := memusage.NewComputer(internal)
 	return memusage.Handler(computer.Compute, memusage.HandlerOptions{
-		Opts: memusage.Options{
-			GCBeforeHeapDump:        opts.GCBeforeHeapDump,
-			IncludeSystemGoroutines: opts.IncludeSystemGoroutines,
-			MaxLabels:               opts.MaxLabels,
-			MaxLabelKeyBytes:        opts.MaxLabelKeyBytes,
-			MaxLabelValueBytes:      opts.MaxLabelValueBytes,
-		},
+		Opts:                internal,
 		MaxRequestBodyBytes: opts.MaxRequestBodyBytes,
 	})
+}
+
+// toInternal maps the public MemUsageOptions onto the internal
+// memusage.Options. It exists so the bool-flip and zero-value defaults
+// can be unit-tested without spinning up an HTTP server.
+func (o MemUsageOptions) toInternal() memusage.Options {
+	return memusage.Options{
+		GCBeforeHeapDump:        !o.DisableGCBeforeHeapDump,
+		IncludeSystemGoroutines: o.IncludeSystemGoroutines,
+		MaxLabels:               o.MaxLabels,
+		MaxLabelKeyBytes:        o.MaxLabelKeyBytes,
+		MaxLabelValueBytes:      o.MaxLabelValueBytes,
+	}
 }
 
 // RegisterMemUsage mounts MemUsageHandler at /debug/memusage on mux. It

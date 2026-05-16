@@ -113,3 +113,78 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 		t.Fatalf("unexpected status %d; body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestMemUsageHandler_RuntimePprofLiteralLabels documents the known
+// Phase 1 limitation: when the profiled program passes ordinary string
+// LITERALS to runtime/pprof.Labels (the common case), the bytes that
+// back those literals live in executable rodata, not heap objects, and
+// WriteHeapDump does not capture them. Phase 3 plans to add an
+// executable/process-memory reader to recover them.
+//
+// In the meantime, the endpoint MUST be honest: it may return either a
+// 200 if the runtime happens to allocate label bytes on the heap, or a
+// 422 string_missing diagnostic. It must NEVER silently fall back to
+// labels.json or goroutine.pprof.
+func TestMemUsageHandler_RuntimePprofLiteralLabels(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live heap-dump integration test in short mode")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	const payloadBytes = 4 << 20 // 4 MiB
+	started := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Plain string literals — exactly the pprof-compatible API.
+	pprof.Do(ctx, pprof.Labels("job", "literal-test"), func(ctx context.Context) {
+		go func() {
+			defer wg.Done()
+			pprof.SetGoroutineLabels(ctx)
+			data := make([]byte, payloadBytes)
+			for i := 0; i < len(data); i += 4096 {
+				data[i] = byte(i)
+			}
+			close(started)
+			<-ctx.Done()
+			runtime.KeepAlive(data)
+		}()
+	})
+	<-started
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	h := MemUsageHandler()
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, MemUsagePath,
+		strings.NewReader(`{"labels":{"job":"literal-test"}}`))
+	h.ServeHTTP(rr, req)
+
+	switch rr.Code {
+	case http.StatusOK:
+		var resp memusage.Response
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v\n%s", err, rr.Body.String())
+		}
+		if resp.Attribution != memusage.AttributionHeapNative &&
+			resp.Attribution != memusage.AttributionHeapNativeIncomplete {
+			t.Fatalf("unexpected attribution %q", resp.Attribution)
+		}
+		t.Logf("literal labels recoverable on this runtime: attribution=%q matched=%d",
+			resp.Attribution, resp.MatchedGoroutines)
+	case http.StatusUnprocessableEntity:
+		var er memusage.ErrorResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+			t.Fatalf("decode error response: %v\n%s", err, rr.Body.String())
+		}
+		if er.Code != "unsupported_runtime" && er.Code != "string_missing" {
+			t.Fatalf("422 code = %q; want unsupported_runtime or string_missing", er.Code)
+		}
+		t.Logf("literal labels not recoverable yet (Phase 3 target): code=%q", er.Code)
+	default:
+		t.Fatalf("unexpected status %d; body=%s", rr.Code, rr.Body.String())
+	}
+}

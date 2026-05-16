@@ -204,6 +204,75 @@ func TestHandler_BodyTooLarge(t *testing.T) {
 	}
 }
 
+func TestHandler_RejectsTrailingJSON(t *testing.T) {
+	h := Handler(stubCompute(nil, nil), HandlerOptions{})
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"trailing object", `{"labels":{"job":"42"}} {"extra":true}`},
+		{"trailing array", `{"labels":{"job":"42"}} []`},
+		{"trailing literal", `{"labels":{"job":"42"}} null`},
+		{"trailing garbage", `{"labels":{"job":"42"}} not-json`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(tc.body))
+			h.ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body=%q)", rr.Code, tc.body)
+			}
+			var er ErrorResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if er.Code != "invalid_request" {
+				t.Fatalf("code = %q, want invalid_request", er.Code)
+			}
+		})
+	}
+}
+
+func TestHandler_RejectsUnknownFields(t *testing.T) {
+	h := Handler(stubCompute(nil, nil), HandlerOptions{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage",
+		strings.NewReader(`{"labels":{"job":"42"},"extra":true}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+	var er ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if er.Code != "invalid_request" {
+		t.Fatalf("code = %q", er.Code)
+	}
+}
+
+func TestHandler_ValidationFromCompute(t *testing.T) {
+	// Simulate a compute function that returns a *ValidationError. The
+	// handler must translate it to 400 even though no handler-level
+	// validation triggered.
+	h := Handler(stubCompute(nil, NewValidationError("custom_code", "boom")), HandlerOptions{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage",
+		strings.NewReader(`{"labels":{"job":"42"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+	var er ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if er.Code != "custom_code" {
+		t.Fatalf("code = %q", er.Code)
+	}
+}
+
 func TestHandler_InternalError(t *testing.T) {
 	h := Handler(stubCompute(nil, errors.New("boom")), HandlerOptions{})
 	rr := httptest.NewRecorder()
