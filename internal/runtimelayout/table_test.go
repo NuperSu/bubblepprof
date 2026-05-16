@@ -14,10 +14,13 @@ func TestVerifiedTableShape(t *testing.T) {
 	}
 	want := []wantEntry{
 		{"go1.26.", "amd64", 8, 0x160},
+		{"go1.26.", "arm64", 8, 0x160},
 		{"go1.26.", "arm", 4, 0xd8},
 		{"go1.25.", "amd64", 8, 0x158},
+		{"go1.25.", "arm64", 8, 0x158},
 		{"go1.25.", "arm", 4, 0xd0},
 		{"go1.24.", "amd64", 8, 0x160},
+		{"go1.24.", "arm64", 8, 0x160},
 		{"go1.24.", "arm", 4, 0xd4},
 	}
 	if len(verifiedTable) != len(want) {

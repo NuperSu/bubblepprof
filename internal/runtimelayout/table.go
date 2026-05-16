@@ -34,6 +34,20 @@ var verifiedTable = []TableEntry{
 			Description:   "verified go1.26.0–go1.26.3 linux/amd64 runtime.g.labels offset 0x160",
 		}),
 	},
+	// Verified with cmd/labeloffsetprobe on linux/arm64
+	// (go1.26.0–go1.26.3 linux/arm64).
+	{
+		VersionPrefix: "go1.26.",
+		GOARCH:        "arm64",
+		PtrSize:       8,
+		BigEndian:     false,
+		Layout: with64BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "arm64",
+			GLabelsOffset: 0x160,
+			Description:   "verified go1.26.0–go1.26.3 linux/arm64 runtime.g.labels offset 0x160",
+		}),
+	},
 	// Verified with cmd/labeloffsetprobe on linux/arm/v7
 	// (go1.26.3 linux/arm).
 	{
@@ -60,6 +74,20 @@ var verifiedTable = []TableEntry{
 			GOARCH:        "amd64",
 			GLabelsOffset: 0x158,
 			Description:   "verified go1.25.0–go1.25.10 linux/amd64 runtime.g.labels offset 0x158",
+		}),
+	},
+	// Verified with cmd/labeloffsetprobe on linux/arm64
+	// (go1.25.0–go1.25.10 linux/arm64).
+	{
+		VersionPrefix: "go1.25.",
+		GOARCH:        "arm64",
+		PtrSize:       8,
+		BigEndian:     false,
+		Layout: with64BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "arm64",
+			GLabelsOffset: 0x158,
+			Description:   "verified go1.25.0–go1.25.10 linux/arm64 runtime.g.labels offset 0x158",
 		}),
 	},
 	// Verified with cmd/labeloffsetprobe on linux/arm/v7
@@ -91,6 +119,20 @@ var verifiedTable = []TableEntry{
 			GOARCH:        "amd64",
 			GLabelsOffset: 0x160,
 			Description:   "verified go1.24.0–go1.24.13 linux/amd64 runtime.g.labels offset 0x160",
+		}),
+	},
+	// Verified with cmd/labeloffsetprobe on linux/arm64
+	// (go1.24.0–go1.24.13 linux/arm64).
+	{
+		VersionPrefix: "go1.24.",
+		GOARCH:        "arm64",
+		PtrSize:       8,
+		BigEndian:     false,
+		Layout: with64BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "arm64",
+			GLabelsOffset: 0x160,
+			Description:   "verified go1.24.0–go1.24.13 linux/arm64 runtime.g.labels offset 0x160",
 		}),
 	},
 	// Verified with cmd/labeloffsetprobe on linux/arm/v7

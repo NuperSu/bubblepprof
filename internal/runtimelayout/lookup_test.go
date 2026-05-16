@@ -39,7 +39,6 @@ func TestLookupVerifiedGo126AMD64(t *testing.T) {
 func TestLookupMisses(t *testing.T) {
 	cases := []LookupInput{
 		{GoVersion: "go1.27.0", GOARCH: "amd64", PtrSize: 8},
-		{GoVersion: "go1.26.3", GOARCH: "arm64", PtrSize: 8},
 		{GoVersion: "go1.26.3", GOARCH: "amd64", PtrSize: 4},
 		{GoVersion: "go1.26.3", GOARCH: "amd64", PtrSize: 8, BigEndian: true},
 		{GoVersion: "", GOARCH: "amd64", PtrSize: 8},
@@ -98,6 +97,60 @@ func TestLookupVerifiedGo125AMD64(t *testing.T) {
 			}
 			if layout.GLabelsOffset != 0x158 {
 				t.Fatalf("GLabelsOffset = %#x, want 0x158", layout.GLabelsOffset)
+			}
+			if layout.GoVersion != v {
+				t.Fatalf("GoVersion = %q, want %q", layout.GoVersion, v)
+			}
+		})
+	}
+}
+
+func TestLookupVerifiedGo126ARM64(t *testing.T) {
+	cases := []string{"go1.26.0", "go1.26.3", "go1.26.999"}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			layout, ok := Lookup(LookupInput{GoVersion: v, GOARCH: "arm64", PtrSize: 8})
+			if !ok {
+				t.Fatalf("Lookup(%q arm64) returned false", v)
+			}
+			if layout.GLabelsOffset != 0x160 {
+				t.Fatalf("GLabelsOffset = %#x, want 0x160", layout.GLabelsOffset)
+			}
+			if layout.GoVersion != v {
+				t.Fatalf("GoVersion = %q, want %q", layout.GoVersion, v)
+			}
+		})
+	}
+}
+
+func TestLookupVerifiedGo125ARM64(t *testing.T) {
+	cases := []string{"go1.25.0", "go1.25.3", "go1.25.999"}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			layout, ok := Lookup(LookupInput{GoVersion: v, GOARCH: "arm64", PtrSize: 8})
+			if !ok {
+				t.Fatalf("Lookup(%q arm64) returned false", v)
+			}
+			if layout.GLabelsOffset != 0x158 {
+				t.Fatalf("GLabelsOffset = %#x, want 0x158", layout.GLabelsOffset)
+			}
+			if layout.GoVersion != v {
+				t.Fatalf("GoVersion = %q, want %q", layout.GoVersion, v)
+			}
+		})
+	}
+}
+
+func TestLookupVerifiedGo124ARM64(t *testing.T) {
+	cases := []string{"go1.24.0", "go1.24.3", "go1.24.999"}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			layout, ok := Lookup(LookupInput{GoVersion: v, GOARCH: "arm64", PtrSize: 8})
+			if !ok {
+				t.Fatalf("Lookup(%q arm64) returned false", v)
+			}
+			if layout.GLabelsOffset != 0x160 {
+				t.Fatalf("GLabelsOffset = %#x, want 0x160", layout.GLabelsOffset)
 			}
 			if layout.GoVersion != v {
 				t.Fatalf("GoVersion = %q, want %q", layout.GoVersion, v)
