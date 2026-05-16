@@ -305,11 +305,10 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 // SharedByGoroutinesObjects, UnreachableObjects).
 //
 // ComputeReachability is optional: Build no longer calls it. Callers
-// that need whole-process reachability (offline `snapshot graph` /
-// `snapshot bubbles`, the bubblereport builder) should run it
-// immediately after Build. The /debug/memusage handler skips this in
-// favour of a single union BFS over only the goroutines whose labels
-// match the request selector.
+// that need whole-process reachability (diagnostics, offline analysis)
+// should run it immediately after Build. The /debug/memusage handler
+// skips this in favour of a single union BFS over only the goroutines
+// whose labels match the request selector.
 //
 // Idempotent: running ComputeReachability twice yields the same sets
 // and stats.
