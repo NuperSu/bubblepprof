@@ -50,26 +50,48 @@ type MemUsageOptions struct {
 	MaxLabelValueBytes int
 }
 
-// MemUsageHandler returns an http.Handler that serves
-// POST /debug/memusage with the default configuration: GC runs before
-// the heap dump and system/background goroutines are excluded from
-// matching.
+// MemUsageHandler returns an http.Handler that serves POST /debug/memusage
+// with the default configuration: GC runs before the heap dump and
+// system/background goroutines are excluded from label matching.
 //
-// The handler captures a heap dump on each request, parses it with
-// object contents retained, builds a process-wide reachability graph,
-// recovers pprof labels directly from heap-dump runtime state, and
-// returns the heap memory reachable from goroutines whose recovered
-// labels contain every requested key/value pair.
+// On each request the handler stops all goroutines, captures a full heap
+// dump, parses it with object contents retained, recovers pprof labels
+// directly from heap-dump runtime state, builds a process-wide reachability
+// graph, and returns the heap memory reachable from goroutines whose
+// recovered labels contain every requested key/value pair.
 //
-// The handler is intended for diagnostic use, similar to
-// net/http/pprof's Index. It should not be exposed to untrusted
-// callers.
+// Security: this endpoint is equivalent in sensitivity to /debug/pprof.
+// A single call can expose pprof label values (which may include tenant
+// IDs, job identifiers, or other runtime metadata) and heap size
+// breakdowns. Protect it with the same authentication and network
+// controls you apply to /debug/pprof. It should never be exposed to
+// untrusted callers.
+//
+// Performance: each request triggers a stop-the-world heap dump.
+// Latency for the caller is proportional to live heap size. The handler
+// enforces single in-flight execution — concurrent callers receive 429.
+//
+// Label compatibility: profiled code should use the standard
+// runtime/pprof API directly. No bubblepprof wrapper is required:
+//
+//	pprof.Do(ctx, pprof.Labels("job", "42"), func(ctx context.Context) {
+//	    runJob(ctx)
+//	})
+//
+// Known limitations: heap-native label recovery is verified for
+// go1.26.* on amd64 (runtime.g.labels offset 0x160). On unsupported
+// runtime versions the endpoint returns HTTP 422 with code
+// "unsupported_runtime". When pprof label strings reside outside heap
+// object contents (common for string literals), the Linux process
+// memory reader is consulted; on other platforms or when /proc/self/mem
+// is unavailable the endpoint may return 422 with code "string_missing".
 func MemUsageHandler() http.Handler {
 	return MemUsageHandlerWithOptions(MemUsageOptions{})
 }
 
 // MemUsageHandlerWithOptions returns an http.Handler with the supplied
-// MemUsageOptions. The zero value mirrors MemUsageHandler().
+// MemUsageOptions. The zero value of MemUsageOptions mirrors MemUsageHandler().
+// See MemUsageHandler for security and performance notes.
 func MemUsageHandlerWithOptions(opts MemUsageOptions) http.Handler {
 	internal := opts.toInternal()
 	computer := memusage.NewComputer(internal)
@@ -93,9 +115,11 @@ func (o MemUsageOptions) toInternal() memusage.Options {
 	}
 }
 
-// RegisterMemUsage mounts MemUsageHandler at /debug/memusage on mux. It
-// is intentionally separate from Register: callers should opt in
-// explicitly because the endpoint is expensive and stop-the-world.
+// RegisterMemUsage mounts MemUsageHandler at /debug/memusage on mux.
+// It is intentionally separate from any default handler registration:
+// callers must opt in explicitly because the endpoint is expensive,
+// stop-the-world, and should be protected from untrusted callers.
+// See MemUsageHandler for the full security and performance contract.
 func RegisterMemUsage(mux *http.ServeMux) {
 	mux.Handle(MemUsagePath, MemUsageHandler())
 }

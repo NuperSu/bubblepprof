@@ -136,6 +136,20 @@ func (e *StringMissingError) Error() string {
 	return "pprof labels were found but some label string bytes were unavailable"
 }
 
+// CaptureFailedError is returned when the heap dump could not be written.
+// The handler maps it to HTTP 500 with code "capture_failed".
+type CaptureFailedError struct{ Cause error }
+
+func (e *CaptureFailedError) Error() string { return "capture heap dump: " + e.Cause.Error() }
+func (e *CaptureFailedError) Unwrap() error { return e.Cause }
+
+// ParseFailedError is returned when the heap dump could not be parsed.
+// The handler maps it to HTTP 500 with code "parse_failed".
+type ParseFailedError struct{ Cause error }
+
+func (e *ParseFailedError) Error() string { return "parse heap dump: " + e.Cause.Error() }
+func (e *ParseFailedError) Unwrap() error { return e.Cause }
+
 // ComputeFromAnalysis is the pure core of /debug/memusage: it takes a
 // structural object graph (built by snapshotgraph.Build, without the
 // optional ComputeReachability pass), a precomputed labelsByGID map,
@@ -207,7 +221,7 @@ func ComputeFromAnalysis(
 		return nil, &StringMissingError{
 			GoVersion: diag.GoVersion,
 			GOARCH:    diag.GOARCH,
-			Warnings:  append([]string(nil), diag.Warnings...),
+			Warnings:  append([]string{}, diag.Warnings...),
 		}
 	}
 
@@ -232,6 +246,7 @@ func ComputeFromAnalysis(
 		attribution = AttributionHeapNativeIncomplete
 	}
 
+	warnings := append([]string{}, diag.Warnings...)
 	resp := &Response{
 		Labels:               copyLabels(req.Labels),
 		MatchedGoroutines:    len(matched),
@@ -244,7 +259,7 @@ func ComputeFromAnalysis(
 		Attribution:          attribution,
 		GoVersion:            diag.GoVersion,
 		GOARCH:               diag.GOARCH,
-		Warnings:             append([]string(nil), diag.Warnings...),
+		Warnings:             warnings,
 	}
 	return resp, nil
 }
