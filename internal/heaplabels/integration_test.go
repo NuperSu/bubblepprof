@@ -105,9 +105,6 @@ type runtimeWorkerSpec struct {
 
 func captureRuntimePprofLabels(t *testing.T, specs ...runtimeWorkerSpec) (map[uint64]map[string]string, Result) {
 	t.Helper()
-	if runtime.GOARCH != "amd64" {
-		t.Skipf("runtime.g.labels test currently targets amd64, got %s", runtime.GOARCH)
-	}
 
 	stop := make(chan struct{})
 	defer close(stop)

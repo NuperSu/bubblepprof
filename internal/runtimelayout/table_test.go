@@ -8,12 +8,16 @@ import "testing"
 func TestVerifiedTableShape(t *testing.T) {
 	type wantEntry struct {
 		versionPrefix string
+		goarch        string
+		ptrSize       int
 		gLabelsOffset uint64
 	}
 	want := []wantEntry{
-		{"go1.26.", 0x160},
-		{"go1.25.", 0x158},
-		{"go1.24.", 0x160},
+		{"go1.26.", "amd64", 8, 0x160},
+		{"go1.26.", "arm", 4, 0xd8},
+		{"go1.25.", "amd64", 8, 0x158},
+		{"go1.25.", "arm", 4, 0xd0},
+		{"go1.24.", "amd64", 8, 0x160},
 	}
 	if len(verifiedTable) != len(want) {
 		t.Fatalf("verifiedTable size = %d, want %d; add a regression test if expanding", len(verifiedTable), len(want))
@@ -23,11 +27,11 @@ func TestVerifiedTableShape(t *testing.T) {
 		if e.VersionPrefix != w.versionPrefix {
 			t.Errorf("[%d] VersionPrefix = %q, want %q", i, e.VersionPrefix, w.versionPrefix)
 		}
-		if e.GOARCH != "amd64" {
-			t.Errorf("[%d] GOARCH = %q", i, e.GOARCH)
+		if e.GOARCH != w.goarch {
+			t.Errorf("[%d] GOARCH = %q, want %q", i, e.GOARCH, w.goarch)
 		}
-		if e.PtrSize != 8 {
-			t.Errorf("[%d] PtrSize = %d", i, e.PtrSize)
+		if e.PtrSize != w.ptrSize {
+			t.Errorf("[%d] PtrSize = %d, want %d", i, e.PtrSize, w.ptrSize)
 		}
 		if e.BigEndian {
 			t.Errorf("[%d] BigEndian = true, want false", i)
@@ -38,8 +42,9 @@ func TestVerifiedTableShape(t *testing.T) {
 		if e.Layout.GLabelsOffset != w.gLabelsOffset {
 			t.Errorf("[%d] Layout.GLabelsOffset = %#x, want %#x", i, e.Layout.GLabelsOffset, w.gLabelsOffset)
 		}
-		if e.Layout.LabelSize != 32 {
-			t.Errorf("[%d] Layout.LabelSize = %d", i, e.Layout.LabelSize)
+		wantLabelSize := uint64(w.ptrSize) * 4
+		if e.Layout.LabelSize != wantLabelSize {
+			t.Errorf("[%d] Layout.LabelSize = %d, want %d", i, e.Layout.LabelSize, wantLabelSize)
 		}
 	}
 }

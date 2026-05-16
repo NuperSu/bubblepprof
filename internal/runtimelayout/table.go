@@ -34,6 +34,20 @@ var verifiedTable = []TableEntry{
 			Description:   "verified go1.26.0–go1.26.3 linux/amd64 runtime.g.labels offset 0x160",
 		}),
 	},
+	// Verified with cmd/labeloffsetprobe on linux/arm/v7
+	// (go1.26.3 linux/arm).
+	{
+		VersionPrefix: "go1.26.",
+		GOARCH:        "arm",
+		PtrSize:       4,
+		BigEndian:     false,
+		Layout: with32BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "arm",
+			GLabelsOffset: 0xd8,
+			Description:   "verified go1.26.3 linux/arm runtime.g.labels offset 0xd8",
+		}),
+	},
 	// Verified with cmd/labeloffsetprobe on linux/amd64
 	// (go1.25.0–go1.25.10 linux/amd64).
 	{
@@ -46,6 +60,20 @@ var verifiedTable = []TableEntry{
 			GOARCH:        "amd64",
 			GLabelsOffset: 0x158,
 			Description:   "verified go1.25.0–go1.25.10 linux/amd64 runtime.g.labels offset 0x158",
+		}),
+	},
+	// Verified with cmd/labeloffsetprobe on linux/arm/v7
+	// (go1.25 linux/arm).
+	{
+		VersionPrefix: "go1.25.",
+		GOARCH:        "arm",
+		PtrSize:       4,
+		BigEndian:     false,
+		Layout: with32BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "arm",
+			GLabelsOffset: 0xd0,
+			Description:   "verified go1.25 linux/arm runtime.g.labels offset 0xd0",
 		}),
 	},
 	// Verified with cmd/labeloffsetprobe on linux/amd64
