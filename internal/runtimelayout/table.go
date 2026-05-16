@@ -93,6 +93,20 @@ var verifiedTable = []TableEntry{
 			Description:   "verified go1.24.0–go1.24.13 linux/amd64 runtime.g.labels offset 0x160",
 		}),
 	},
+	// Verified with cmd/labeloffsetprobe on linux/arm/v7
+	// (go1.24 linux/arm).
+	{
+		VersionPrefix: "go1.24.",
+		GOARCH:        "arm",
+		PtrSize:       4,
+		BigEndian:     false,
+		Layout: with32BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "arm",
+			GLabelsOffset: 0xd0,
+			Description:   "verified go1.24 linux/arm runtime.g.labels offset 0xd0",
+		}),
+	},
 }
 
 // Lookup returns the verified runtime layout that matches the input, or
