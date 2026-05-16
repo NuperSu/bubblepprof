@@ -9,9 +9,9 @@ import (
 
 // Memory exposes a heap snapshot's per-object contents as an
 // address-indexed byte source. It implements addrspace.Reader (and
-// addrspace.NamedReader) so the decoder can read through a composite
-// of heap memory + process/executable memory when callers supply an
-// ExtraMemory reader.
+// addrspace.NamedReader). Structural label reads (runtime.g, labelMap,
+// slice headers, string headers) use a Memory directly; string body
+// reads may use a composite that falls through to ExtraStringMemory.
 type Memory struct {
 	ranges []Range
 }

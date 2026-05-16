@@ -31,7 +31,7 @@ func TestParseProcMaps(t *testing.T) {
 	}
 }
 
-func TestProcessReader_ReadsHeapBackedString(t *testing.T) {
+func TestProcessReader_RejectsHeapBackedString(t *testing.T) {
 	r, err := OpenSelfProcessReader()
 	if err != nil {
 		t.Skipf("OpenSelfProcessReader: %v", err)
@@ -44,8 +44,7 @@ func TestProcessReader_ReadsHeapBackedString(t *testing.T) {
 
 	// Force a heap allocation we can address by virtual address. The
 	// string is built from a fresh []byte so the data pointer is
-	// definitely heap-backed (Go's compiler doesn't intern dynamic
-	// strings into rodata).
+	// definitely heap-backed (Go heap is in a writable mapping).
 	payload := []byte("process-reader-readback")
 	s := string(payload)
 	sh := (*stringHeader)(unsafe.Pointer(&s))
@@ -53,16 +52,33 @@ func TestProcessReader_ReadsHeapBackedString(t *testing.T) {
 		t.Fatalf("test string header invalid: %+v", sh)
 	}
 
-	got, ok := r.ReadAtAddr(uint64(sh.Data), uint64(sh.Len))
-	if !ok {
-		t.Skipf("ReadAtAddr(heap string at 0x%x len %d) failed; /proc/self/mem may be unavailable", sh.Data, sh.Len)
-	}
-	if string(got) != s {
-		t.Fatalf("ReadAtAddr bytes = %q, want %q", got, s)
+	// ProcessReader now rejects writable mappings (heap, stack, anonymous
+	// RW). Heap strings must never be served — they are already covered by
+	// the heap dump object contents and live in writable address space.
+	if _, ok := r.ReadAtAddr(uint64(sh.Data), uint64(sh.Len)); ok {
+		t.Fatalf("ProcessReader must reject heap-backed (writable) addresses at 0x%x len %d", sh.Data, sh.Len)
 	}
 
 	if got, ok := r.ReadAtAddr(0xdead, 0); !ok || len(got) != 0 {
 		t.Fatalf("zero-size read = %v ok=%t", got, ok)
+	}
+}
+
+func TestProcessReader_RejectsWritableMappings(t *testing.T) {
+	// Construct a ProcessReader with only writable mappings to verify
+	// that ReadAtAddr rejects them all regardless of address.
+	r := &ProcessReader{
+		maps: []Mapping{
+			{Start: 0x1000, End: 0x2000, Read: true, Write: true},  // rw- (heap-like)
+			{Start: 0x3000, End: 0x4000, Read: true, Write: true, Exec: true}, // rwx
+		},
+		mem: nil, // closed/nil — any successful lookup would panic on read
+	}
+	if _, ok := r.ReadAtAddr(0x1000, 8); ok {
+		t.Fatal("must reject rw- mapping (heap/stack)")
+	}
+	if _, ok := r.ReadAtAddr(0x3000, 8); ok {
+		t.Fatal("must reject rwx mapping")
 	}
 }
 
