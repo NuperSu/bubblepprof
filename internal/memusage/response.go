@@ -27,7 +27,7 @@ type Response struct {
 	Attribution string   `json:"attribution"`
 	GoVersion   string   `json:"go_version,omitempty"`
 	GOARCH      string   `json:"goarch,omitempty"`
-	Warnings    []string `json:"warnings,omitempty"`
+	Warnings    []string `json:"warnings"`
 }
 
 // ErrorResponse is the failure body for /debug/memusage. HTTP status is
@@ -38,5 +38,5 @@ type ErrorResponse struct {
 	Attribution string   `json:"attribution,omitempty"`
 	GoVersion   string   `json:"go_version,omitempty"`
 	GOARCH      string   `json:"goarch,omitempty"`
-	Warnings    []string `json:"warnings,omitempty"`
+	Warnings    []string `json:"warnings"`
 }
