@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"sync"
 
 	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heapdump"
@@ -96,10 +97,19 @@ func (DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addr
 // Computer captures, parses, and analyzes a heap dump to answer one
 // /debug/memusage request. It is a value with default-zero fields wired
 // to production implementations.
+//
+// The process memory reader (/proc/self/mem on Linux) is opened lazily on
+// the first Compute call and reused across subsequent requests. Call Close
+// when the Computer is no longer needed to release the underlying file
+// descriptor. Close must not be called concurrently with Compute.
 type Computer struct {
 	Capturer  HeapDumpCapturer
 	Recoverer LabelRecoverer
 	Opts      Options
+
+	procOnce    sync.Once
+	procReader  *addrspace.ProcessReader
+	procWarning string
 }
 
 // NewComputer returns a Computer wired to the runtime implementations.
@@ -109,6 +119,24 @@ func NewComputer(opts Options) *Computer {
 		Recoverer: DefaultLabelRecoverer{},
 		Opts:      opts,
 	}
+}
+
+// Close releases the cached process memory reader. Safe to call multiple
+// times. Computer must not be used after Close returns.
+func (c *Computer) Close() error {
+	if c == nil || c.procReader == nil {
+		return nil
+	}
+	return c.procReader.Close()
+}
+
+// processReader returns the cached process reader, opening it lazily on
+// first call. The returned reader must not be closed by the caller.
+func (c *Computer) processReader() (*addrspace.ProcessReader, string) {
+	c.procOnce.Do(func() {
+		c.procReader, c.procWarning = openProcessReader(c.Opts.DisableProcessMemoryReader)
+	})
+	return c.procReader, c.procWarning
 }
 
 // Compute runs the full /debug/memusage pipeline:
@@ -169,10 +197,7 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		return nil, err
 	}
 
-	procReader, procWarning := openProcessReader(c.Opts.DisableProcessMemoryReader)
-	if procReader != nil {
-		defer procReader.Close()
-	}
+	procReader, procWarning := c.processReader()
 
 	// Decode labels first so an unsupported runtime can short-circuit
 	// before the (expensive) graph build.

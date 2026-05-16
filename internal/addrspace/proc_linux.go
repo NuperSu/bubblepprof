@@ -71,8 +71,18 @@ func (r *ProcessReader) Mappings() []Mapping {
 	return out
 }
 
+// mappingEligibleForStringBody reports whether m is a mapping that
+// ProcessReader may serve string literal bytes from. Only read-only
+// mappings (rodata, text segments) are eligible. Writable mappings
+// (heap, stack, anonymous RW) are excluded because they represent live
+// mutable state rather than the stop-the-world snapshot, and heap/stack
+// string bytes are already covered by heap dump object contents.
+func mappingEligibleForStringBody(m Mapping) bool {
+	return m.Read && !m.Write
+}
+
 // ReadAtAddr implements Reader. It only succeeds when the requested
-// [addr, addr+size) range lies entirely inside a single readable
+// [addr, addr+size) range lies entirely inside a single eligible
 // mapping; cross-mapping reads return false.
 func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 	if r == nil || r.mem == nil {
@@ -89,12 +99,7 @@ func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		return nil, false
 	}
 	for _, m := range r.maps {
-		// Only serve read-only mappings (rodata, text). Writable mappings
-		// (heap, stack, anonymous RW) must never supply structural label
-		// bytes — they represent live mutable state, not the stop-the-world
-		// snapshot, and string body reads from heap/stack are already
-		// covered by the heap dump object contents.
-		if !m.Read || m.Write {
+		if !mappingEligibleForStringBody(m) {
 			continue
 		}
 		if addr >= m.Start && end <= m.End {

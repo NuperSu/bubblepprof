@@ -64,21 +64,23 @@ func TestProcessReader_RejectsHeapBackedString(t *testing.T) {
 	}
 }
 
-func TestProcessReader_RejectsWritableMappings(t *testing.T) {
-	// Construct a ProcessReader with only writable mappings to verify
-	// that ReadAtAddr rejects them all regardless of address.
-	r := &ProcessReader{
-		maps: []Mapping{
-			{Start: 0x1000, End: 0x2000, Read: true, Write: true},  // rw- (heap-like)
-			{Start: 0x3000, End: 0x4000, Read: true, Write: true, Exec: true}, // rwx
-		},
-		mem: nil, // closed/nil — any successful lookup would panic on read
+func TestMappingEligibleForStringBody(t *testing.T) {
+	cases := []struct {
+		name string
+		m    Mapping
+		want bool
+	}{
+		{"r--p (rodata)", Mapping{Read: true}, true},
+		{"r-xp (text)", Mapping{Read: true, Exec: true}, true},
+		{"rw-p (heap/stack)", Mapping{Read: true, Write: true}, false},
+		{"rwxp", Mapping{Read: true, Write: true, Exec: true}, false},
+		{"---p (no perms)", Mapping{}, false},
+		{"--xp (exec only)", Mapping{Exec: true}, false},
 	}
-	if _, ok := r.ReadAtAddr(0x1000, 8); ok {
-		t.Fatal("must reject rw- mapping (heap/stack)")
-	}
-	if _, ok := r.ReadAtAddr(0x3000, 8); ok {
-		t.Fatal("must reject rwx mapping")
+	for _, tc := range cases {
+		if got := mappingEligibleForStringBody(tc.m); got != tc.want {
+			t.Errorf("%s: mappingEligibleForStringBody=%v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

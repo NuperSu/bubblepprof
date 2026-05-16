@@ -80,7 +80,9 @@ func (m *Memory) Read(addr uint64, size uint64) ([]byte, bool) {
 		}
 		if addr >= r.Start && end <= r.End {
 			off := addr - r.Start
-			return r.Data[off : off+size], true
+			out := make([]byte, size)
+			copy(out, r.Data[off:off+size])
+			return out, true
 		}
 	}
 	return nil, false

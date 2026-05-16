@@ -62,7 +62,9 @@ func (r *RangeReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		}
 		if addr >= rg.Start && end <= rg.End {
 			off := addr - rg.Start
-			return rg.Data[off : off+size], true
+			out := make([]byte, size)
+			copy(out, rg.Data[off:off+size])
+			return out, true
 		}
 	}
 	return nil, false

@@ -20,17 +20,11 @@ Parse the JSON body. Reject requests with:
 
 Validation is purely structural; no heap activity.
 
-### Step 2 — Look up the runtime layout
-
-`runtime.g.labels` is a private field. Its offset within the `runtime.g` struct depends on the Go version and GOARCH. The endpoint consults a static table of verified offsets.
-
-If no entry exists for the current Go version and GOARCH, the endpoint returns `422 unsupported_runtime` immediately, before capturing any heap dump.
-
-### Step 3 — GC (optional)
+### Step 2 — GC (optional)
 
 If `GCBeforeHeapDump` is enabled (the default), `runtime.GC()` runs to reduce dead objects in the dump. This does not affect correctness, only the size of the snapshot.
 
-### Step 4 — Capture a heap dump
+### Step 3 — Capture a heap dump
 
 `runtime/debug.WriteHeapDump` stops all goroutines and serializes the entire heap to a temporary file. The stop-the-world pause is proportional to live heap size.
 
@@ -38,15 +32,19 @@ Object contents are retained in memory so the label decoder can read string byte
 
 After parsing, the temporary file is deleted.
 
-### Step 5 — Open the process memory reader (Linux)
+### Step 4 — Open the process memory reader (Linux)
 
 On Linux, `/proc/self/maps` is parsed to enumerate readable address-space mappings, and `/proc/self/mem` is opened for random reads. This reader lets the label decoder access string literal bytes that live in the executable's read-only data segment rather than inside heap objects.
 
 If the reader cannot be opened (non-Linux host, `/proc/self/mem` denied, or `DisableProcessMemoryReader` set), the endpoint continues with heap-object contents only and adds a warning. Literal-allocated labels may later fail with `string_missing`.
 
-### Step 6 — Decode pprof labels from heap dump runtime state
+### Step 5 — Decode pprof labels and look up the runtime layout
 
-For each goroutine record in the heap dump:
+The heap dump parameters contain the exact Go build version and pointer size. The label decoder uses these to consult a static table of verified `runtime.g.labels` field offsets.
+
+If no entry exists for the current Go version and GOARCH, the decoder marks every goroutine as unsupported and the endpoint returns `422 unsupported_runtime` before building the object graph.
+
+When the layout is known, for each goroutine record in the heap dump:
 
 1. Read the `runtime.g` address from the goroutine record.
 2. Apply the verified field offset to locate the `labels` pointer.
@@ -57,9 +55,9 @@ For each goroutine record in the heap dump:
 
 Goroutines whose labels cannot be fully decoded are excluded from matching with a `string_missing` attribution.
 
-The label decoder runs before graph construction. If the runtime layout is verified but label strings are missing, the endpoint returns `422 string_missing` rather than silently returning zero matches.
+Label decoding runs before graph construction. If the runtime layout is verified but label strings are missing, the endpoint returns `422 string_missing` rather than silently returning zero matches.
 
-### Step 7 — Build the structural object graph
+### Step 6 — Build the structural object graph
 
 `snapshotgraph.Build` converts the parsed heap dump into a process-wide directed graph:
 
@@ -70,19 +68,19 @@ The label decoder runs before graph construction. If the runtime layout is verif
 
 Reachability is **not** computed here. This step is structural only: O(objects + pointers).
 
-### Step 8 — Select matched goroutines
+### Step 7 — Select matched goroutines
 
 Walk all non-system goroutines (those not identified as GC workers, finalizer goroutines, g0, etc.). A goroutine is selected if its recovered label set contains **every** key/value pair in the request selector. Extra labels on the goroutine are allowed.
 
 If no goroutines match, the endpoint returns a successful `200` response with `matched_goroutines: 0` and `reachable_bytes: 0`.
 
-### Step 9 — Single BFS from the union of matched roots
+### Step 8 — Single BFS from the union of matched roots
 
 `snapshotgraph.ReachableFrom` performs one breadth-first search starting from the union of all matched goroutines' root sets. This is equivalent to computing the transitive closure of "any object reachable from any matched goroutine" in a single pass.
 
 Cost: O(reachable objects + reachable edges), bounded by the subgraph reachable from the selected goroutines, not the total process heap.
 
-### Step 10 — Compute global and system overlap
+### Step 9 — Compute global and system overlap
 
 If there are global roots, `snapshotgraph.ReachableFrom` runs a second time from the global root set. The intersection with the goroutine-reachable set yields `global_overlap_*`.
 
@@ -90,7 +88,7 @@ If system goroutines are excluded (the default), a third BFS runs from system go
 
 These overlaps are reported separately. They are not subtracted from `reachable_bytes` because the endpoint reports reachability from the selected goroutines as a fact, not an exclusive attribution.
 
-### Step 11 — Sum sizes and return JSON
+### Step 10 — Sum sizes and return JSON
 
 Iterate the reachable object set, summing `Object.Size` (the shallow size of each heap object as reported by the runtime). Return a `200` JSON response.
 
@@ -100,7 +98,7 @@ Iterate the reachable object set, summing `Object.Size` (the shallow size of eac
 
 Earlier prototype approaches used a separately captured `goroutine.pprof` for label recovery. That approach is rejected: `goroutine.pprof` is captured at a different runtime moment and may not match the heap dump, producing incorrect attribution.
 
-Process address space reads (Step 5) access only memory-mapped read-only segments. The string bytes at those addresses are immutable (string literals in Go are immutable), so reading them after the heap dump is consistent.
+Process address space reads (Step 4) access only memory-mapped read-only segments. The string bytes at those addresses are immutable (string literals in Go are immutable), so reading them after the heap dump is consistent.
 
 ## Concurrency control
 

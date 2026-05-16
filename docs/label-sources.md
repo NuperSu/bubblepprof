@@ -140,8 +140,9 @@ recovery reads string bytes through a composite address-space reader
 2. the current process's memory mappings (for the in-process endpoint:
    `addrspace.ProcessReader` parses `/proc/self/maps` and reads via
    `/proc/self/mem` on Linux),
-3. the executable's load segments (for offline debug:
-   `addrspace.ELFReader`, exposed as `--exe`).
+3. the executable's load segments (`addrspace.ELFReader` — an internal
+   library reader; `/debug/memusage` does not expose this as a
+   user-facing option).
 
 `/debug/memusage` opens the process memory reader by default on Linux.
 When the process reader is unavailable (non-Linux host, denied
@@ -186,8 +187,9 @@ go run ./cmd/labeloffsetprobe
   (or when `DisableProcessMemoryReader` is set), literal-allocated
   labels return `string_missing`.
 - The current verified prototype layout covers a single Go release.
-- Offline `--exe` ELF reading covers non-PIE binaries; PIE/ASLR
-  binaries require a load bias that the snapshot does not yet record.
+- `addrspace.ELFReader` covers non-PIE binaries; PIE/ASLR binaries
+  require a load bias that the snapshot does not yet record.
+  `/debug/memusage` does not expose ELF reading.
 
 ## What NOT to do
 
