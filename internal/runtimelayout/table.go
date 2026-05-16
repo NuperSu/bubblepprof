@@ -34,6 +34,20 @@ var verifiedTable = []TableEntry{
 			Description:   "verified go1.26.* amd64 runtime.g.labels layout",
 		}),
 	},
+	// Verified with cmd/labeloffsetprobe on linux/amd64
+	// (go version go1.25.0 linux/amd64).
+	{
+		VersionPrefix: "go1.25.",
+		GOARCH:        "amd64",
+		PtrSize:       8,
+		BigEndian:     false,
+		Layout: with64BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "amd64",
+			GLabelsOffset: 0x158,
+			Description:   "verified go1.25.* amd64 runtime.g.labels layout",
+		}),
+	},
 }
 
 // Lookup returns the verified runtime layout that matches the input, or

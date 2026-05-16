@@ -43,12 +43,39 @@ func TestLookupMisses(t *testing.T) {
 		{GoVersion: "go1.26.3", GOARCH: "amd64", PtrSize: 4},
 		{GoVersion: "go1.26.3", GOARCH: "amd64", PtrSize: 8, BigEndian: true},
 		{GoVersion: "", GOARCH: "amd64", PtrSize: 8},
-		{GoVersion: "go1.25.5", GOARCH: "amd64", PtrSize: 8},
+		{GoVersion: "go1.24.0", GOARCH: "amd64", PtrSize: 8},
 	}
 	for _, c := range cases {
 		if _, ok := Lookup(c); ok {
 			t.Fatalf("Lookup(%+v) returned true, want false", c)
 		}
+	}
+}
+
+func TestLookupVerifiedGo125AMD64(t *testing.T) {
+	cases := []string{
+		"go1.25.0",
+		"go1.25.3",
+		"go1.25.999",
+	}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			layout, ok := Lookup(LookupInput{
+				GoVersion: v,
+				GOARCH:    "amd64",
+				PtrSize:   8,
+				BigEndian: false,
+			})
+			if !ok {
+				t.Fatalf("Lookup(%q) returned false", v)
+			}
+			if layout.GLabelsOffset != 0x158 {
+				t.Fatalf("GLabelsOffset = %#x, want 0x158", layout.GLabelsOffset)
+			}
+			if layout.GoVersion != v {
+				t.Fatalf("GoVersion = %q, want %q", layout.GoVersion, v)
+			}
+		})
 	}
 }
 

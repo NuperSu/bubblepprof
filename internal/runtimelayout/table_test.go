@@ -6,29 +6,39 @@ import "testing"
 // accidental layout change (e.g. wrong offset, wrong source tag) shows up
 // as a test failure here instead of as silently-wrong production output.
 func TestVerifiedTableShape(t *testing.T) {
-	if len(verifiedTable) != 1 {
-		t.Fatalf("verifiedTable size = %d, want 1; add a regression test if expanding", len(verifiedTable))
+	type wantEntry struct {
+		versionPrefix string
+		gLabelsOffset uint64
 	}
-	e := verifiedTable[0]
-	if e.VersionPrefix != "go1.26." {
-		t.Fatalf("VersionPrefix = %q, want %q", e.VersionPrefix, "go1.26.")
+	want := []wantEntry{
+		{"go1.26.", 0x160},
+		{"go1.25.", 0x158},
 	}
-	if e.GOARCH != "amd64" {
-		t.Fatalf("GOARCH = %q", e.GOARCH)
+	if len(verifiedTable) != len(want) {
+		t.Fatalf("verifiedTable size = %d, want %d; add a regression test if expanding", len(verifiedTable), len(want))
 	}
-	if e.PtrSize != 8 {
-		t.Fatalf("PtrSize = %d", e.PtrSize)
-	}
-	if e.BigEndian {
-		t.Fatal("BigEndian = true, want false")
-	}
-	if e.Layout.Source != SourceTable {
-		t.Fatalf("Layout.Source = %q", e.Layout.Source)
-	}
-	if e.Layout.GLabelsOffset != 0x160 {
-		t.Fatalf("Layout.GLabelsOffset = %#x", e.Layout.GLabelsOffset)
-	}
-	if e.Layout.LabelSize != 32 {
-		t.Fatalf("Layout.LabelSize = %d", e.Layout.LabelSize)
+	for i, w := range want {
+		e := verifiedTable[i]
+		if e.VersionPrefix != w.versionPrefix {
+			t.Errorf("[%d] VersionPrefix = %q, want %q", i, e.VersionPrefix, w.versionPrefix)
+		}
+		if e.GOARCH != "amd64" {
+			t.Errorf("[%d] GOARCH = %q", i, e.GOARCH)
+		}
+		if e.PtrSize != 8 {
+			t.Errorf("[%d] PtrSize = %d", i, e.PtrSize)
+		}
+		if e.BigEndian {
+			t.Errorf("[%d] BigEndian = true, want false", i)
+		}
+		if e.Layout.Source != SourceTable {
+			t.Errorf("[%d] Layout.Source = %q", i, e.Layout.Source)
+		}
+		if e.Layout.GLabelsOffset != w.gLabelsOffset {
+			t.Errorf("[%d] Layout.GLabelsOffset = %#x, want %#x", i, e.Layout.GLabelsOffset, w.gLabelsOffset)
+		}
+		if e.Layout.LabelSize != 32 {
+			t.Errorf("[%d] Layout.LabelSize = %d", i, e.Layout.LabelSize)
+		}
 	}
 }
