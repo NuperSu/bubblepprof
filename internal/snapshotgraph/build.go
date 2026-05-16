@@ -17,13 +17,12 @@ import (
 // sets (GoroutineReachability.Reachable, GlobalReachability.Reachable)
 // and reach-derived Stats (GoroutineReachableObjects,
 // GlobalReachableObjects, SharedByGoroutinesObjects, UnreachableObjects)
-// are populated by ComputeReachability. Callers that need reachability
-// — e.g. the offline snapshot CLI and bubblereport — should call
-// ComputeReachability immediately after Build. Callers that only need
-// reachability for a label-selected subset of goroutines (the
-// /debug/memusage handler) should skip ComputeReachability and traverse
-// from the union of matched goroutine roots instead, paying for one BFS
-// rather than one per goroutine plus globals.
+// are populated by ComputeReachability. Callers that need whole-process
+// reachability should call ComputeReachability immediately after Build.
+// Callers that only need reachability for a label-selected subset of
+// goroutines (the /debug/memusage handler) should skip ComputeReachability
+// and traverse from the union of matched goroutine roots instead, paying
+// for one BFS rather than one per goroutine plus globals.
 //
 // Parser-level warnings from snap.Warnings are forwarded to
 // Analysis.Warnings with a "parse: " prefix so downstream consumers see
