@@ -4,20 +4,17 @@
 // each order fans out into fraud / dispatch / inventory / recommendation
 // stages, then funnels through payment authorization and receipt
 // rendering, with per-tenant aggregators retaining recent receipts so
-// the offline bubble report has meaningful per-bubble heap.
+// the memusage endpoint has meaningful per-bubble heap.
 //
-// Compared to a vanilla runtime/pprof program, every long-lived
-// goroutine is started through bubblepprof.Go (so its goroutine ID ends
-// up in the snapshot's labels.json) and every meaningful labeled scope
-// uses bubblepprof.Do (so the label stack persists across captures).
 // The standard runtime/pprof endpoints are still mounted at /debug/pprof
 // because bubblepprof does not replace pprof; it augments it.
 //
 // Try it:
 //
 //	go run ./examples/order_pipeline -duration 30s &
-//	curl http://127.0.0.1:6060/debug/bubblepprof/snapshot -o snapshot.tar
-//	./bubblepprof snapshot bubbles snapshot.tar
+//	curl -X POST http://127.0.0.1:6060/debug/memusage \
+//	  -H 'Content-Type: application/json' \
+//	  -d '{"labels":{"tenant":"atlas-bikes"}}'
 package main
 
 import (
@@ -131,11 +128,8 @@ func main() {
 		receipts:      make(chan Receipt, 4096),
 	}
 
-	// One mux serves both /debug/pprof (registered globally by the
-	// blank import of net/http/pprof on the DefaultServeMux) and the
-	// bubblepprof snapshot endpoint plus the /stats handler.
 	mux := http.NewServeMux()
-	bubblepprof.Register(mux)
+	bubblepprof.RegisterMemUsage(mux)
 	mux.HandleFunc("/stats", app.statsHandler)
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)
 
@@ -144,9 +138,9 @@ func main() {
 	goWithLabels(ctx, pprof.Labels(
 		"component", "observability",
 		"role", "http_endpoints",
-		"endpoint", "/debug/bubblepprof+/debug/pprof",
+		"endpoint", "/debug/memusage+/debug/pprof",
 	), func(ctx context.Context) {
-		log.Printf("bubblepprof snapshot: curl http://%s/debug/bubblepprof/snapshot -o snapshot.tar", *addr)
+		log.Printf("memusage endpoint:   curl -X POST http://%s/debug/memusage -H 'Content-Type: application/json' -d '{\"labels\":{\"tenant\":\"atlas-bikes\"}}'", *addr)
 		log.Printf("pprof endpoints:     http://%s/debug/pprof/", *addr)
 		log.Printf("stats:               http://%s/stats", *addr)
 
@@ -178,8 +172,8 @@ func main() {
 	}
 
 	// Per-tenant aggregator goroutines. Each owns the retained receipt
-	// buffer for one tenant, so a snapshot during steady state shows
-	// real heap reachable from tenant=X bubbles.
+	// buffer for one tenant, so a /debug/memusage query during steady
+	// state shows real heap reachable from tenant=X goroutines.
 	tenantInboxes := make(map[string]chan Receipt, len(tenantList))
 	for _, tenant := range tenantList {
 		inbox := make(chan Receipt, 1024)
@@ -226,15 +220,15 @@ func main() {
 	)
 }
 
-// goWithLabels stamps pprof labels on a fresh goroutine via
-// bubblepprof.Go. bubblepprof.Go reads the labels off ctx and both sets
-// runtime/pprof labels (so the standard goroutine profile carries
-// them) and records the new goroutine ID in the bubblepprof Registry
-// (so labels.json inside snapshot.tar can attribute heap usage back to
-// this goroutine).
+// goWithLabels stamps pprof labels on a fresh goroutine. It calls
+// pprof.SetGoroutineLabels so heap-native label recovery sees the labels
+// on the child goroutine.
 func goWithLabels(parent context.Context, labels pprof.LabelSet, fn func(context.Context)) {
 	ctx := pprof.WithLabels(parent, labels)
-	bubblepprof.Go(ctx, fn)
+	go func() {
+		pprof.SetGoroutineLabels(ctx)
+		fn(ctx)
+	}()
 }
 
 func (a *App) statsHandler(w http.ResponseWriter, r *http.Request) {
@@ -246,7 +240,6 @@ func (a *App) statsHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "dropped=%d\n", a.dropped.Load())
 	fmt.Fprintf(w, "sink=%d\n", a.sink.Load())
 	fmt.Fprintf(w, "goroutines=%d\n", runtime.NumGoroutine())
-	fmt.Fprintf(w, "registered labels: %d\n", len(bubblepprof.SnapshotLabels().Goroutines))
 }
 
 func (a *App) generateTraffic(ctx context.Context, rate int) {
@@ -322,11 +315,9 @@ func (a *App) ingestWorker(ctx context.Context, workerID int) {
 func (a *App) handleOrder(workerCtx context.Context, workerID int, order Order) {
 	a.started.Add(1)
 
-	// Do not label by order_id: that would create extremely high
-	// cardinality. Instead, label by dimensions you actually want to
-	// group into bubbles. bubblepprof.Do pushes onto the goroutine's
-	// label stack and pops on return, mirroring runtime/pprof.Do.
-	bubblepprof.Do(workerCtx, bubblepprof.Labels(
+	// Label by dimensions you actually want to group into bubbles.
+	// pprof.Do pushes onto the goroutine's label stack and pops on return.
+	pprof.Do(workerCtx, pprof.Labels(
 		"work", "order_checkout",
 		"tenant", order.Tenant,
 		"region", order.Region,
@@ -397,7 +388,7 @@ func (a *App) handleOrder(workerCtx context.Context, workerID int, order Order) 
 		}
 
 		approved := false
-		bubblepprof.Do(orderCtx, bubblepprof.Labels(
+		pprof.Do(orderCtx, pprof.Labels(
 			"service", "payment",
 			"stage", "authorize",
 			"gateway", paymentGateway(order),
@@ -418,7 +409,7 @@ func (a *App) handleOrder(workerCtx context.Context, workerID int, order Order) 
 		}
 
 		var receiptPayload []byte
-		bubblepprof.Do(orderCtx, bubblepprof.Labels(
+		pprof.Do(orderCtx, pprof.Labels(
 			"service", "fulfillment",
 			"stage", "pack",
 			"format", "gzip_receipt",
@@ -708,8 +699,8 @@ func paymentLane(order Order, fraudRisk int) string {
 
 // renderReceipt produces the gzipped receipt body and returns it. The
 // caller forwards it to the per-tenant aggregator; the payload stays
-// reachable from the aggregator goroutine, so heap snapshots show real
-// bytes attributed to that tenant's bubble.
+// reachable from the aggregator goroutine so /debug/memusage shows real
+// bytes attributed to that tenant.
 func (a *App) renderReceipt(ctx context.Context, order Order, workerID int, routeCost int, recScore int) []byte {
 	payload := map[string]any{
 		"order_id":   order.ID,
@@ -798,7 +789,7 @@ func (a *App) tenantAggregator(ctx context.Context, tenant string, inbox <-chan 
 }
 
 func (a *App) publishNotification(ctx context.Context, notification Notification) {
-	bubblepprof.Do(ctx, bubblepprof.Labels(
+	pprof.Do(ctx, pprof.Labels(
 		"service", "notifications",
 		"stage", "enqueue",
 		"channel", notification.Channel,
@@ -819,7 +810,7 @@ func (a *App) notificationWorker(ctx context.Context, workerID int) {
 			return
 
 		case notification := <-a.notifications:
-			bubblepprof.Do(ctx, bubblepprof.Labels(
+			pprof.Do(ctx, pprof.Labels(
 				"service", "notifications",
 				"stage", "deliver",
 				"channel", notification.Channel,

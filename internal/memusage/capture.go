@@ -2,12 +2,14 @@ package memusage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"runtime/debug"
 
+	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heaplabels"
 	"bubblepprof/internal/heapsnapshot"
@@ -62,8 +64,13 @@ func (RuntimeHeapDumpCapturer) CaptureHeapDump(ctx context.Context, gcBefore boo
 // LabelRecoverer is the interface used by Compute to recover heap-native
 // pprof labels from a parsed snapshot. The default implementation is
 // DefaultLabelRecoverer, which delegates to internal/heaplabels.
+//
+// extra is an optional addrspace.Reader (typically an
+// addrspace.ProcessReader on Linux for /debug/memusage) consulted when
+// label string bytes are not present in heap object contents. nil
+// disables the fallback.
 type LabelRecoverer interface {
-	Recover(snap *heapsnapshot.HeapSnapshot) (heaplabels.Result, error)
+	Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error)
 }
 
 // DefaultLabelRecoverer recovers labels via internal/heaplabels using the
@@ -74,7 +81,7 @@ type LabelRecoverer interface {
 type DefaultLabelRecoverer struct{}
 
 // Recover implements LabelRecoverer.
-func (DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot) (heaplabels.Result, error) {
+func (DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error) {
 	if snap == nil {
 		return heaplabels.Result{}, fmt.Errorf("memusage: nil heap snapshot")
 	}
@@ -83,7 +90,7 @@ func (DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot) (heaplabel
 	if !ok {
 		return heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input)), nil
 	}
-	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{}), nil
+	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{ExtraMemory: extra}), nil
 }
 
 // Computer captures, parses, and analyzes a heap dump to answer one
@@ -109,12 +116,17 @@ func NewComputer(opts Options) *Computer {
 //  1. Capture a heap dump to a temp file.
 //  2. Parse it with KeepObjectContents=true (required for heap-native
 //     label recovery).
-//  3. Resolve the runtime layout via runtimelayout.Lookup and recover
+//  3. Open an in-process address-space reader (Linux only; gated by
+//     Opts.DisableProcessMemoryReader) so the heap-label decoder can
+//     recover ordinary runtime/pprof string literals that live outside
+//     heap object contents.
+//  4. Resolve the runtime layout via runtimelayout.Lookup and recover
 //     pprof labels via the configured LabelRecoverer.
-//  4. If the runtime layout is unsupported, return UnsupportedRuntimeError
+//  5. If the runtime layout is unsupported, return UnsupportedRuntimeError
 //     before paying the graph-build cost.
-//  5. Build the object graph and per-goroutine/global reachability.
-//  6. Hand off to ComputeFromAnalysis.
+//  6. Build the object graph (structural; no reachability) and hand off
+//     to ComputeFromAnalysis, which performs the single reachability
+//     pass from matched roots.
 //
 // ctx.Err() is checked between stages so a cancelled client does not
 // pay for the parse/build work that follows WriteHeapDump (WriteHeapDump
@@ -157,13 +169,25 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		return nil, err
 	}
 
+	procReader, procWarning := openProcessReader(c.Opts.DisableProcessMemoryReader)
+	if procReader != nil {
+		defer procReader.Close()
+	}
+
 	// Decode labels first so an unsupported runtime can short-circuit
 	// before the (expensive) graph build.
-	result, err := recoverer.Recover(snap)
+	var extra addrspace.Reader
+	if procReader != nil {
+		extra = procReader
+	}
+	result, err := recoverer.Recover(snap, extra)
 	if err != nil {
 		return nil, fmt.Errorf("recover heap-native labels: %w", err)
 	}
 	diag := DiagnosticsFromHeapLabels(snap, result)
+	if procWarning != "" {
+		diag.Warnings = append(diag.Warnings, procWarning)
+	}
 	if diag.UnsupportedRuntime {
 		return nil, &UnsupportedRuntimeError{GoVersion: diag.GoVersion, GOARCH: diag.GOARCH}
 	}
@@ -178,4 +202,25 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	}
 
 	return ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, c.Opts)
+}
+
+// openProcessReader tries to open the in-process address-space reader
+// and returns a warning string describing the outcome when the reader
+// is not available. Callers must Close a non-nil reader.
+//
+// The warning string follows the literal phrasing required by Phase 3
+// so /debug/memusage clients can detect literal-label limitations from
+// the response alone. An empty warning means the reader is available.
+func openProcessReader(disabled bool) (*addrspace.ProcessReader, string) {
+	if disabled {
+		return nil, "process memory reader disabled by options; literal pprof label strings may be unrecoverable"
+	}
+	r, err := addrspace.OpenSelfProcessReader()
+	if err != nil {
+		if errors.Is(err, addrspace.ErrUnsupported) {
+			return nil, "process memory reader unavailable on this platform; literal pprof label strings may be unrecoverable"
+		}
+		return nil, fmt.Sprintf("process memory reader unavailable: %v; literal pprof label strings may be unrecoverable", err)
+	}
+	return r, ""
 }

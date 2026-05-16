@@ -114,17 +114,17 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 	}
 }
 
-// TestMemUsageHandler_RuntimePprofLiteralLabels documents the known
-// Phase 1 limitation: when the profiled program passes ordinary string
-// LITERALS to runtime/pprof.Labels (the common case), the bytes that
-// back those literals live in executable rodata, not heap objects, and
-// WriteHeapDump does not capture them. Phase 3 plans to add an
-// executable/process-memory reader to recover them.
+// TestMemUsageHandler_RuntimePprofLiteralLabels exercises the Phase 3
+// path that recovers literal pprof.Labels strings from the in-process
+// address space. On supported runtimes (Linux + Go 1.26.x amd64), the
+// endpoint should return 200 with heap-native attribution; the
+// stricter end-to-end assertions live in
+// TestMemUsageHandler_Phase3_LiteralLabelsRecovered.
 //
-// In the meantime, the endpoint MUST be honest: it may return either a
-// 200 if the runtime happens to allocate label bytes on the heap, or a
-// 422 string_missing diagnostic. It must NEVER silently fall back to
-// labels.json or goroutine.pprof.
+// This older test stays tolerant of 422 string_missing /
+// unsupported_runtime so it still passes on hosts where /proc/self/mem
+// cannot be opened or the runtime layout is unknown. It must NEVER
+// silently fall back to labels.json or goroutine.pprof.
 func TestMemUsageHandler_RuntimePprofLiteralLabels(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live heap-dump integration test in short mode")

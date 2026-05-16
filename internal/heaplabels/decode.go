@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heapsnapshot"
 	"bubblepprof/internal/runtimelayout"
 )
@@ -41,8 +42,9 @@ func DecodeAll(snap *heapsnapshot.HeapSnapshot, layout runtimelayout.Layout, opt
 	res.Stats.GoroutinesTotal = len(snap.Goroutines)
 
 	mem := NewMemory(snap)
+	reader := composeReader(mem, opts.ExtraMemory)
 	for _, g := range snap.Goroutines {
-		gr := DecodeLabelsForGoroutine(mem, layout, opts, g)
+		gr := DecodeLabelsForGoroutine(reader, layout, opts, g)
 		res.Goroutines = append(res.Goroutines, gr)
 		switch gr.Status {
 		case StatusDecoded:
@@ -85,8 +87,8 @@ func DecodeAllAuto(snap *heapsnapshot.HeapSnapshot, opts Options) Result {
 }
 
 // UnsupportedResult builds a Result that reports every goroutine as
-// unsupported_runtime with the supplied diagnostic. /debug/memusage and
-// labelresolve use this so the unsupported message is consistent.
+// unsupported_runtime with the supplied diagnostic. /debug/memusage uses
+// this so the unsupported message is consistent across callers.
 func UnsupportedResult(snap *heapsnapshot.HeapSnapshot, message string) Result {
 	res := Result{
 		LabelsByGID: make(map[uint64]map[string]string),
@@ -113,7 +115,12 @@ func UnsupportedResult(snap *heapsnapshot.HeapSnapshot, message string) Result {
 	return res
 }
 
-func DecodeLabelsForGoroutine(mem *Memory, layout runtimelayout.Layout, opts Options, g heapsnapshot.Goroutine) GoroutineResult {
+// DecodeLabelsForGoroutine decodes a single goroutine's labels using
+// the supplied address-space reader. The reader is typically a
+// composite of heap memory (for structural reads) plus an optional
+// extra reader (process/executable memory) consulted when string
+// bytes live outside heap object contents.
+func DecodeLabelsForGoroutine(reader addrspace.Reader, layout runtimelayout.Layout, opts Options, g heapsnapshot.Goroutine) GoroutineResult {
 	opts = normalizeOptions(opts)
 	gr := GoroutineResult{
 		GID:   g.ID,
@@ -130,7 +137,7 @@ func DecodeLabelsForGoroutine(mem *Memory, layout runtimelayout.Layout, opts Opt
 		gr.Error = "runtime.g.labels field address overflows"
 		return gr
 	}
-	labelsPtr, ok := mem.ReadUintptr(labelsFieldAddr, layout.PtrSize, layout.ByteOrder())
+	labelsPtr, ok := addrspace.ReadUintptr(reader, labelsFieldAddr, layout.PtrSize, layout.ByteOrder())
 	if !ok {
 		gr.Status = StatusGObjectMissing
 		gr.Error = "runtime.g object bytes are unavailable"
@@ -141,7 +148,7 @@ func DecodeLabelsForGoroutine(mem *Memory, layout runtimelayout.Layout, opts Opt
 		gr.Status = StatusNoLabels
 		return gr
 	}
-	labels, err := DecodeLabelMap(mem, layout, opts, labelsPtr)
+	labels, err := DecodeLabelMap(reader, layout, opts, labelsPtr)
 	if err != nil {
 		gr.Status = statusOf(err)
 		gr.Error = err.Error()
@@ -152,7 +159,11 @@ func DecodeLabelsForGoroutine(mem *Memory, layout runtimelayout.Layout, opts Opt
 	return gr
 }
 
-func DecodeLabelMap(mem *Memory, layout runtimelayout.Layout, opts Options, addr uint64) (map[string]string, error) {
+// DecodeLabelMap walks a labelMap pointed to by addr and returns its
+// flattened key/value map. Structural bytes (labelMap, slice header,
+// label array, string headers) must live inside the reader's heap
+// view; string contents may fall through to an extra reader.
+func DecodeLabelMap(reader addrspace.Reader, layout runtimelayout.Layout, opts Options, addr uint64) (map[string]string, error) {
 	opts = normalizeOptions(opts)
 	order := layout.ByteOrder()
 	setAddr, ok := addUint64(addr, layout.LabelMapSetOffset)
@@ -164,15 +175,15 @@ func DecodeLabelMap(mem *Memory, layout runtimelayout.Layout, opts Options, addr
 		return nil, decodeError{StatusMalformed, "label.Set list address overflows"}
 	}
 
-	dataPtr, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceDataOffset, layout.PtrSize, order)
+	dataPtr, ok := addrspace.ReadUintptr(reader, listHeaderAddr+layout.SliceDataOffset, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "labelMap object bytes are unavailable"}
 	}
-	length, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceLenOffset, layout.PtrSize, order)
+	length, ok := addrspace.ReadUintptr(reader, listHeaderAddr+layout.SliceLenOffset, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "label.Set list length is unavailable"}
 	}
-	capacity, ok := mem.ReadUintptr(listHeaderAddr+layout.SliceCapOffset, layout.PtrSize, order)
+	capacity, ok := addrspace.ReadUintptr(reader, listHeaderAddr+layout.SliceCapOffset, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "label.Set list capacity is unavailable"}
 	}
@@ -192,7 +203,7 @@ func DecodeLabelMap(mem *Memory, layout runtimelayout.Layout, opts Options, addr
 	if !ok {
 		return nil, decodeError{StatusMalformed, "label array size overflows"}
 	}
-	if _, ok := mem.Read(dataPtr, arrayBytes); !ok {
+	if _, ok := reader.ReadAtAddr(dataPtr, arrayBytes); !ok {
 		return nil, decodeError{StatusLabelArrayMissing, "label array bytes are unavailable"}
 	}
 
@@ -202,11 +213,11 @@ func DecodeLabelMap(mem *Memory, layout runtimelayout.Layout, opts Options, addr
 		if !ok {
 			return nil, decodeError{StatusMalformed, "label address overflows"}
 		}
-		key, err := DecodeString(mem, layout, opts, labelAddr+layout.LabelKeyOffset)
+		key, err := DecodeString(reader, layout, opts, labelAddr+layout.LabelKeyOffset)
 		if err != nil {
 			return nil, err
 		}
-		value, err := DecodeString(mem, layout, opts, labelAddr+layout.LabelValueOffset)
+		value, err := DecodeString(reader, layout, opts, labelAddr+layout.LabelValueOffset)
 		if err != nil {
 			return nil, err
 		}
@@ -215,14 +226,19 @@ func DecodeLabelMap(mem *Memory, layout runtimelayout.Layout, opts Options, addr
 	return labels, nil
 }
 
-func DecodeString(mem *Memory, layout runtimelayout.Layout, opts Options, headerAddr uint64) (string, error) {
+// DecodeString reads a Go string header at headerAddr and returns the
+// referenced bytes. The header itself comes from the reader (always
+// heap-resident); the string body may come from heap memory or, when
+// the reader is a composite, from the extra address space (process /
+// ELF) where literal label strings often live.
+func DecodeString(reader addrspace.Reader, layout runtimelayout.Layout, opts Options, headerAddr uint64) (string, error) {
 	opts = normalizeOptions(opts)
 	order := layout.ByteOrder()
-	dataPtr, ok := mem.ReadUintptr(headerAddr+layout.StringDataOffset, layout.PtrSize, order)
+	dataPtr, ok := addrspace.ReadUintptr(reader, headerAddr+layout.StringDataOffset, layout.PtrSize, order)
 	if !ok {
 		return "", decodeError{StatusStringMissing, "string header data pointer is unavailable"}
 	}
-	length, ok := mem.ReadUintptr(headerAddr+layout.StringLenOffset, layout.PtrSize, order)
+	length, ok := addrspace.ReadUintptr(reader, headerAddr+layout.StringLenOffset, layout.PtrSize, order)
 	if !ok {
 		return "", decodeError{StatusStringMissing, "string header length is unavailable"}
 	}
@@ -232,12 +248,43 @@ func DecodeString(mem *Memory, layout runtimelayout.Layout, opts Options, header
 	if length == 0 {
 		return "", nil
 	}
-	s, ok := mem.ReadString(dataPtr, length)
+	if dataPtr == 0 {
+		return "", decodeError{StatusStringMissing, "string header data pointer is nil"}
+	}
+	s, ok := addrspace.ReadString(reader, dataPtr, length, opts.MaxStringLen)
 	if !ok {
 		return "", decodeError{StatusStringMissing, fmt.Sprintf("string bytes unavailable at 0x%x length %d", dataPtr, length)}
 	}
 	return s, nil
 }
+
+// composeReader builds the address-space reader used during label
+// decoding. When ExtraMemory is supplied, a Composite is built that
+// prefers heap bytes (so structural reads always see the
+// stop-the-world snapshot) and falls through to the extra source for
+// addresses outside heap object contents.
+func composeReader(mem *Memory, extra addrspace.Reader) addrspace.Reader {
+	if extra == nil {
+		return mem
+	}
+	return addrspace.Composite{
+		Readers: []addrspace.NamedReader{mem, asNamedReader(extra)},
+	}
+}
+
+func asNamedReader(r addrspace.Reader) addrspace.NamedReader {
+	if r == nil {
+		return nil
+	}
+	if n, ok := r.(addrspace.NamedReader); ok {
+		return n
+	}
+	return unnamedReader{Reader: r}
+}
+
+type unnamedReader struct{ addrspace.Reader }
+
+func (unnamedReader) Name() string { return "extra" }
 
 // FindOffsetCandidates is a debug/diagnostic helper used by the
 // labeloffsetprobe and the `snapshot heap-labels --find-offset` command.
@@ -295,8 +342,7 @@ func FindOffsetCandidates(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map
 }
 
 // FindCandidateGLabelsOffsets returns just the offset values from
-// FindOffsetCandidates. Kept for compatibility with the offline CLI test
-// surface.
+// FindOffsetCandidates.
 func FindCandidateGLabelsOffsets(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map[string]string, opts Options) []uint64 {
 	candidates := FindOffsetCandidates(snap, mem, want, opts)
 	out := make([]uint64, 0, len(candidates))

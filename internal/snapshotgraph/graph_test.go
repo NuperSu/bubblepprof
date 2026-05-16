@@ -995,6 +995,70 @@ func TestFinalizerOnSelfReferentialObject(t *testing.T) {
 	}
 }
 
+// TestFinalizerTargetNotChargedToUnrelatedGoroutine is the explicit Phase C
+// acceptance check for criterion 6: a finalizer-rooted object must not be
+// included in a BFS from an unrelated user goroutine's roots.
+//
+// Model:
+//
+//	object A — reachable only from a finalizer (global root)
+//	object B — reachable only from a user goroutine's stack root
+//
+// ReachableFrom(goroutine roots) must return {B} only.
+// Globals.Reachable must contain {A}.
+// Selected BFS via ReachableFrom must not include A.
+func TestFinalizerTargetNotChargedToUnrelatedGoroutine(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 64},  // A: finalizer target
+			{Addr: 0x2000, Size: 128}, // B: owned by user goroutine
+		},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID: 7,
+			Frames: []heapsnapshot.StackFrame{{
+				FuncName:     "user.work",
+				PointerAddrs: []uint64{0x2000}, // goroutine root -> B only
+			}},
+		}},
+		Finalizers: []heapsnapshot.Finalizer{{ObjectAddr: 0x1000}}, // finalizer -> A
+	}
+
+	a := mustBuild(t, snap)
+
+	aID := idFor(t, a.Graph, 0x1000)
+	bID := idFor(t, a.Graph, 0x2000)
+
+	// Finalizer root must be in Globals, not in any goroutine.
+	if len(a.Globals.Roots) != 1 || a.Globals.Roots[0].Kind != "finalizer" {
+		t.Fatalf("expected one finalizer global root, got %+v", a.Globals.Roots)
+	}
+	if _, ok := a.Globals.Reachable[aID]; !ok {
+		t.Fatalf("A must be globally reachable (via finalizer root)")
+	}
+
+	// Goroutine BFS must reach B but not A.
+	gr := a.Goroutines[0]
+	if _, ok := gr.Reachable[bID]; !ok {
+		t.Fatalf("B must be reachable from goroutine 7's roots")
+	}
+	if _, ok := gr.Reachable[aID]; ok {
+		t.Fatalf("A must NOT be in goroutine 7's reachable set (it is finalizer-rooted only)")
+	}
+
+	// Direct ReachableFrom — the code path used by /debug/memusage — must also
+	// return only B when called with the goroutine's roots.
+	selected := ReachableFrom(a.Graph, gr.Roots)
+	if _, ok := selected[bID]; !ok {
+		t.Fatalf("ReachableFrom(goroutine roots): B missing")
+	}
+	if _, ok := selected[aID]; ok {
+		t.Fatalf("ReachableFrom(goroutine roots): A must not appear (finalizer object not charged to unrelated goroutine)")
+	}
+	if len(selected) != 1 {
+		t.Fatalf("ReachableFrom(goroutine roots) size = %d, want 1", len(selected))
+	}
+}
+
 // ReachableFrom must not panic on invalid root or invalid child edges.
 func TestReachableFromInvalidIDsSafe(t *testing.T) {
 	a := mustBuild(t, makeSnap([]heapsnapshot.Object{

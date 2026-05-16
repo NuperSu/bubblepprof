@@ -3,6 +3,8 @@ package bubblepprof
 import (
 	"context"
 	"runtime"
+	"runtime/pprof"
+	"strings"
 	"testing"
 
 	"bubblepprof/internal/capture"
@@ -11,7 +13,7 @@ import (
 	"bubblepprof/internal/runtimelayout"
 )
 
-func TestWrapperLiteralLabelsRecoverFromHeapDump(t *testing.T) {
+func TestHeapNativeLabelRecovery(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skipf("runtime.g.labels test currently targets amd64, got %s", runtime.GOARCH)
 	}
@@ -20,15 +22,20 @@ func TestWrapperLiteralLabelsRecoverFromHeapDump(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	Do(context.Background(), Labels("bubble", "alpha", "job", "42"), func(ctx context.Context) {
-		Go(ctx, func(ctx context.Context) {
-			data := make([]byte, 1<<20)
-			close(ready)
-			<-stop
-			runtime.KeepAlive(data)
-		})
-		<-ready
-	})
+	// Use heap-allocated label strings so bytes are in the heap dump object
+	// contents and recoverable without the process memory reader.
+	ctx := pprof.WithLabels(context.Background(), pprof.Labels(
+		strings.Clone("bubble"), strings.Clone("alpha"),
+		strings.Clone("job"), strings.Clone("42"),
+	))
+	go func() {
+		pprof.SetGoroutineLabels(ctx)
+		data := make([]byte, 1<<20)
+		close(ready)
+		<-stop
+		runtime.KeepAlive(data)
+	}()
+	<-ready
 
 	captured, err := capture.Capture(context.Background(), capture.CaptureOptions{GCBeforeHeapDump: true})
 	if err != nil {
@@ -53,6 +60,6 @@ func TestWrapperLiteralLabelsRecoverFromHeapDump(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("wrapper literal labels were not recovered from heap dump; stats=%+v warnings=%v",
+	t.Fatalf("pprof labels were not recovered from heap dump; stats=%+v warnings=%v",
 		res.Stats, res.Warnings)
 }

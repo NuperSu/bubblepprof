@@ -38,6 +38,15 @@ type Options struct {
 	// like ordinary user goroutines. Default false.
 	IncludeSystemGoroutines bool
 
+	// DisableProcessMemoryReader turns off the in-process address-space
+	// reader the handler opens (when running on Linux) so the heap-label
+	// decoder can recover ordinary runtime/pprof string literals that
+	// live outside heap object contents. When true, label decoding sees
+	// heap object contents only, which makes literal-allocated labels
+	// fail with status_missing. Useful in tests and in environments
+	// where /proc/self/mem access is undesirable.
+	DisableProcessMemoryReader bool
+
 	// Resource limits. Zero values fall back to the Default* constants.
 	MaxLabels          int
 	MaxLabelKeyBytes   int
