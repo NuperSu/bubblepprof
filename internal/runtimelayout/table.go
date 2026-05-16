@@ -21,7 +21,7 @@ type TableEntry struct {
 // against a heap dump produced by a live binary on that runtime.
 var verifiedTable = []TableEntry{
 	// Verified with cmd/labeloffsetprobe on linux/amd64
-	// (go version go1.26.3-X:nodwarf5 linux/amd64).
+	// (go1.26.0–go1.26.3 linux/amd64).
 	{
 		VersionPrefix: "go1.26.",
 		GOARCH:        "amd64",
@@ -31,11 +31,11 @@ var verifiedTable = []TableEntry{
 			Source:        SourceTable,
 			GOARCH:        "amd64",
 			GLabelsOffset: 0x160,
-			Description:   "verified go1.26.* amd64 runtime.g.labels layout",
+			Description:   "verified go1.26.0–go1.26.3 linux/amd64 runtime.g.labels offset 0x160",
 		}),
 	},
 	// Verified with cmd/labeloffsetprobe on linux/amd64
-	// (go version go1.25.0 linux/amd64).
+	// (go1.25.0–go1.25.10 linux/amd64).
 	{
 		VersionPrefix: "go1.25.",
 		GOARCH:        "amd64",
@@ -45,11 +45,11 @@ var verifiedTable = []TableEntry{
 			Source:        SourceTable,
 			GOARCH:        "amd64",
 			GLabelsOffset: 0x158,
-			Description:   "verified go1.25.* amd64 runtime.g.labels layout",
+			Description:   "verified go1.25.0–go1.25.10 linux/amd64 runtime.g.labels offset 0x158",
 		}),
 	},
 	// Verified with cmd/labeloffsetprobe on linux/amd64
-	// (go version go1.24.0 linux/amd64).
+	// (go1.24.0–go1.24.13 linux/amd64).
 	// go1.24 introduced internal/runtime/pprof and the struct-based label
 	// format ([]label.Label). go1.23 and earlier used map[string]string and
 	// are not supported by this decoder.
@@ -62,7 +62,7 @@ var verifiedTable = []TableEntry{
 			Source:        SourceTable,
 			GOARCH:        "amd64",
 			GLabelsOffset: 0x160,
-			Description:   "verified go1.24.* amd64 runtime.g.labels layout",
+			Description:   "verified go1.24.0–go1.24.13 linux/amd64 runtime.g.labels offset 0x160",
 		}),
 	},
 }
