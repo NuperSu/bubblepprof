@@ -90,7 +90,7 @@ func (DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addr
 	if !ok {
 		return heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input)), nil
 	}
-	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{ExtraMemory: extra}), nil
+	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{ExtraStringMemory: extra}), nil
 }
 
 // Computer captures, parses, and analyzes a heap dump to answer one
@@ -146,7 +146,7 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 
 	path, cleanup, err := capturer.CaptureHeapDump(ctx, c.Opts.GCBeforeHeapDump)
 	if err != nil {
-		return nil, fmt.Errorf("capture heap dump: %w", err)
+		return nil, &CaptureFailedError{Cause: err}
 	}
 	defer cleanup()
 
@@ -156,13 +156,13 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open heap dump: %w", err)
+		return nil, &CaptureFailedError{Cause: err}
 	}
 	defer f.Close()
 
 	snap, err := heapdump.Parse(f, heapdump.Options{KeepObjectContents: true})
 	if err != nil {
-		return nil, fmt.Errorf("parse heap dump: %w", err)
+		return nil, &ParseFailedError{Cause: err}
 	}
 
 	if err := ctx.Err(); err != nil {

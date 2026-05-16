@@ -18,18 +18,19 @@ type Options struct {
 	MaxLabels    uint64
 	MaxStringLen uint64
 
-	// ExtraMemory is an optional secondary address-space reader
-	// consulted when heap dump object contents do not cover the
-	// requested address. The decoder always tries heap memory first
-	// so structural reads (pointers, slice headers) see the
-	// stop-the-world snapshot exactly; ExtraMemory only fills in
-	// string bytes that live outside heap objects, typically pprof
-	// label string literals in the executable's read-only data.
+	// ExtraStringMemory is an optional secondary address-space reader
+	// consulted only when reading string body bytes (key or value
+	// characters) that live outside heap dump object contents. The
+	// decoder uses the heap-only reader for all structural reads
+	// (runtime.g, labelMap, slice headers, string headers);
+	// ExtraStringMemory is consulted solely for the raw bytes that
+	// follow a located string header.
 	//
-	// Set to addrspace.ProcessReader for the in-process
-	// /debug/memusage handler, or addrspace.ELFReader for offline
-	// `snapshot heap-labels --exe`. Nil disables the fallback.
-	ExtraMemory addrspace.Reader
+	// Typical use: set to addrspace.ProcessReader for the in-process
+	// /debug/memusage handler so ordinary pprof.Labels("job","42")
+	// string literals (which live in executable read-only data) are
+	// recovered. Nil disables the fallback.
+	ExtraStringMemory addrspace.Reader
 }
 
 // LookupInputFromSnapshot extracts the runtime-layout lookup key from a

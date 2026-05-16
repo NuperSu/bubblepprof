@@ -1,0 +1,59 @@
+# Known Limitations
+
+## Runtime layout dependency
+
+`runtime.g.labels` is a private field of the `runtime.g` struct. Its byte offset depends on the **exact Go version and GOARCH**. `bubblepprof` uses a static table of verified offsets.
+
+**Current verified support**: go1.26.\* on amd64 (pointer size 8, `runtime.g.labels` offset `0x160`).
+
+On any other Go version or architecture the endpoint returns `422 unsupported_runtime` and does not proceed. Future work requires either manual verification of new Go releases or a DWARF-based layout discovery path.
+
+## Label string recovery is Linux-first
+
+Ordinary pprof label strings created with `pprof.Labels("key", "value")` may have their byte content stored in the executable's read-only data segment rather than in heap objects. The heap dump alone does not contain those bytes.
+
+On Linux, `bubblepprof` reads those bytes from the running process via `/proc/self/mem`. On all other platforms, or when `/proc/self/mem` is unavailable (permission denied, `DisableProcessMemoryReader=true`), literal-allocated label strings return `string_missing` and the endpoint returns `422`.
+
+Heap-allocated label strings (e.g., from `strings.Clone("value")`) do not require the process reader and work on all platforms.
+
+## Shallow sizes only
+
+`reachable_bytes` is the **sum of shallow sizes** of heap objects reachable from matched goroutine roots. Each object is counted once. The size is the object's own footprint — not the transitive size of everything it points to.
+
+This is consistent with how `runtime.MemStats` counts objects, but it means that two goroutines sharing a large buffer will each appear to "reach" the full buffer; the overlap is reported in `global_overlap_bytes` / `system_overlap_bytes`, not subtracted from `reachable_bytes`.
+
+## Global and system overlap is not subtracted
+
+Objects reachable from both a matched goroutine and from global roots (data segment, BSS, finalizers) or system goroutines are included in `reachable_bytes` **and** reported in `global_overlap_bytes` / `system_overlap_bytes`. The endpoint does not automatically attribute shared objects to one owner.
+
+Callers that want exclusive attribution must subtract overlap manually or implement a more sophisticated ownership model.
+
+## Stop-the-world cost
+
+`runtime/debug.WriteHeapDump` stops all goroutines for the duration of the heap dump. On large heaps this pause can be seconds. The endpoint is not suitable for frequent polling in production. Use it for on-demand diagnostics, not continuous monitoring.
+
+A single `/debug/memusage` call holds an exclusive lock; concurrent callers receive `429 Too Many Requests`.
+
+## Disk I/O
+
+The heap dump is written to a temporary file in the OS default temp directory. A large heap requires proportional disk space. The file is deleted after parsing, but the deletion is best-effort and may leave a stale file if the process crashes during a request.
+
+## Sensitive data exposure
+
+The endpoint captures a full heap dump, which may contain any data currently in memory: secrets, keys, tokens, tenant data. Protect `/debug/memusage` with the same network-level and authentication controls you apply to `/debug/pprof`.
+
+## ELF reader and offline use
+
+The offline ELF reader (`internal/addrspace.ELFReader`) reads string bytes from executable load segments. It works reliably only for **non-PIE / non-ASLR** binaries: PIE binaries are loaded at a randomized base address at runtime, so static ELF `Vaddr` values do not match the addresses recorded in a heap dump captured from a running process.
+
+The in-process `/debug/memusage` endpoint is not affected by this limitation because it uses the process memory reader, which reads live virtual addresses directly.
+
+## System goroutine classification
+
+System goroutines (GC workers, finalizer goroutine, `g0`, `gsignal`, background scavenger, etc.) are excluded from label matching by default. Classification is heuristic: goroutines with no user-visible pprof labels and whose stack frames start in known runtime packages are treated as system goroutines.
+
+The heuristic may misclassify unusual goroutines. Set `IncludeSystemGoroutines: true` in `MemUsageOptions` to include all goroutines in label matching.
+
+## Interior pointer resolution
+
+The heap dump records pointer fields as raw virtual addresses. When a pointer targets the interior of an object (e.g., a pointer to the second element of an array), `bubblepprof` resolves it to the enclosing object. This is correct for GC reachability but means that a single large array is attributed as one unit, not per-element.

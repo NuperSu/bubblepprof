@@ -28,7 +28,7 @@ func TestHandler_RejectsNonPost(t *testing.T) {
 			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 				t.Fatalf("decode body: %v", err)
 			}
-			if body.Code != "method_not_allowed" {
+			if body.Code != "invalid_method" {
 				t.Fatalf("code = %q", body.Code)
 			}
 		})
@@ -285,8 +285,99 @@ func TestHandler_InternalError(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if er.Code != "internal" {
+	if er.Code != "internal_error" {
 		t.Fatalf("code = %q", er.Code)
+	}
+}
+
+func TestHandler_ZeroMatchReturns200(t *testing.T) {
+	// A valid request that matches no goroutines must return 200 with zero
+	// counts, not an error. "no match" is not an error condition.
+	want := &Response{
+		Labels:            map[string]string{"job": "missing"},
+		MatchedGoroutines: 0,
+		ReachableObjects:  0,
+		ReachableBytes:    0,
+		Attribution:       AttributionHeapNative,
+		Warnings:          []string{},
+	}
+	h := Handler(stubCompute(want, nil), HandlerOptions{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"job":"missing"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for zero-match", rr.Code)
+	}
+	var got Response
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.MatchedGoroutines != 0 || got.ReachableObjects != 0 || got.ReachableBytes != 0 {
+		t.Fatalf("expected zero counts, got %+v", got)
+	}
+	if got.Warnings == nil {
+		t.Fatal("warnings must be [] not null in JSON response")
+	}
+}
+
+func TestHandler_WarningsAlwaysPresent(t *testing.T) {
+	// Both success and error responses must emit "warnings": [] not null.
+	h := Handler(stubCompute(&Response{
+		Labels:      map[string]string{"a": "b"},
+		Attribution: AttributionHeapNative,
+	}, nil), HandlerOptions{})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"a":"b"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	raw := rr.Body.Bytes()
+	if !strings.Contains(string(raw), `"warnings":`) {
+		t.Fatalf("response body missing warnings field: %s", raw)
+	}
+
+	// Error path: validation failure.
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{}}`))
+	h.ServeHTTP(rr, req)
+	if !strings.Contains(rr.Body.String(), `"warnings":`) {
+		t.Fatalf("error response body missing warnings field: %s", rr.Body.String())
+	}
+}
+
+func TestHandler_CaptureFailed(t *testing.T) {
+	h := Handler(stubCompute(nil, &CaptureFailedError{Cause: errors.New("disk full")}), HandlerOptions{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"a":"b"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rr.Code)
+	}
+	var er ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if er.Code != "capture_failed" {
+		t.Fatalf("code = %q, want capture_failed", er.Code)
+	}
+}
+
+func TestHandler_ParseFailed(t *testing.T) {
+	h := Handler(stubCompute(nil, &ParseFailedError{Cause: errors.New("truncated")}), HandlerOptions{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"a":"b"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rr.Code)
+	}
+	var er ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if er.Code != "parse_failed" {
+		t.Fatalf("code = %q, want parse_failed", er.Code)
 	}
 }
 

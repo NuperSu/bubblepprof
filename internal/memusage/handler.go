@@ -56,7 +56,7 @@ func serve(
 		w.Header().Set("Allow", http.MethodPost)
 		writeError(w, http.StatusMethodNotAllowed, &ErrorResponse{
 			Error: "method not allowed; use POST",
-			Code:  "method_not_allowed",
+			Code:  "invalid_method",
 		})
 		return
 	}
@@ -150,9 +150,25 @@ func writeComputeError(w http.ResponseWriter, err error) {
 		})
 		return
 	}
+	var captureFailed *CaptureFailedError
+	if errors.As(err, &captureFailed) {
+		writeError(w, http.StatusInternalServerError, &ErrorResponse{
+			Error: captureFailed.Error(),
+			Code:  "capture_failed",
+		})
+		return
+	}
+	var parseFailed *ParseFailedError
+	if errors.As(err, &parseFailed) {
+		writeError(w, http.StatusInternalServerError, &ErrorResponse{
+			Error: parseFailed.Error(),
+			Code:  "parse_failed",
+		})
+		return
+	}
 	writeError(w, http.StatusInternalServerError, &ErrorResponse{
 		Error: err.Error(),
-		Code:  "internal",
+		Code:  "internal_error",
 	})
 }
 
@@ -167,5 +183,8 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 }
 
 func writeError(w http.ResponseWriter, status int, body *ErrorResponse) {
+	if body.Warnings == nil {
+		body.Warnings = []string{}
+	}
 	writeJSON(w, status, body)
 }

@@ -14,7 +14,7 @@
 //	*ProcessReader   — reads /proc/self/mem on Linux for the running
 //	                   process (used by /debug/memusage).
 //	*ELFReader       — reads PT_LOAD segments from an ELF executable
-//	                   on disk (used by offline snapshot CLI --exe).
+//	                   on disk (fallback when process memory is unavailable).
 //	Composite        — tries readers in order, returning the first hit.
 //
 // Readers never panic on malformed addresses, never silently truncate,
@@ -40,7 +40,8 @@ var ErrUnsupported = errors.New("addrspace: unsupported on this platform")
 //   - Return ok=false when addr == 0 and size > 0.
 //   - Return ok=false when addr + size overflows uint64.
 //   - Never panic; return ok=false for any unreadable range.
-//   - Return a fresh slice or immutable bytes; callers may retain them.
+//   - Return a fresh copy or a read-only view; callers MUST NOT modify
+//     the returned bytes, and may retain them after the call.
 type Reader interface {
 	ReadAtAddr(addr uint64, size uint64) ([]byte, bool)
 }

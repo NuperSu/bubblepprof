@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -88,10 +89,18 @@ func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		return nil, false
 	}
 	for _, m := range r.maps {
-		if !m.Read {
+		// Only serve read-only mappings (rodata, text). Writable mappings
+		// (heap, stack, anonymous RW) must never supply structural label
+		// bytes — they represent live mutable state, not the stop-the-world
+		// snapshot, and string body reads from heap/stack are already
+		// covered by the heap dump object contents.
+		if !m.Read || m.Write {
 			continue
 		}
 		if addr >= m.Start && end <= m.End {
+			if addr > math.MaxInt64 {
+				return nil, false
+			}
 			buf := make([]byte, size)
 			if _, err := r.mem.ReadAt(buf, int64(addr)); err != nil {
 				return nil, false

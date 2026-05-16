@@ -3,6 +3,7 @@ package addrspace
 import (
 	"debug/elf"
 	"fmt"
+	"math"
 	"os"
 )
 
@@ -17,8 +18,9 @@ type ELFSegment struct {
 }
 
 // ELFReader reads bytes from an ELF executable's PT_LOAD segments at
-// the segment's virtual addresses (Vaddr). It is intended for the
-// offline snapshot CLI: `bubblepprof snapshot heap-labels --exe …`.
+// the segment's virtual addresses (Vaddr). It recovers label string
+// literals from the executable's read-only data when ProcessReader is
+// unavailable (e.g. offline analysis).
 //
 // CAVEAT: Position-independent / ASLR-loaded executables run at a base
 // different from their on-disk Vaddrs. Without a load bias from the
@@ -121,6 +123,9 @@ func (r *ELFReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		}
 		if addr >= s.Vaddr && end <= segEnd {
 			fileOff := s.Off + (addr - s.Vaddr)
+			if fileOff > math.MaxInt64 {
+				return nil, false
+			}
 			buf := make([]byte, size)
 			if _, err := r.file.ReadAt(buf, int64(fileOff)); err != nil {
 				return nil, false
