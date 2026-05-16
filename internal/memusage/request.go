@@ -47,6 +47,13 @@ type Options struct {
 	// where /proc/self/mem access is undesirable.
 	DisableProcessMemoryReader bool
 
+	// AllowInferredLayout allows label recovery to proceed even when the
+	// Go version is not in the verified runtimelayout table. The best
+	// matching entry by GOARCH/PtrSize/BigEndian is used instead; a warning
+	// is added to the response. Useful for testing on unreleased or custom
+	// Go builds.
+	AllowInferredLayout bool
+
 	// Resource limits. Zero values fall back to the Default* constants.
 	MaxLabels          int
 	MaxLabelKeyBytes   int

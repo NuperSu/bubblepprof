@@ -39,6 +39,13 @@ type MemUsageOptions struct {
 	// status_missing. Default false (reader enabled).
 	DisableProcessMemoryReader bool
 
+	// AllowInferredLayout allows heap-native label recovery to proceed even
+	// when the running Go version is not in the verified runtime layout table.
+	// The best matching table entry by GOARCH/PtrSize/BigEndian is used instead
+	// and a warning is added to the response. Intended for development and
+	// testing on custom or unreleased Go builds; not recommended for production.
+	AllowInferredLayout bool
+
 	// MaxRequestBodyBytes caps the request body. Zero falls back to the
 	// internal default (1 MiB).
 	MaxRequestBodyBytes int64
@@ -109,6 +116,7 @@ func (o MemUsageOptions) toInternal() memusage.Options {
 		GCBeforeHeapDump:           !o.DisableGCBeforeHeapDump,
 		IncludeSystemGoroutines:    o.IncludeSystemGoroutines,
 		DisableProcessMemoryReader: o.DisableProcessMemoryReader,
+		AllowInferredLayout:        o.AllowInferredLayout,
 		MaxLabels:                  o.MaxLabels,
 		MaxLabelKeyBytes:           o.MaxLabelKeyBytes,
 		MaxLabelValueBytes:         o.MaxLabelValueBytes,
@@ -122,4 +130,11 @@ func (o MemUsageOptions) toInternal() memusage.Options {
 // See MemUsageHandler for the full security and performance contract.
 func RegisterMemUsage(mux *http.ServeMux) {
 	mux.Handle(MemUsagePath, MemUsageHandler())
+}
+
+// RegisterMemUsageWithOptions mounts MemUsageHandlerWithOptions at
+// /debug/memusage on mux. Use this when the zero-value MemUsageOptions
+// defaults are not sufficient.
+func RegisterMemUsageWithOptions(mux *http.ServeMux, opts MemUsageOptions) {
+	mux.Handle(MemUsagePath, MemUsageHandlerWithOptions(opts))
 }

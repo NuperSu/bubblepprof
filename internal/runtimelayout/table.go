@@ -64,6 +64,28 @@ func Lookup(input LookupInput) (Layout, bool) {
 	return Layout{}, false
 }
 
+// LookupBestEffort returns the first table entry that matches GOARCH, PtrSize,
+// and BigEndian, ignoring GoVersion. It is used when AllowInferredLayout is
+// set: the caller gets a best-effort layout for an unverified Go version and
+// must surface a warning. Returns (zero, false) when no arch/width match exists.
+func LookupBestEffort(input LookupInput) (Layout, bool) {
+	for _, e := range verifiedTable {
+		if e.GOARCH != input.GOARCH {
+			continue
+		}
+		if e.PtrSize != input.PtrSize {
+			continue
+		}
+		if e.BigEndian != input.BigEndian {
+			continue
+		}
+		layout := e.Layout
+		layout.GoVersion = input.GoVersion
+		return layout, true
+	}
+	return Layout{}, false
+}
+
 // UnsupportedMessage formats a stable diagnostic for callers that need to
 // explain why Lookup returned false. The wording is shared by the HTTP
 // endpoint and the offline CLI so logs/tests can match on it.
