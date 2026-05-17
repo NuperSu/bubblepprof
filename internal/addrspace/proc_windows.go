@@ -3,14 +3,17 @@
 package addrspace
 
 import (
-	"debug/gosym"
 	"debug/pe"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
-	"runtime"
+	"syscall"
+)
+
+var (
+	modkernel32         = syscall.NewLazyDLL("kernel32.dll")
+	procGetModuleHandle = modkernel32.NewProc("GetModuleHandleW")
 )
 
 const (
@@ -33,38 +36,36 @@ type ProcessReader struct {
 	file     *os.File
 	path     string
 	sections []peSection
-	slide    int64 // runtimeAddr - onDiskVirtualAddr
+	slide    int64 // actualLoadBase - preferredImageBase
 }
 
-// peSlideProbe is a do-nothing function whose runtime address (via
-// reflect) minus its on-disk pclntab address gives the current ASLR
-// slide. It must not be inlined so FuncForPC can find it.
-//
-//go:noinline
-func peSlideProbe() {}
-
 // OpenSelfProcessReader opens the current executable, parses its
-// readable PE sections, computes the ASLR slide, and returns a
-// reader. Callers must Close it.
+// readable PE sections, computes the ASLR slide via GetModuleHandle,
+// and returns a reader. Callers must Close it.
 func OpenSelfProcessReader() (*ProcessReader, error) {
-	exe, err := os.Executable()
+	exe, err := resolveExePath()
 	if err != nil {
-		return nil, fmt.Errorf("addrspace: executable path: %w", err)
-	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return nil, fmt.Errorf("addrspace: resolve symlinks for %q: %w", exe, err)
+		return nil, err
 	}
 
 	pf, err := pe.Open(exe)
 	if err != nil {
 		return nil, fmt.Errorf("addrspace: parse PE %q: %w", exe, err)
 	}
-	sects, slide, parseErr := parsePESections(pf)
+	imageBase, sects, parseErr := parsePE(pf)
 	pf.Close()
 	if parseErr != nil {
 		return nil, fmt.Errorf("addrspace: %w", parseErr)
 	}
+
+	// GetModuleHandleW(NULL) returns the actual load base of the current
+	// executable. Comparing it to the preferred ImageBase from the PE
+	// header gives the ASLR slide without needing pclntab.
+	r, _, callErr := procGetModuleHandle.Call(0)
+	if r == 0 {
+		return nil, fmt.Errorf("addrspace: GetModuleHandleW: %w", callErr)
+	}
+	slide := int64(r) - int64(imageBase)
 
 	f, err := os.Open(exe)
 	if err != nil {
@@ -73,14 +74,35 @@ func OpenSelfProcessReader() (*ProcessReader, error) {
 	return &ProcessReader{file: f, path: exe, sections: sects, slide: slide}, nil
 }
 
-func parsePESections(f *pe.File) ([]peSection, int64, error) {
+// resolveExePath returns the path to the running executable, falling back
+// to os.Args[0] when os.Executable returns "" (observed under Wine).
+func resolveExePath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		if len(os.Args) > 0 && os.Args[0] != "" {
+			exe = os.Args[0]
+		}
+	}
+	if exe == "" {
+		return "", fmt.Errorf("addrspace: cannot determine executable path")
+	}
+	if !filepath.IsAbs(exe) {
+		if wd, wdErr := os.Getwd(); wdErr == nil {
+			exe = filepath.Join(wd, exe)
+		}
+	}
+	// Resolve symlinks best-effort; ignore failure (Wine may not support all
+	// VFS operations needed by EvalSymlinks).
+	if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+		exe = resolved
+	}
+	return exe, nil
+}
+
+func parsePE(f *pe.File) (uint64, []peSection, error) {
 	imageBase, err := peImageBase(f)
 	if err != nil {
-		return nil, 0, err
-	}
-	slide, err := computePESlide(f, imageBase)
-	if err != nil {
-		return nil, 0, err
+		return 0, nil, err
 	}
 	var sects []peSection
 	for _, s := range f.Sections {
@@ -99,7 +121,7 @@ func parsePESections(f *pe.File) ([]peSection, int64, error) {
 			offset:      uint64(s.Offset),
 		})
 	}
-	return sects, slide, nil
+	return imageBase, sects, nil
 }
 
 func peImageBase(f *pe.File) (uint64, error) {
@@ -111,49 +133,6 @@ func peImageBase(f *pe.File) (uint64, error) {
 	default:
 		return 0, fmt.Errorf("unknown PE optional header type")
 	}
-}
-
-// computePESlide determines the ASLR slide by comparing the runtime
-// PC of peSlideProbe against its on-disk address from the binary's
-// pclntab. Both values use the same function name as the common key.
-func computePESlide(f *pe.File, imageBase uint64) (int64, error) {
-	var textAddr uint64
-	var pclntabData []byte
-	for _, s := range f.Sections {
-		switch s.Name {
-		case ".text":
-			textAddr = imageBase + uint64(s.VirtualAddress)
-		case ".gopclntab":
-			data, err := s.Data()
-			if err != nil {
-				return 0, fmt.Errorf("read .gopclntab: %w", err)
-			}
-			pclntabData = data
-		}
-	}
-	if pclntabData == nil {
-		return 0, fmt.Errorf("binary has no .gopclntab section (binary may be stripped)")
-	}
-	if textAddr == 0 {
-		return 0, fmt.Errorf("binary has no .text section")
-	}
-
-	lineTable := gosym.NewLineTable(pclntabData, textAddr)
-	symTable, err := gosym.NewTable(nil, lineTable)
-	if err != nil {
-		return 0, fmt.Errorf("parse pclntab: %w", err)
-	}
-
-	rpc := reflect.ValueOf(peSlideProbe).Pointer()
-	rtFn := runtime.FuncForPC(rpc)
-	if rtFn == nil {
-		return 0, fmt.Errorf("runtime.FuncForPC returned nil for probe")
-	}
-	sym := symTable.LookupFunc(rtFn.Name())
-	if sym == nil {
-		return 0, fmt.Errorf("probe %q not found in pclntab", rtFn.Name())
-	}
-	return int64(rpc) - int64(sym.Entry), nil
 }
 
 // Close releases the underlying executable file.
@@ -196,7 +175,8 @@ func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		return nil, false
 	}
 
-	// Convert runtime addresses to on-disk virtual addresses by subtracting slide.
+	// Convert runtime addresses to on-disk preferred virtual addresses
+	// by subtracting the ASLR slide.
 	ondisk := uint64(int64(addr) - r.slide)
 	ondiskEnd := uint64(int64(end) - r.slide)
 

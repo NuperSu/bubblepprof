@@ -147,17 +147,17 @@ func TestProcessReader_ReadsPartialSection(t *testing.T) {
 	}
 }
 
-func TestComputePESlide_IsNonNegative(t *testing.T) {
-	// On Windows with ASLR, the slide is always >= 0 (runtime address >=
-	// on-disk virtual address). A negative slide would indicate a bug in
-	// the pclntab lookup or an unusual binary layout.
+func TestProcessReader_SlideIsPlausible(t *testing.T) {
+	// The ASLR slide (GetModuleHandle - preferredImageBase) should be within
+	// a plausible range. A value outside ±4 GB would indicate a bug.
 	r, err := OpenSelfProcessReader()
 	if err != nil {
 		t.Fatalf("OpenSelfProcessReader: %v", err)
 	}
 	defer r.Close()
-	if r.slide < 0 {
-		t.Fatalf("slide = %d, expected >= 0", r.slide)
+	const fourGB = int64(4) << 30
+	if r.slide < -fourGB || r.slide > fourGB {
+		t.Fatalf("slide = %d, expected within ±4 GB", r.slide)
 	}
 }
 
