@@ -1,20 +1,10 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package addrspace
 
-// Mapping mirrors the Linux variant so callers that import this type
-// compile on every platform. Fields are unused on non-Linux builds.
-type Mapping struct {
-	Start uint64
-	End   uint64
-	Read  bool
-	Write bool
-	Exec  bool
-	Path  string
-}
-
-// ProcessReader is a stub for platforms where /proc/self/mem is not
-// available. OpenSelfProcessReader always returns ErrUnsupported.
+// ProcessReader is a stub for platforms where process memory reading
+// is not yet implemented. OpenSelfProcessReader always returns
+// ErrUnsupported.
 type ProcessReader struct{}
 
 // OpenSelfProcessReader returns ErrUnsupported on non-Linux builds.

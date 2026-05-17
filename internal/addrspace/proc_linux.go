@@ -12,17 +12,6 @@ import (
 	"strings"
 )
 
-// Mapping describes one entry of /proc/<pid>/maps: a contiguous virtual
-// address range with its permission and (optional) backing path.
-type Mapping struct {
-	Start uint64
-	End   uint64
-	Read  bool
-	Write bool
-	Exec  bool
-	Path  string
-}
-
 // ProcessReader reads bytes from the current process's address space
 // via /proc/self/mem, gated by the readable mappings reported in
 // /proc/self/maps. It is intended for the in-process /debug/memusage

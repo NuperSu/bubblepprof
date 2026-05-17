@@ -11,8 +11,9 @@
 //
 //	*RangeReader     — backed by an in-memory slice of byte ranges,
 //	                   used to expose heap dump object contents.
-//	*ProcessReader   — reads /proc/self/mem on Linux for the running
-//	                   process (used by /debug/memusage).
+//	*ProcessReader   — reads /proc/self/mem on Linux, or the Mach-O
+//	                   executable on Darwin, for the running process
+//	                   (used by /debug/memusage).
 //	*ELFReader       — reads PT_LOAD segments from an ELF executable
 //	                   on disk (fallback when process memory is unavailable).
 //	Composite        — tries readers in order, returning the first hit.

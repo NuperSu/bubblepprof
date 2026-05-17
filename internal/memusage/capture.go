@@ -67,7 +67,7 @@ func (RuntimeHeapDumpCapturer) CaptureHeapDump(ctx context.Context, gcBefore boo
 // DefaultLabelRecoverer, which delegates to internal/heaplabels.
 //
 // extra is an optional addrspace.Reader (typically an
-// addrspace.ProcessReader on Linux for /debug/memusage) consulted when
+// addrspace.ProcessReader on Linux/Darwin for /debug/memusage) consulted when
 // label string bytes are not present in heap object contents. nil
 // disables the fallback.
 type LabelRecoverer interface {
@@ -111,7 +111,7 @@ func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra ad
 // /debug/memusage request. It is a value with default-zero fields wired
 // to production implementations.
 //
-// The process memory reader (/proc/self/mem on Linux) is opened lazily on
+// The process memory reader (/proc/self/mem on Linux, Mach-O on Darwin) is opened lazily on
 // the first Compute call and reused across subsequent requests. Call Close
 // when the Computer is no longer needed to release the underlying file
 // descriptor. Close must not be called concurrently with Compute.
@@ -157,7 +157,7 @@ func (c *Computer) processReader() (*addrspace.ProcessReader, string) {
 //  1. Capture a heap dump to a temp file.
 //  2. Parse it with KeepObjectContents=true (required for heap-native
 //     label recovery).
-//  3. Open an in-process address-space reader (Linux only; gated by
+//  3. Open an in-process address-space reader (Linux and Darwin; gated by
 //     Opts.DisableProcessMemoryReader) so the heap-label decoder can
 //     recover ordinary runtime/pprof string literals that live outside
 //     heap object contents.
