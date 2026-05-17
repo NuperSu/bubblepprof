@@ -119,7 +119,7 @@ func captureRuntimePprofLabels(t *testing.T, specs ...runtimeWorkerSpec) (map[ui
 	}
 	defer captured.Cleanup()
 
-	snap, err := heapdump.Parse(captured.HeapDump, heapdump.Options{KeepObjectContents: true})
+	snap, err := heapdump.Parse(captured.HeapDump, heapdump.Options{KeepObjectContents: true, Strict: true})
 	if err != nil {
 		t.Fatalf("parse heap dump: %v", err)
 	}

@@ -188,7 +188,7 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	}
 	defer f.Close()
 
-	snap, err := heapdump.Parse(f, heapdump.Options{KeepObjectContents: true})
+	snap, err := heapdump.Parse(f, heapdump.Options{KeepObjectContents: true, Strict: true})
 	if err != nil {
 		return nil, &ParseFailedError{Cause: err}
 	}

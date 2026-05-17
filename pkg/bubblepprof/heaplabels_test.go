@@ -43,7 +43,7 @@ func TestHeapNativeLabelRecovery(t *testing.T) {
 	}
 	defer captured.Cleanup()
 
-	snap, err := heapdump.Parse(captured.HeapDump, heapdump.Options{KeepObjectContents: true})
+	snap, err := heapdump.Parse(captured.HeapDump, heapdump.Options{KeepObjectContents: true, Strict: true})
 	if err != nil {
 		t.Fatalf("Parse heap dump: %v", err)
 	}
