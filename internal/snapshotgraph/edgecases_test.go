@@ -197,6 +197,132 @@ func TestSummaryIncludesNewCounters(t *testing.T) {
 	}
 }
 
+func TestPrintSummary_WithWarnings(t *testing.T) {
+	a, err := Build(&heapsnapshot.HeapSnapshot{}, Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	a.Warnings = []string{"first warning", "second warning"}
+	var out bytes.Buffer
+	a.PrintSummary(&out)
+	got := out.String()
+	if !strings.Contains(got, "  warning: first warning") {
+		t.Fatalf("summary missing first warning:\n%s", got)
+	}
+	if !strings.Contains(got, "  warning: second warning") {
+		t.Fatalf("summary missing second warning:\n%s", got)
+	}
+}
+
+func TestComputeReachability_NilAnalysis(t *testing.T) {
+	// Should not panic.
+	ComputeReachability(nil)
+}
+
+func TestComputeReachability_NilGraph(t *testing.T) {
+	a := &Analysis{}
+	ComputeReachability(a) // should not panic
+}
+
+func TestComputeReachability_UnreachableNegativeClamp(t *testing.T) {
+	// Build a minimal analysis, add goroutine roots pointing to the object,
+	// then set Stats.Objects artificially low so
+	// unreachable = Objects - len(allReach) would be negative without the clamp.
+	a, err := Build(&heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Size: 8}},
+	}, Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	// Wire a goroutine root to object 0 so allReach = {0}.
+	a.Goroutines = []GoroutineReachability{{
+		GoroutineID: 1,
+		Roots:       []RootRef{{ObjectID: 0, Kind: "stack"}},
+	}}
+	// Set Stats.Objects < len(allReach) to trigger the negative clamp.
+	a.Stats.Objects = 0
+	ComputeReachability(a)
+	if a.Stats.UnreachableObjects != 0 {
+		t.Fatalf("UnreachableObjects = %d, want 0 (clamped from negative)", a.Stats.UnreachableObjects)
+	}
+}
+
+func TestComputeReachability_SharedObjects(t *testing.T) {
+	// Two goroutines sharing an object → SharedByGoroutinesObjects > 0.
+	a, err := Build(&heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Size: 8}},
+	}, Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	a.Goroutines = []GoroutineReachability{
+		{GoroutineID: 1, Roots: []RootRef{{ObjectID: 0, Kind: "stack"}}},
+		{GoroutineID: 2, Roots: []RootRef{{ObjectID: 0, Kind: "stack"}}},
+	}
+	ComputeReachability(a)
+	if a.Stats.SharedByGoroutinesObjects != 1 {
+		t.Fatalf("SharedByGoroutinesObjects = %d, want 1", a.Stats.SharedByGoroutinesObjects)
+	}
+}
+
+func TestFindObjectContaining_EmptyRanges(t *testing.T) {
+	// Graph with objects of size 1 → no interior pointer ranges → len(g.ranges)==0.
+	g := &Graph{
+		Objects: []Object{{ID: 0, Addr: 0x1000, Size: 1}},
+		ByAddr:  map[uint64]ObjectID{0x1000: 0},
+	}
+	// 0x1001 is not in ByAddr and ranges is empty → returns false
+	if _, ok := g.FindObjectContaining(0x1001); ok {
+		t.Fatal("expected false for addr beyond single-byte object")
+	}
+}
+
+func TestDataSegmentPointerSlots_NonPtrField(t *testing.T) {
+	// A segment with a non-Ptr field should skip it (continue branch).
+	seg := heapsnapshot.DataSegment{
+		Addr:         0x1000,
+		PointerAddrs: []uint64{0x2000},
+		Fields: []heapsnapshot.Field{
+			{Kind: heapsnapshot.FieldKindIface, Offset: 0}, // non-ptr field → continue
+			{Kind: heapsnapshot.FieldKindPtr, Offset: 8},  // ptr field
+		},
+	}
+	slots := dataSegmentPointerSlots(seg)
+	if len(slots) != 1 {
+		t.Fatalf("expected 1 slot, got %d", len(slots))
+	}
+	if slots[0] != 0x1008 {
+		t.Fatalf("slot = %#x, want 0x1008", slots[0])
+	}
+}
+
+func TestDataSegmentPointerSlots_NoFields(t *testing.T) {
+	seg := heapsnapshot.DataSegment{
+		Addr:         0x1000,
+		PointerAddrs: []uint64{0x2000},
+		Fields:       nil, // no fields → returns nil
+	}
+	slots := dataSegmentPointerSlots(seg)
+	if slots != nil {
+		t.Fatalf("expected nil, got %v", slots)
+	}
+}
+
+func TestAddSegmentGlobalRoots_EmptyKind(t *testing.T) {
+	seg := heapsnapshot.DataSegment{
+		Addr:         0x1000,
+		Kind:         "", // empty → falls back to defaultKind
+		PointerAddrs: []uint64{0x2000},
+	}
+	var gotKind string
+	addSegmentGlobalRoots(seg, "data", func(kind string, ptr, slot uint64, detail string) {
+		gotKind = kind
+	})
+	if gotKind != "data" {
+		t.Fatalf("kind = %q, want %q", gotKind, "data")
+	}
+}
+
 func warningContains(warnings []string, needle string) bool {
 	for _, w := range warnings {
 		if strings.Contains(w, needle) {

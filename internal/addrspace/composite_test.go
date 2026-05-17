@@ -131,6 +131,22 @@ func TestCompositeName(t *testing.T) {
 	}
 }
 
+func TestReadString_ReadAtFails(t *testing.T) {
+	r := stubReader{base: 0x1000, data: []byte("hello")}
+	// addr 0xdead is not in the stub range → ReadAtAddr returns false → ReadString returns false
+	if _, ok := ReadString(r, 0xdead, 5, 100); ok {
+		t.Fatal("ReadString with missing addr must fail")
+	}
+}
+
+func TestReadUintptr_ReadAtFails(t *testing.T) {
+	r := stubReader{base: 0x1000, data: []byte("hello")}
+	// addr 0xdead is not in the stub range → ReadAtAddr fails
+	if _, ok := ReadUintptr(r, 0xdead, 8, binary.LittleEndian); ok {
+		t.Fatal("ReadUintptr with missing addr must fail")
+	}
+}
+
 func TestReadStringRespectsMax(t *testing.T) {
 	r := stubReader{base: 0x1000, data: []byte("hello")}
 	if got, ok := ReadString(r, 0x1000, 5, 100); !ok || got != "hello" {
@@ -162,6 +178,46 @@ func TestReadUintptr(t *testing.T) {
 	}
 	if _, ok := ReadUintptr(nil, 0x1000, 8, binary.LittleEndian); ok {
 		t.Fatal("nil reader must fail")
+	}
+}
+
+func TestCompositeName_WithNilReader(t *testing.T) {
+	b := stubReader{name: "b"}
+	c := Composite{Readers: []NamedReader{nil, b, nil}}
+	if got := c.Name(); got != "composite[b]" {
+		t.Fatalf("Name = %q, want composite[b]", got)
+	}
+}
+
+func TestCompositeSourceFor_EdgeCases(t *testing.T) {
+	b := stubReader{name: "b", base: 0x2000, data: []byte{1}}
+	c := Composite{Readers: []NamedReader{nil, b}}
+
+	// addr == 0
+	if _, ok := c.SourceFor(0, 4); ok {
+		t.Fatal("SourceFor addr=0 must fail")
+	}
+	// overflow
+	if _, ok := c.SourceFor(^uint64(0), 4); ok {
+		t.Fatal("SourceFor overflow must fail")
+	}
+	// nil reader in loop (covered by Readers: []NamedReader{nil, b})
+	src, ok := c.SourceFor(0x2000, 1)
+	if !ok || src != "b" {
+		t.Fatalf("SourceFor with nil reader = %q ok=%t", src, ok)
+	}
+}
+
+func TestReadString_NilReader(t *testing.T) {
+	if _, ok := ReadString(nil, 0x1000, 5, 100); ok {
+		t.Fatal("nil reader must fail")
+	}
+}
+
+func TestReadUintptr_NilOrder(t *testing.T) {
+	r := stubReader{base: 0x1000, data: make([]byte, 8)}
+	if _, ok := ReadUintptr(r, 0x1000, 8, nil); ok {
+		t.Fatal("nil order must fail")
 	}
 }
 

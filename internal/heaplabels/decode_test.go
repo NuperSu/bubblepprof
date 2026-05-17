@@ -190,6 +190,28 @@ func syntheticLabelSnapshot(gLabelsOffset uint64, labels []kv) *heapsnapshot.Hea
 	}
 }
 
+// plainReader implements addrspace.Reader without addrspace.NamedReader so
+// asNamedReader wraps it in an unnamedReader, exercising Name() == "extra".
+type plainReader struct{}
+
+func (plainReader) ReadAtAddr(_, _ uint64) ([]byte, bool) { return nil, false }
+
+func TestAsNamedReader_UnnamedReaderName(t *testing.T) {
+	named := asNamedReader(plainReader{})
+	if named == nil {
+		t.Fatal("asNamedReader returned nil for non-nil reader")
+	}
+	if got := named.Name(); got != "extra" {
+		t.Fatalf("unnamedReader.Name() = %q, want %q", got, "extra")
+	}
+}
+
+func TestAsNamedReader_NilInput(t *testing.T) {
+	if got := asNamedReader(nil); got != nil {
+		t.Fatalf("asNamedReader(nil) = %v, want nil", got)
+	}
+}
+
 func writeStringHeader(buf []byte, off int, addr uint64, s string) {
 	writePtr(buf, off, addr)
 	writePtr(buf, off+8, uint64(len(s)))

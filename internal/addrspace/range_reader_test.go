@@ -55,6 +55,31 @@ func TestRangeReaderNilSafe(t *testing.T) {
 	}
 }
 
+func TestRangeReaderReadAtAddr_Overflow(t *testing.T) {
+	r := NewRangeReader("test", []Range{
+		{Start: 0x1000, End: 0x1008, Data: make([]byte, 8)},
+	})
+	if _, ok := r.ReadAtAddr(^uint64(0), 8); ok {
+		t.Fatal("overflow addr+size must fail")
+	}
+}
+
+func TestRangeReaderSort_SameStart(t *testing.T) {
+	// Two ranges with the same Start: sort falls back to End comparison.
+	r := NewRangeReader("test", []Range{
+		{Start: 0x1000, End: 0x1010, Data: make([]byte, 16)},
+		{Start: 0x1000, End: 0x1008, Data: make([]byte, 8)},
+	})
+	ranges := r.Ranges()
+	if len(ranges) != 2 {
+		t.Fatalf("expected 2 ranges, got %d", len(ranges))
+	}
+	// Shorter range should come first (End < End sorting)
+	if ranges[0].End >= ranges[1].End {
+		t.Fatalf("sort order: End[0]=%#x, End[1]=%#x — shorter should be first", ranges[0].End, ranges[1].End)
+	}
+}
+
 func TestRangeReaderName(t *testing.T) {
 	r := NewRangeReader("custom", nil)
 	if r.Name() != "custom" {

@@ -11,6 +11,28 @@ func TestOpenELFReader_Missing(t *testing.T) {
 	}
 }
 
+func TestELFReader_Name_NilReceiver(t *testing.T) {
+	var r *ELFReader
+	if got := r.Name(); got != "elf" {
+		t.Fatalf("nil ELFReader.Name() = %q, want %q", got, "elf")
+	}
+}
+
+func TestELFReader_Name_NonNil(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skipf("os.Executable: %v", err)
+	}
+	r, err := OpenELFReader(exe)
+	if err != nil {
+		t.Skipf("OpenELFReader failed: %v", err)
+	}
+	defer r.Close()
+	if got := r.Name(); got == "" || got == "elf" {
+		t.Fatalf("Name() = %q, want 'elf:<path>'", got)
+	}
+}
+
 func TestOpenELFReader_SelfExe(t *testing.T) {
 	// The Go test binary is itself an ELF executable on Linux. Skip on
 	// platforms where the test binary may not be ELF.

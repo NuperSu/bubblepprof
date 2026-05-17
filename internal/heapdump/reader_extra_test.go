@@ -113,6 +113,59 @@ func TestReadLineNoNewline(t *testing.T) {
 	}
 }
 
+func TestUvarint_Overflow_NinthByte(t *testing.T) {
+	// 9 continuation bytes + byte value 2 → overflow at i==9 (line 68)
+	data := make([]byte, 10)
+	for i := 0; i < 9; i++ {
+		data[i] = 0x80
+	}
+	data[9] = 0x02
+	r := newReader(bytes.NewReader(data), Limits{})
+	_, err := r.Uvarint()
+	if err == nil || err.Error() != "uvarint overflow" {
+		t.Fatalf("got %v, want 'uvarint overflow'", err)
+	}
+}
+
+func TestUvarint_Overflow_LoopExhausted(t *testing.T) {
+	// 10 continuation bytes → loop exhausts → overflow at line 75
+	data := make([]byte, 11)
+	for i := range data {
+		data[i] = 0x80
+	}
+	r := newReader(bytes.NewReader(data), Limits{})
+	_, err := r.Uvarint()
+	if err == nil || err.Error() != "uvarint overflow" {
+		t.Fatalf("got %v, want 'uvarint overflow'", err)
+	}
+}
+
+func TestBytes_ReadFullZeroBytes(t *testing.T) {
+	// length=5 but 0 bytes follow → io.ReadFull gets io.EOF → converted to io.ErrUnexpectedEOF
+	r := newReader(bytes.NewReader(encodeUvarint(5)), Limits{})
+	_, err := r.Bytes()
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("got %v, want io.ErrUnexpectedEOF", err)
+	}
+}
+
+func TestString_ExceedsMaxStringBytes(t *testing.T) {
+	r := newReader(bytes.NewReader(encodeUvarint(100)), Limits{MaxStringBytes: 10})
+	_, err := r.String()
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("got %v, want 'exceeds limit' error", err)
+	}
+}
+
+func TestString_ReadFullZeroBytes(t *testing.T) {
+	// length=5 but 0 bytes follow → io.EOF → converted to io.ErrUnexpectedEOF
+	r := newReader(bytes.NewReader(encodeUvarint(5)), Limits{})
+	_, err := r.String()
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("got %v, want io.ErrUnexpectedEOF", err)
+	}
+}
+
 func TestOffsetAdvances(t *testing.T) {
 	r := newReader(strings.NewReader("ab"), Limits{})
 	if r.Offset() != 0 {

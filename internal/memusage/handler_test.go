@@ -381,6 +381,15 @@ func TestHandler_ParseFailed(t *testing.T) {
 	}
 }
 
+func TestHandler_NilComputePanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for nil compute func, got none")
+		}
+	}()
+	Handler(nil, HandlerOptions{})
+}
+
 func stubCompute(resp *Response, err error) ComputeFunc {
 	return func(ctx context.Context, req Request) (*Response, error) {
 		if err != nil {

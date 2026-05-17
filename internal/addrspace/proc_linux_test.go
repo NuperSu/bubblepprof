@@ -100,6 +100,116 @@ func TestProcessReader_CloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestProcessReader_Name(t *testing.T) {
+	r, err := OpenSelfProcessReader()
+	if err != nil {
+		t.Skipf("OpenSelfProcessReader: %v", err)
+	}
+	defer r.Close()
+	if got := r.Name(); got != "process" {
+		t.Fatalf("Name() = %q, want %q", got, "process")
+	}
+}
+
+func TestProcessReader_Mappings(t *testing.T) {
+	r, err := OpenSelfProcessReader()
+	if err != nil {
+		t.Skipf("OpenSelfProcessReader: %v", err)
+	}
+	defer r.Close()
+	m := r.Mappings()
+	if len(m) == 0 {
+		t.Fatal("Mappings() returned empty slice")
+	}
+}
+
+func TestProcessReader_Mappings_NilReceiver(t *testing.T) {
+	var r *ProcessReader
+	if got := r.Mappings(); got != nil {
+		t.Fatalf("(*ProcessReader)(nil).Mappings() = %v, want nil", got)
+	}
+}
+
+func TestProcessReader_ReadAtAddr_NilReceiver(t *testing.T) {
+	var r *ProcessReader
+	if _, ok := r.ReadAtAddr(0x1000, 8); ok {
+		t.Fatal("(*ProcessReader)(nil).ReadAtAddr should return false")
+	}
+}
+
+func TestProcessReader_ReadAtAddr_Overflow(t *testing.T) {
+	r, err := OpenSelfProcessReader()
+	if err != nil {
+		t.Skipf("OpenSelfProcessReader: %v", err)
+	}
+	defer r.Close()
+	// addr + size overflows uint64 → should return false, not panic.
+	const maxUint64 = ^uint64(0)
+	if _, ok := r.ReadAtAddr(maxUint64, 8); ok {
+		t.Fatal("overflow read should return false")
+	}
+}
+
+func TestParseProcMaps_EdgeCases(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		count int
+	}{
+		{
+			name:  "empty range end==start",
+			input: "55a000000000-55a000000000 r-xp 00000000 fd:01 1\n",
+			count: 0, // rejected: end <= start
+		},
+		{
+			name:  "no dash in range",
+			input: "55a000000000 r-xp 00000000 fd:01 1\n",
+			count: 0,
+		},
+		{
+			name:  "bad hex in start",
+			input: "zzzz-55a000010000 r-xp 00000000 fd:01 1\n",
+			count: 0,
+		},
+		{
+			name:  "bad hex in end",
+			input: "55a000000000-zzzz r-xp 00000000 fd:01 1\n",
+			count: 0,
+		},
+		{
+			name:  "perms string too short",
+			input: "55a000000000-55a000010000 r- 00000000 fd:01 1\n",
+			count: 0,
+		},
+		{
+			name:  "only one field",
+			input: "55a000000000-55a000010000\n",
+			count: 0,
+		},
+		{
+			name:  "empty line",
+			input: "\n",
+			count: 0,
+		},
+		{
+			name:  "valid line with 5 fields (no path)",
+			input: "55a000000000-55a000010000 r-xp 00000000 fd:01 1\n",
+			count: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseProcMaps(strings.NewReader(tc.input))
+			if err != nil {
+				t.Fatalf("parseProcMaps: %v", err)
+			}
+			if len(got) != tc.count {
+				t.Fatalf("len = %d, want %d (got %+v)", len(got), tc.count, got)
+			}
+		})
+	}
+}
+
 // stringHeader mirrors reflect.StringHeader without depending on its
 // (deprecated) public type.
 type stringHeader struct {

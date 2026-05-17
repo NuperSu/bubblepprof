@@ -29,6 +29,59 @@ func TestMemoryRead(t *testing.T) {
 	}
 }
 
+func TestMemory_Name(t *testing.T) {
+	mem := NewMemory(nil)
+	if got := mem.Name(); got != "heap" {
+		t.Fatalf("Name() = %q, want %q", got, "heap")
+	}
+}
+
+func TestMemory_Read_Overflow(t *testing.T) {
+	mem := NewMemory(&heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Contents: []byte{1, 2, 3, 4}}},
+	})
+	// addr + size overflows uint64
+	if _, ok := mem.Read(^uint64(0), 8); ok {
+		t.Fatal("overflow addr+size must fail")
+	}
+}
+
+func TestMemory_ReadUintptr_MissingAddr(t *testing.T) {
+	buf := make([]byte, 8)
+	mem := NewMemory(&heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Contents: buf}},
+	})
+	// 0xdead is not in memory
+	if _, ok := mem.ReadUintptr(0xdead, 8, binary.LittleEndian); ok {
+		t.Fatal("ReadUintptr with missing addr must fail")
+	}
+}
+
+func TestMemory_ReadString_MissingAddr(t *testing.T) {
+	mem := NewMemory(&heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Contents: []byte("hello")}},
+	})
+	// 0xdead is not in memory
+	if _, ok := mem.ReadString(0xdead, 5); ok {
+		t.Fatal("ReadString with missing addr must fail")
+	}
+}
+
+func TestNewMemory_SameStartAddr(t *testing.T) {
+	// Two objects with the same Addr trigger the sort.Slice tie-breaker.
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Contents: []byte{1, 2, 3, 4, 5, 6, 7, 8}},         // [0x1000, 0x1008)
+			{Addr: 0x1000, Contents: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}}, // [0x1000, 0x100a)
+		},
+	}
+	mem := NewMemory(snap)
+	// Both ranges are stored; verify memory reads work (no panic from sort).
+	if _, ok := mem.Read(0x1000, 8); !ok {
+		t.Fatal("expected successful read from first range")
+	}
+}
+
 func TestMemoryReadUintptr(t *testing.T) {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, 0x1122334455667788)

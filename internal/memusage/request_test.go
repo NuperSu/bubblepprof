@@ -82,6 +82,27 @@ func TestValidateRequest(t *testing.T) {
 	}
 }
 
+func TestValidationError_Error(t *testing.T) {
+	e := &ValidationError{Code: "test_code", Msg: "test message"}
+	if got := e.Error(); got != "test message" {
+		t.Fatalf("Error() = %q, want %q", got, "test message")
+	}
+}
+
+func TestOptions_EffectiveMaxLabelKeyBytes_Custom(t *testing.T) {
+	o := Options{MaxLabelKeyBytes: 512}
+	if got := o.effectiveMaxLabelKeyBytes(); got != 512 {
+		t.Fatalf("effectiveMaxLabelKeyBytes = %d, want 512", got)
+	}
+}
+
+func TestOptions_EffectiveMaxLabelValueBytes_Custom(t *testing.T) {
+	o := Options{MaxLabelValueBytes: 2000}
+	if got := o.effectiveMaxLabelValueBytes(); got != 2000 {
+		t.Fatalf("effectiveMaxLabelValueBytes = %d, want 2000", got)
+	}
+}
+
 func manyLabels(n int) map[string]string {
 	out := make(map[string]string, n)
 	for i := 0; i < n; i++ {

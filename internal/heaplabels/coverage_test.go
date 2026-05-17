@@ -370,6 +370,33 @@ func TestDecodeLabelsForGoroutineNoLabels(t *testing.T) {
 	}
 }
 
+func TestUnsupportedResult_NilSnapWithMessage(t *testing.T) {
+	res := UnsupportedResult(nil, "runtime not supported")
+	if len(res.Warnings) != 1 || res.Warnings[0] != "runtime not supported" {
+		t.Fatalf("warnings = %v", res.Warnings)
+	}
+}
+
+func TestUnsupportedResult_NilSnapEmptyMessage(t *testing.T) {
+	res := UnsupportedResult(nil, "")
+	if len(res.Warnings) != 0 {
+		t.Fatalf("expected no warnings for empty message, got %v", res.Warnings)
+	}
+}
+
+func TestUnsupportedResult_WithGoroutinesNoMessage(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Goroutines: []heapsnapshot.Goroutine{{ID: 7, Addr: 0x500}},
+	}
+	res := UnsupportedResult(snap, "") // message="" → no warning appended
+	if res.Stats.GoroutinesUnsupported != 1 {
+		t.Fatalf("GoroutinesUnsupported = %d", res.Stats.GoroutinesUnsupported)
+	}
+	if len(res.Warnings) != 0 {
+		t.Fatalf("expected no warnings for empty message, got %v", res.Warnings)
+	}
+}
+
 func TestContainsLabelsHelper(t *testing.T) {
 	if !containsLabels(map[string]string{"a": "1", "b": "2"}, map[string]string{"a": "1"}) {
 		t.Fatal("expected match")
@@ -379,6 +406,60 @@ func TestContainsLabelsHelper(t *testing.T) {
 	}
 	if containsLabels(nil, map[string]string{"a": "1"}) {
 		t.Fatal("expected mismatch (nil have)")
+	}
+}
+
+func TestDecodeLabelMap_SetAddrOverflows(t *testing.T) {
+	mem := NewMemory(nil)
+	layout := mustManualLayout(t, 0x18)
+	layout.LabelMapSetOffset = ^uint64(0) // MaxUint64 → addr=1 + MaxUint64 overflows
+	_, err := DecodeLabelMap(mem, mem, layout, Options{}, 1)
+	if err == nil || statusOf(err) != StatusMalformed {
+		t.Fatalf("expected malformed for set addr overflow, got %v", err)
+	}
+}
+
+func TestDecodeLabelMap_SetListAddrOverflows(t *testing.T) {
+	mem := NewMemory(nil)
+	layout := mustManualLayout(t, 0x18)
+	layout.LabelMapSetOffset = 0         // setAddr = addr (no overflow)
+	layout.SetListOffset = ^uint64(0)    // setAddr + MaxUint64 overflows
+	_, err := DecodeLabelMap(mem, mem, layout, Options{}, 1)
+	if err == nil || statusOf(err) != StatusMalformed {
+		t.Fatalf("expected malformed for list addr overflow, got %v", err)
+	}
+}
+
+func TestDecodeString_NilDataPointer(t *testing.T) {
+	// Label array entry: key data=0x0 (nil), key len=5 → dataPtr==0 with length>0
+	mapBytes := make([]byte, 24)
+	binary.LittleEndian.PutUint64(mapBytes[0:8], 0x2000) // data ptr
+	binary.LittleEndian.PutUint64(mapBytes[8:16], 1)     // len=1
+	binary.LittleEndian.PutUint64(mapBytes[16:24], 1)    // cap=1
+
+	labelArray := make([]byte, 32)
+	binary.LittleEndian.PutUint64(labelArray[0:8], 0)   // key data ptr = nil
+	binary.LittleEndian.PutUint64(labelArray[8:16], 5)  // key len = 5 (non-zero)
+	binary.LittleEndian.PutUint64(labelArray[16:24], 0) // val data ptr = nil (doesn't matter)
+	binary.LittleEndian.PutUint64(labelArray[24:32], 0) // val len = 0
+
+	gObj := make([]byte, 0x20)
+	binary.LittleEndian.PutUint64(gObj[0x10:0x18], 0x1000)
+
+	snap := &heapsnapshot.HeapSnapshot{
+		Params: heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64", BuildVersion: "go1.26.3"},
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x500, Contents: gObj},
+			{Addr: 0x1000, Contents: mapBytes},
+			{Addr: 0x2000, Contents: labelArray},
+		},
+		Goroutines: []heapsnapshot.Goroutine{{ID: 1, Addr: 0x500}},
+	}
+	layout := mustManualLayout(t, 0x10)
+	res := DecodeAll(snap, layout, Options{})
+	if res.Goroutines[0].Status != StatusStringMissing {
+		t.Fatalf("expected string_missing for nil data ptr, got status=%v error=%s",
+			res.Goroutines[0].Status, res.Goroutines[0].Error)
 	}
 }
 

@@ -2,6 +2,7 @@ package memusage
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"bubblepprof/internal/heaplabels"
@@ -396,6 +397,102 @@ func TestComputeFromAnalysis_NoMatchWithStringMissing(t *testing.T) {
 	var sme *StringMissingError
 	if !errors.As(err, &sme) {
 		t.Fatalf("error = %v, want StringMissingError", err)
+	}
+}
+
+func TestReachableFromGoroutines_NilGraph(t *testing.T) {
+	result := reachableFromGoroutines(nil, []*snapshotgraph.GoroutineReachability{
+		{GoroutineID: 1},
+	})
+	if len(result) != 0 {
+		t.Fatalf("expected empty set for nil graph, got %d items", len(result))
+	}
+}
+
+func TestReachableFromGoroutines_ZeroRoots(t *testing.T) {
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
+	goroutines := []*snapshotgraph.GoroutineReachability{
+		{GoroutineID: 1, Roots: nil}, // non-empty slice but no roots
+	}
+	result := reachableFromGoroutines(g, goroutines)
+	if len(result) != 0 {
+		t.Fatalf("expected empty set for zero-root goroutines, got %d items", len(result))
+	}
+}
+
+func TestReachableFromGoroutines_EmptyGoroutines(t *testing.T) {
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
+	result := reachableFromGoroutines(g, nil)
+	if len(result) != 0 {
+		t.Fatalf("expected empty set for empty goroutines, got %d items", len(result))
+	}
+}
+
+func TestObjectSetBytes_NilGraph(t *testing.T) {
+	set := map[snapshotgraph.ObjectID]struct{}{0: {}}
+	if got := ObjectSetBytes(nil, set); got != 0 {
+		t.Fatalf("ObjectSetBytes(nil, …) = %d, want 0", got)
+	}
+}
+
+func TestComputeFromAnalysis_NilAnalysis(t *testing.T) {
+	_, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"a": "b"}},
+		nil,
+		nil,
+		Diagnostics{},
+		Options{},
+	)
+	if err == nil {
+		t.Fatal("expected error for nil analysis, got nil")
+	}
+}
+
+func TestComputeFromAnalysis_NilGraph(t *testing.T) {
+	analysis := &snapshotgraph.Analysis{Graph: nil}
+	_, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"a": "b"}},
+		analysis,
+		nil,
+		Diagnostics{},
+		Options{},
+	)
+	if err == nil {
+		t.Fatal("expected error for nil graph, got nil")
+	}
+}
+
+func TestDiagnosticsFromHeapLabels_FailedGoroutinesWarning(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Params: heapsnapshot.DumpParams{BuildVersion: "go1.26.3", GOARCH: "amd64"},
+	}
+	res := heaplabels.Result{
+		Stats: heaplabels.Stats{
+			GoroutinesTotal:  2,
+			GoroutinesFailed: 2,
+			// StringsMissing < FailedGoroutines triggers the "failed" warning.
+			StringsMissing: 0,
+		},
+	}
+	diag := DiagnosticsFromHeapLabels(snap, res)
+	if diag.FailedGoroutines != 2 {
+		t.Fatalf("FailedGoroutines = %d, want 2", diag.FailedGoroutines)
+	}
+	found := false
+	for _, w := range diag.Warnings {
+		if strings.Contains(w, "failed") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected failed-goroutines warning, got warnings=%v", diag.Warnings)
+	}
+}
+
+func TestCopyLabels_NilInput(t *testing.T) {
+	if copyLabels(nil) != nil {
+		t.Fatal("copyLabels(nil) should return nil")
 	}
 }
 

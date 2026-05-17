@@ -75,6 +75,24 @@ func TestMemUsageOptions_DisableProcessMemoryReaderFlows(t *testing.T) {
 	}
 }
 
+func TestRegisterMemUsageWithOptions(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterMemUsageWithOptions(mux, MemUsageOptions{MaxLabels: 5})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, MemUsagePath, strings.NewReader(`{"labels":{}}`))
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (handler reachable on %s)", rr.Code, MemUsagePath)
+	}
+	var body memusage.ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "empty_labels" {
+		t.Fatalf("code = %q, want empty_labels", body.Code)
+	}
+}
+
 func TestRegisterMemUsage(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterMemUsage(mux)

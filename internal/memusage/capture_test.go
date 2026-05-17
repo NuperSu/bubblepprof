@@ -1,10 +1,13 @@
 package memusage
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"bubblepprof/internal/addrspace"
@@ -84,4 +87,475 @@ func name(b bool) string {
 		return "gc"
 	}
 	return "no-gc"
+}
+
+// --- dump helpers ---
+
+func putUvarint(w *bytes.Buffer, x uint64) {
+	var b [binary.MaxVarintLen64]byte
+	n := binary.PutUvarint(b[:], x)
+	w.Write(b[:n])
+}
+
+func putString(w *bytes.Buffer, s string) {
+	putUvarint(w, uint64(len(s)))
+	w.WriteString(s)
+}
+
+// minimalValidDump returns the bytes of a parseable heap dump with no
+// objects or goroutines. The params record uses 8-byte pointers and little
+// endian — sufficient for runtimelayout.Lookup to match.
+func minimalValidDump(arch, version string) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("go1.7 heap dump\n")
+	putUvarint(&buf, 6)           // tagParams
+	putUvarint(&buf, 0)           // bigEndian=false
+	putUvarint(&buf, 8)           // ptrSize=8
+	putUvarint(&buf, 0)           // heapStart
+	putUvarint(&buf, 0)           // heapEnd
+	putString(&buf, arch)         // goarch
+	putString(&buf, version)      // buildVersion
+	putUvarint(&buf, 1)           // numCPU
+	putUvarint(&buf, 0)           // tagEOF
+	return buf.Bytes()
+}
+
+// dumpCapturer writes a valid minimal heap dump to a temp file and returns
+// its path, satisfying HeapDumpCapturer.
+type dumpCapturer struct {
+	arch    string
+	version string
+}
+
+func (d dumpCapturer) CaptureHeapDump(_ context.Context, _ bool) (string, func(), error) {
+	f, err := os.CreateTemp("", "memusage-test-*.heap")
+	if err != nil {
+		return "", nil, err
+	}
+	name := f.Name()
+	cleanup := func() { os.Remove(name) }
+	f.Write(minimalValidDump(d.arch, d.version))
+	f.Close()
+	return name, cleanup, nil
+}
+
+// cancelCapture cancels ctx inside CaptureHeapDump so the ctx.Err() check
+// that follows the capture call in Computer.Compute fires.
+type cancelCapture struct {
+	cancel   context.CancelFunc
+	delegate HeapDumpCapturer
+}
+
+func (c *cancelCapture) CaptureHeapDump(ctx context.Context, gcBefore bool) (string, func(), error) {
+	path, cleanup, err := c.delegate.CaptureHeapDump(ctx, gcBefore)
+	c.cancel()
+	return path, cleanup, err
+}
+
+// --- NewComputer ---
+
+func TestNewComputer(t *testing.T) {
+	c := NewComputer(Options{AllowInferredLayout: true})
+	if c == nil {
+		t.Fatal("NewComputer returned nil")
+	}
+	if _, ok := c.Capturer.(RuntimeHeapDumpCapturer); !ok {
+		t.Fatalf("Capturer type = %T, want RuntimeHeapDumpCapturer", c.Capturer)
+	}
+	dr, ok := c.Recoverer.(DefaultLabelRecoverer)
+	if !ok {
+		t.Fatalf("Recoverer type = %T, want DefaultLabelRecoverer", c.Recoverer)
+	}
+	if !dr.AllowInferredLayout {
+		t.Fatal("AllowInferredLayout not propagated to DefaultLabelRecoverer")
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// --- Computer.Close ---
+
+func TestComputer_Close_NilReceiver(t *testing.T) {
+	var c *Computer
+	if err := c.Close(); err != nil {
+		t.Fatalf("(*Computer)(nil).Close() = %v, want nil", err)
+	}
+}
+
+func TestComputer_Close_NilProcReader(t *testing.T) {
+	c := &Computer{}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close with nil procReader = %v, want nil", err)
+	}
+}
+
+func TestComputer_Close_WithProcReader(t *testing.T) {
+	r, _ := openProcessReader(false)
+	if r == nil {
+		t.Skip("process reader not available on this platform")
+	}
+	c := &Computer{procReader: r}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// --- RuntimeHeapDumpCapturer.CaptureHeapDump ---
+
+func TestRuntimeHeapDumpCapturer_CtxCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := RuntimeHeapDumpCapturer{}.CaptureHeapDump(ctx, false)
+	if err == nil {
+		t.Fatal("expected error from canceled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestRuntimeHeapDumpCapturer_GCBeforeCapture(t *testing.T) {
+	// gcBefore=true must trigger runtime.GC() and still produce a valid dump.
+	path, cleanup, err := RuntimeHeapDumpCapturer{}.CaptureHeapDump(context.Background(), true)
+	if err != nil {
+		t.Fatalf("CaptureHeapDump(gcBefore=true): %v", err)
+	}
+	defer cleanup()
+	if path == "" {
+		t.Fatal("path is empty")
+	}
+}
+
+func TestRuntimeHeapDumpCapturer_Happy(t *testing.T) {
+	path, cleanup, err := RuntimeHeapDumpCapturer{}.CaptureHeapDump(context.Background(), false)
+	if err != nil {
+		t.Fatalf("CaptureHeapDump: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+	defer cleanup()
+	if path == "" {
+		t.Fatal("path is empty")
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %q: %v", path, err)
+	}
+	if fi.Size() == 0 {
+		t.Fatal("heap dump file is empty")
+	}
+}
+
+// --- DefaultLabelRecoverer.Recover ---
+
+func TestDefaultLabelRecoverer_NilSnap(t *testing.T) {
+	r := DefaultLabelRecoverer{}
+	_, err := r.Recover(nil, nil)
+	if err == nil {
+		t.Fatal("expected error for nil snapshot, got nil")
+	}
+}
+
+func TestDefaultLabelRecoverer_SupportedLayout(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Params: heapsnapshot.DumpParams{
+			GOARCH:       "amd64",
+			PtrSize:      8,
+			BuildVersion: "go1.26.0",
+		},
+	}
+	r := DefaultLabelRecoverer{}
+	res, err := r.Recover(snap, nil)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if res.Stats.GoroutinesUnsupported != 0 {
+		t.Fatalf("GoroutinesUnsupported = %d, want 0", res.Stats.GoroutinesUnsupported)
+	}
+}
+
+func TestDefaultLabelRecoverer_UnsupportedLayout(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Params: heapsnapshot.DumpParams{
+			GOARCH:       "s390x",
+			PtrSize:      8,
+			BuildVersion: "go1.99.0",
+		},
+	}
+	r := DefaultLabelRecoverer{}
+	res, err := r.Recover(snap, nil)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(res.Warnings) == 0 {
+		t.Fatal("expected unsupported-runtime warning, got none")
+	}
+}
+
+func TestDefaultLabelRecoverer_AllowInferredLayout_Found(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Params: heapsnapshot.DumpParams{
+			GOARCH:       "amd64",
+			PtrSize:      8,
+			BuildVersion: "go1.99.0", // not in verified table
+		},
+	}
+	r := DefaultLabelRecoverer{AllowInferredLayout: true}
+	res, err := r.Recover(snap, nil)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "inferred") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected inferred-layout warning, got warnings=%v", res.Warnings)
+	}
+}
+
+func TestDefaultLabelRecoverer_AllowInferredLayout_NotFound(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Params: heapsnapshot.DumpParams{
+			GOARCH:       "s390x",
+			PtrSize:      8,
+			BuildVersion: "go1.99.0",
+		},
+	}
+	r := DefaultLabelRecoverer{AllowInferredLayout: true}
+	res, err := r.Recover(snap, nil)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	// LookupBestEffort finds nothing → UnsupportedResult with a warning.
+	if len(res.Warnings) == 0 {
+		t.Fatal("expected unsupported-runtime warning, got none")
+	}
+}
+
+// --- openProcessReader ---
+
+func TestOpenProcessReader_Disabled(t *testing.T) {
+	r, warn := openProcessReader(true)
+	if r != nil {
+		r.Close()
+		t.Fatalf("expected nil reader for disabled=true, got %T", r)
+	}
+	if warn == "" {
+		t.Fatal("expected non-empty warning for disabled reader")
+	}
+}
+
+func TestOpenProcessReader_Available(t *testing.T) {
+	r, warn := openProcessReader(false)
+	if r != nil {
+		defer r.Close()
+		if warn != "" {
+			t.Fatalf("reader is non-nil but warning = %q", warn)
+		}
+	} else {
+		if warn == "" {
+			t.Fatal("nil reader with empty warning: expected a diagnostic message")
+		}
+	}
+}
+
+// --- Computer.Compute ---
+
+// badPathCapturer returns a path that does not exist so os.Open in Compute fails.
+type badPathCapturer struct{}
+
+func (badPathCapturer) CaptureHeapDump(_ context.Context, _ bool) (string, func(), error) {
+	return "/nonexistent-memusage-test-path", func() {}, nil
+}
+
+// cancelAfterParse wraps a recoverer and cancels the context before returning,
+// exercising the ctx.Err() check after label recovery in Computer.Compute.
+type cancelAfterParse struct {
+	cancel   context.CancelFunc
+	delegate LabelRecoverer
+}
+
+func (c *cancelAfterParse) Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error) {
+	res, err := c.delegate.Recover(snap, extra)
+	c.cancel()
+	return res, err
+}
+
+func TestComputer_Compute_NilReceiver(t *testing.T) {
+	var c *Computer
+	_, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	if err == nil {
+		t.Fatal("expected error from nil Computer, got nil")
+	}
+}
+
+func TestComputer_Compute_NilCapturer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &Computer{
+		Capturer:  nil, // falls back to RuntimeHeapDumpCapturer
+		Recoverer: fakeRecoverer{},
+	}
+	_, err := c.Compute(ctx, Request{Labels: map[string]string{"a": "b"}})
+	var cfe *CaptureFailedError
+	if !errors.As(err, &cfe) {
+		t.Fatalf("expected CaptureFailedError, got %v", err)
+	}
+}
+
+func TestComputer_Compute_NilRecoverer(t *testing.T) {
+	c := &Computer{
+		Capturer:  dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: nil, // falls back to DefaultLabelRecoverer{}
+		Opts:      Options{DisableProcessMemoryReader: true},
+	}
+	resp, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	if err != nil {
+		t.Fatalf("Compute with nil Recoverer: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestComputer_Compute_OpenFileFails(t *testing.T) {
+	c := &Computer{
+		Capturer:  badPathCapturer{},
+		Recoverer: fakeRecoverer{},
+	}
+	_, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	var cfe *CaptureFailedError
+	if !errors.As(err, &cfe) {
+		t.Fatalf("expected CaptureFailedError, got %v", err)
+	}
+}
+
+func TestComputer_Compute_CtxCancelledAfterParse(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &Computer{
+		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: &cancelAfterParse{
+			cancel:   cancel,
+			delegate: fakeRecoverer{},
+		},
+		Opts: Options{DisableProcessMemoryReader: true},
+	}
+	_, err := c.Compute(ctx, Request{Labels: map[string]string{"a": "b"}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestComputer_Compute_ParseFails(t *testing.T) {
+	c := &Computer{
+		Capturer:  &fakeCapturer{},
+		Recoverer: fakeRecoverer{},
+	}
+	_, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	var pfe *ParseFailedError
+	if !errors.As(err, &pfe) {
+		t.Fatalf("expected ParseFailedError, got %v", err)
+	}
+}
+
+func TestComputer_Compute_RecovererError(t *testing.T) {
+	recErr := errors.New("decode failed")
+	c := &Computer{
+		Capturer:  dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: fakeRecoverer{err: recErr},
+		Opts:      Options{DisableProcessMemoryReader: true},
+	}
+	_, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "decode failed") {
+		t.Fatalf("error = %v, want to contain 'decode failed'", err)
+	}
+}
+
+func TestComputer_Compute_CtxCancelledAfterCapture(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &Computer{
+		Capturer: &cancelCapture{
+			cancel:   cancel,
+			delegate: dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		},
+		Recoverer: fakeRecoverer{},
+		Opts:      Options{DisableProcessMemoryReader: true},
+	}
+	_, err := c.Compute(ctx, Request{Labels: map[string]string{"a": "b"}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestComputer_Compute_UnsupportedRuntime(t *testing.T) {
+	c := &Computer{
+		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: fakeRecoverer{result: heaplabels.Result{
+			LabelsByGID: map[uint64]map[string]string{},
+			Stats: heaplabels.Stats{
+				GoroutinesTotal:       1,
+				GoroutinesUnsupported: 1,
+			},
+		}},
+		Opts: Options{DisableProcessMemoryReader: true},
+	}
+	_, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	var ure *UnsupportedRuntimeError
+	if !errors.As(err, &ure) {
+		t.Fatalf("expected UnsupportedRuntimeError, got %v", err)
+	}
+}
+
+func TestComputer_Compute_WithProcReader(t *testing.T) {
+	// When DisableProcessMemoryReader=false, processReader opens /proc/self/mem
+	// (Linux) and passes it as extra to the recoverer.  On other platforms
+	// the reader is unavailable but the path should still not error.
+	c := &Computer{
+		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: fakeRecoverer{result: heaplabels.Result{
+			LabelsByGID: map[uint64]map[string]string{},
+		}},
+		Opts: Options{DisableProcessMemoryReader: false},
+	}
+	defer c.Close()
+	resp, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	if err != nil {
+		t.Fatalf("Compute with proc reader: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestComputer_Compute_ProcWarning(t *testing.T) {
+	c := &Computer{
+		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: fakeRecoverer{result: heaplabels.Result{
+			LabelsByGID: map[uint64]map[string]string{},
+		}},
+		Opts: Options{DisableProcessMemoryReader: true},
+	}
+	resp, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	if err != nil {
+		t.Fatalf("Compute: %v", err)
+	}
+	found := false
+	for _, w := range resp.Warnings {
+		if strings.Contains(w, "process memory reader") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected proc-reader warning in response, got warnings=%v", resp.Warnings)
+	}
 }
