@@ -148,16 +148,18 @@ func TestProcessReader_ReadsPartialSection(t *testing.T) {
 }
 
 func TestProcessReader_SlideIsPlausible(t *testing.T) {
-	// The ASLR slide (GetModuleHandle - preferredImageBase) should be within
-	// a plausible range. A value outside ±4 GB would indicate a bug.
+	// The ASLR slide (GetModuleHandle - preferredImageBase) must be within the
+	// 64-bit Windows user address space (~128 TB). Go 1.24+ enables High Entropy
+	// ASLR so the slide routinely exceeds ±4 GB on 64-bit targets; ±128 TB
+	// covers the full user-space range.
 	r, err := OpenSelfProcessReader()
 	if err != nil {
 		t.Fatalf("OpenSelfProcessReader: %v", err)
 	}
 	defer r.Close()
-	const fourGB = int64(4) << 30
-	if r.slide < -fourGB || r.slide > fourGB {
-		t.Fatalf("slide = %d, expected within ±4 GB", r.slide)
+	const maxSlide = int64(128) << 40 // 128 TB
+	if r.slide < -maxSlide || r.slide > maxSlide {
+		t.Fatalf("slide = %d, expected within ±128 TB", r.slide)
 	}
 }
 
