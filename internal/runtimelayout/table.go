@@ -131,9 +131,10 @@ func Lookup(input LookupInput) (Layout, bool) {
 }
 
 // LookupBestEffort returns the first table entry that matches PtrSize and
-// BigEndian, ignoring GoVersion. It is used when AllowInferredLayout is
-// set: the caller gets a best-effort layout for an unverified Go version and
-// must surface a warning. Returns (zero, false) when no width/endian match exists.
+// BigEndian, ignoring GoVersion. Intended for development tools such as
+// cmd/labeloffsetprobe and tests; never call this from the HTTP path because
+// the layout may be wrong and will produce silent incorrect results.
+// Returns (zero, false) when no width/endian match exists.
 func LookupBestEffort(input LookupInput) (Layout, bool) {
 	for _, e := range verifiedTable {
 		if e.PtrSize != input.PtrSize {

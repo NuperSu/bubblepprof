@@ -155,19 +155,15 @@ func (c *cancelCapture) CaptureHeapDump(ctx context.Context, gcBefore bool) (str
 // --- NewComputer ---
 
 func TestNewComputer(t *testing.T) {
-	c := NewComputer(Options{AllowInferredLayout: true})
+	c := NewComputer(Options{})
 	if c == nil {
 		t.Fatal("NewComputer returned nil")
 	}
 	if _, ok := c.Capturer.(RuntimeHeapDumpCapturer); !ok {
 		t.Fatalf("Capturer type = %T, want RuntimeHeapDumpCapturer", c.Capturer)
 	}
-	dr, ok := c.Recoverer.(DefaultLabelRecoverer)
-	if !ok {
+	if _, ok := c.Recoverer.(DefaultLabelRecoverer); !ok {
 		t.Fatalf("Recoverer type = %T, want DefaultLabelRecoverer", c.Recoverer)
-	}
-	if !dr.AllowInferredLayout {
-		t.Fatal("AllowInferredLayout not propagated to DefaultLabelRecoverer")
 	}
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -289,50 +285,6 @@ func TestDefaultLabelRecoverer_UnsupportedLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if len(res.Warnings) == 0 {
-		t.Fatal("expected unsupported-runtime warning, got none")
-	}
-}
-
-func TestDefaultLabelRecoverer_AllowInferredLayout_Found(t *testing.T) {
-	snap := &heapsnapshot.HeapSnapshot{
-		Params: heapsnapshot.DumpParams{
-			GOARCH:       "amd64",
-			PtrSize:      8,
-			BuildVersion: "go1.99.0", // not in verified table
-		},
-	}
-	r := DefaultLabelRecoverer{AllowInferredLayout: true}
-	res, err := r.Recover(snap, nil)
-	if err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
-	found := false
-	for _, w := range res.Warnings {
-		if strings.Contains(w, "inferred") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected inferred-layout warning, got warnings=%v", res.Warnings)
-	}
-}
-
-func TestDefaultLabelRecoverer_AllowInferredLayout_NotFound(t *testing.T) {
-	snap := &heapsnapshot.HeapSnapshot{
-		Params: heapsnapshot.DumpParams{
-			GOARCH:       "s390x",
-			PtrSize:      8,
-			BuildVersion: "go1.99.0",
-		},
-	}
-	r := DefaultLabelRecoverer{AllowInferredLayout: true}
-	res, err := r.Recover(snap, nil)
-	if err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
-	// LookupBestEffort finds nothing → UnsupportedResult with a warning.
 	if len(res.Warnings) == 0 {
 		t.Fatal("expected unsupported-runtime warning, got none")
 	}

@@ -79,11 +79,7 @@ type LabelRecoverer interface {
 // layout is unsupported, every goroutine is reported with
 // StatusUnsupportedRuntime so the compute layer can short-circuit before
 // the expensive graph build.
-type DefaultLabelRecoverer struct {
-	// AllowInferredLayout mirrors Options.AllowInferredLayout: when true,
-	// LookupBestEffort is tried as a fallback for unverified Go versions.
-	AllowInferredLayout bool
-}
+type DefaultLabelRecoverer struct{}
 
 // Recover implements LabelRecoverer.
 func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error) {
@@ -92,15 +88,6 @@ func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra ad
 	}
 	input := heaplabels.LookupInputFromSnapshot(snap)
 	layout, ok := runtimelayout.Lookup(input)
-	if !ok && r.AllowInferredLayout {
-		layout, ok = runtimelayout.LookupBestEffort(input)
-		if ok {
-			res := heaplabels.DecodeAll(snap, layout, heaplabels.Options{ExtraStringMemory: extra})
-			res.Warnings = append(res.Warnings,
-				fmt.Sprintf("runtime layout inferred from best-effort table match (go version %q not verified); results may be incorrect", input.GoVersion))
-			return res, nil
-		}
-	}
 	if !ok {
 		return heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input)), nil
 	}
@@ -129,7 +116,7 @@ type Computer struct {
 func NewComputer(opts Options) *Computer {
 	return &Computer{
 		Capturer:  RuntimeHeapDumpCapturer{},
-		Recoverer: DefaultLabelRecoverer{AllowInferredLayout: opts.AllowInferredLayout},
+		Recoverer: DefaultLabelRecoverer{},
 		Opts:      opts,
 	}
 }

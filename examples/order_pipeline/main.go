@@ -129,9 +129,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	bubblepprof.RegisterMemUsageWithOptions(mux, bubblepprof.MemUsageOptions{
-		AllowInferredLayout: true,
-	})
+	bubblepprof.RegisterMemUsage(mux)
 	mux.HandleFunc("/stats", app.statsHandler)
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)
 
