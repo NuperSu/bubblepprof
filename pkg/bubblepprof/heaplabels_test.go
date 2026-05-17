@@ -14,10 +14,6 @@ import (
 )
 
 func TestHeapNativeLabelRecovery(t *testing.T) {
-	if runtime.GOARCH != "amd64" {
-		t.Skipf("runtime.g.labels test currently targets amd64, got %s", runtime.GOARCH)
-	}
-
 	ready := make(chan struct{})
 	stop := make(chan struct{})
 	defer close(stop)

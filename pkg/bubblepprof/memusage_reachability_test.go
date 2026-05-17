@@ -191,13 +191,23 @@ func startReachabilityWorker(t *testing.T, label string, stop <-chan struct{}, f
 	}
 }
 
+// processMemoryReaderSupported reports whether the current GOOS has a working
+// process memory reader. On these platforms string_missing is a product
+// regression, not a platform limitation.
+func processMemoryReaderSupported() bool {
+	switch runtime.GOOS {
+	case "linux", "darwin", "freebsd", "windows":
+		return true
+	}
+	return false
+}
+
 // assertReachableAtLeast posts {"labels":{"case":label}} to /debug/memusage
 // and asserts reachable_bytes >= minBytes.
 //
-// A 422 string_missing response skips the subtest: it is a platform
-// limitation (e.g. no /proc/self/mem), not a reachability bug. A 422
-// unsupported_runtime is a hard failure — the Go version must be in the
-// verified layout table for this test to run.
+// A 422 unsupported_runtime is always a hard failure. A 422 string_missing
+// is a hard failure on platforms with a verified process memory reader (Linux,
+// macOS, FreeBSD, Windows); on other platforms it signals a skip.
 func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64) {
 	t.Helper()
 	body := bytes.NewReader([]byte(`{"labels":{"case":"` + label + `"}}`))
@@ -234,8 +244,12 @@ func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64
 			t.Fatalf("label=%q: runtime not in verified layout table: go=%s arch=%s",
 				label, er.GoVersion, er.GOARCH)
 		}
-		t.Skipf("label=%q: label recovery returned %q — skipping reachability assertion (not a reachability bug): %s",
-			label, er.Code, er.Error)
+		if processMemoryReaderSupported() {
+			t.Fatalf("label=%q: label recovery returned %q on %s — process memory reader is implemented here, this is a regression: warnings=%v",
+				label, er.Code, runtime.GOOS, er.Warnings)
+		}
+		t.Skipf("label=%q: label recovery returned %q on %s — process memory reader not supported on this platform",
+			label, er.Code, runtime.GOOS)
 	default:
 		t.Fatalf("label=%q: unexpected status %d", label, resp.StatusCode)
 	}
