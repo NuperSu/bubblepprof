@@ -130,23 +130,21 @@ func writeComputeError(w http.ResponseWriter, err error) {
 	var unsupported *UnsupportedRuntimeError
 	if errors.As(err, &unsupported) {
 		writeError(w, http.StatusUnprocessableEntity, &ErrorResponse{
-			Error:       unsupported.Error(),
-			Code:        "unsupported_runtime",
-			Attribution: AttributionUnsupportedRuntime,
-			GoVersion:   unsupported.GoVersion,
-			GOARCH:      unsupported.GOARCH,
+			Error:     unsupported.Error(),
+			Code:      "unsupported_runtime",
+			GoVersion: unsupported.GoVersion,
+			GOARCH:    unsupported.GOARCH,
 		})
 		return
 	}
 	var stringMissing *StringMissingError
 	if errors.As(err, &stringMissing) {
 		writeError(w, http.StatusUnprocessableEntity, &ErrorResponse{
-			Error:       stringMissing.Error(),
-			Code:        "string_missing",
-			Attribution: AttributionHeapNativeIncomplete,
-			GoVersion:   stringMissing.GoVersion,
-			GOARCH:      stringMissing.GOARCH,
-			Warnings:    stringMissing.Warnings,
+			Error:     stringMissing.Error(),
+			Code:      "string_missing",
+			GoVersion: stringMissing.GoVersion,
+			GOARCH:    stringMissing.GOARCH,
+			Warnings:  stringMissing.Warnings,
 		})
 		return
 	}

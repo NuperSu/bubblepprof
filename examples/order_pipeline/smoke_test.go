@@ -84,7 +84,6 @@ func TestOrderPipelineSmoke(t *testing.T) {
 	var result struct {
 		MatchedGoroutines int    `json:"matched_goroutines"`
 		ReachableBytes    uint64 `json:"reachable_bytes"`
-		Attribution       string `json:"attribution"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -95,6 +94,5 @@ func TestOrderPipelineSmoke(t *testing.T) {
 	if result.ReachableBytes == 0 {
 		t.Errorf("reachable_bytes = 0, want > 0")
 	}
-	t.Logf("smoke: attribution=%q matched=%d reachable_bytes=%d",
-		result.Attribution, result.MatchedGoroutines, result.ReachableBytes)
+	t.Logf("smoke: matched=%d reachable_bytes=%d", result.MatchedGoroutines, result.ReachableBytes)
 }

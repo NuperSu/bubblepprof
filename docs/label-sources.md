@@ -72,9 +72,9 @@ The main endpoint does not combine label sources. Separately captured
 goroutine profiles and wrapper manifests were prototype scaffolding and
 are not part of the final product path.
 
-If heap-native recovery fails the endpoint returns an explicit error or
-incomplete diagnostic — it never silently falls back to an alternative
-source.
+If heap-native recovery fails or is incomplete, the endpoint returns an
+explicit error — it never silently falls back to an alternative source or
+returns a partial count as success.
 
 ### Why heap-native
 
@@ -150,18 +150,8 @@ recovery reads string bytes through a composite address-space reader
 `/debug/memusage` opens the process memory reader by default on Linux,
 macOS, Windows, and FreeBSD. When the reader is unavailable (unsupported
 platform, denied access, or `DisableProcessMemoryReader=true`) the endpoint
-degrades honestly: decode failures surface as `string_missing` /
-`heap_native_incomplete` with a descriptive warning, never as a silent
+returns `422 string_missing` with a descriptive warning, never as a silent
 fallback.
-
-## Attribution values
-
-The response tags itself with one of:
-
-- `heap_native` — all labels decoded from heap dump.
-- `heap_native_incomplete` — some label strings were missing.
-- `unsupported_runtime` — runtime layout not in the verified table.
-- `string_missing` — label structure decoded but string bytes unavailable.
 
 ## Required artifacts
 

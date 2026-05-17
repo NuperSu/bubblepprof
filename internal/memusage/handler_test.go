@@ -75,7 +75,6 @@ func TestHandler_HappyPath(t *testing.T) {
 		MatchedGoroutines: 2,
 		ReachableObjects:  3,
 		ReachableBytes:    60,
-		Attribution:       AttributionHeapNative,
 	}
 	h := Handler(stubCompute(want, nil), HandlerOptions{})
 	rr := httptest.NewRecorder()
@@ -91,7 +90,7 @@ func TestHandler_HappyPath(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if got.MatchedGoroutines != 2 || got.ReachableBytes != 60 || got.Attribution != AttributionHeapNative {
+	if got.MatchedGoroutines != 2 || got.ReachableBytes != 60 {
 		t.Fatalf("body = %+v", got)
 	}
 }
@@ -111,9 +110,6 @@ func TestHandler_UnsupportedRuntime(t *testing.T) {
 	if body.Code != "unsupported_runtime" || body.GoVersion != "go1.27.0" || body.GOARCH != "amd64" {
 		t.Fatalf("error body = %+v", body)
 	}
-	if body.Attribution != AttributionUnsupportedRuntime {
-		t.Fatalf("attribution = %q, want %q", body.Attribution, AttributionUnsupportedRuntime)
-	}
 }
 
 func TestHandler_StringMissing(t *testing.T) {
@@ -131,9 +127,6 @@ func TestHandler_StringMissing(t *testing.T) {
 	if body.Code != "string_missing" {
 		t.Fatalf("code = %q", body.Code)
 	}
-	if body.Attribution != AttributionHeapNativeIncomplete {
-		t.Fatalf("attribution = %q", body.Attribution)
-	}
 	if len(body.Warnings) != 1 {
 		t.Fatalf("warnings = %v", body.Warnings)
 	}
@@ -147,7 +140,7 @@ func TestHandler_Busy(t *testing.T) {
 	compute := func(ctx context.Context, req Request) (*Response, error) {
 		close(started)
 		<-release
-		return &Response{Attribution: AttributionHeapNative, Labels: req.Labels}, nil
+		return &Response{Labels: req.Labels}, nil
 	}
 	h := Handler(compute, HandlerOptions{})
 
@@ -298,8 +291,6 @@ func TestHandler_ZeroMatchReturns200(t *testing.T) {
 		MatchedGoroutines: 0,
 		ReachableObjects:  0,
 		ReachableBytes:    0,
-		Attribution:       AttributionHeapNative,
-		Warnings:          []string{},
 	}
 	h := Handler(stubCompute(want, nil), HandlerOptions{})
 	rr := httptest.NewRecorder()
@@ -315,35 +306,39 @@ func TestHandler_ZeroMatchReturns200(t *testing.T) {
 	if got.MatchedGoroutines != 0 || got.ReachableObjects != 0 || got.ReachableBytes != 0 {
 		t.Fatalf("expected zero counts, got %+v", got)
 	}
-	if got.Warnings == nil {
-		t.Fatal("warnings must be [] not null in JSON response")
+}
+
+func TestHandler_ErrorWarningsAlwaysArray(t *testing.T) {
+	// Error responses must always emit "warnings":[] not "warnings":null.
+	h := Handler(stubCompute(nil, nil), HandlerOptions{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), `"warnings":[]`) {
+		t.Fatalf("error response missing warnings:[] — got: %s", rr.Body.String())
 	}
 }
 
-func TestHandler_WarningsAlwaysPresent(t *testing.T) {
-	// Both success and error responses must emit "warnings": [] not null.
-	h := Handler(stubCompute(&Response{
-		Labels:      map[string]string{"a": "b"},
-		Attribution: AttributionHeapNative,
-	}, nil), HandlerOptions{})
-
+func TestHandler_SuccessOmitsDebugFields(t *testing.T) {
+	// Success responses must not contain debug fields removed from the struct.
+	h := Handler(stubCompute(&Response{Labels: map[string]string{"a": "b"}}, nil), HandlerOptions{})
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"a":"b"}}`))
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
-	raw := rr.Body.Bytes()
-	if !strings.Contains(string(raw), `"warnings":`) {
-		t.Fatalf("response body missing warnings field: %s", raw)
+	var raw map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-
-	// Error path: validation failure.
-	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{}}`))
-	h.ServeHTTP(rr, req)
-	if !strings.Contains(rr.Body.String(), `"warnings":`) {
-		t.Fatalf("error response body missing warnings field: %s", rr.Body.String())
+	for _, forbidden := range []string{"attribution", "go_version", "goarch", "warnings"} {
+		if _, present := raw[forbidden]; present {
+			t.Errorf("success response must not contain %q: %s", forbidden, rr.Body.String())
+		}
 	}
 }
 
@@ -396,7 +391,7 @@ func stubCompute(resp *Response, err error) ComputeFunc {
 			return nil, err
 		}
 		if resp == nil {
-			return &Response{Labels: req.Labels, Attribution: AttributionHeapNative}, nil
+			return &Response{Labels: req.Labels}, nil
 		}
 		return resp, nil
 	}

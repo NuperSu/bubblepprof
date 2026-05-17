@@ -213,9 +213,8 @@ func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64
 		if err := json.NewDecoder(resp.Body).Decode(&mr); err != nil {
 			t.Fatalf("decode 200 response: %v", err)
 		}
-		t.Logf("label=%q: matched=%d objects=%d bytes=%d attribution=%q warnings=%v",
-			label, mr.MatchedGoroutines, mr.ReachableObjects, mr.ReachableBytes,
-			mr.Attribution, mr.Warnings)
+		t.Logf("label=%q: matched=%d objects=%d bytes=%d",
+			label, mr.MatchedGoroutines, mr.ReachableObjects, mr.ReachableBytes)
 		if mr.MatchedGoroutines < 1 {
 			t.Errorf("label=%q: matched_goroutines=%d, want >=1 (label not found in heap dump)",
 				label, mr.MatchedGoroutines)

@@ -1,6 +1,7 @@
 package memusage
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -142,10 +143,6 @@ func TestComputeFromAnalysis_SystemExclusionAndOverlap(t *testing.T) {
 	if resp.SystemOverlapObjects != 1 || resp.SystemOverlapBytes != 20 {
 		t.Fatalf("system overlap = (%d, %d), want (1, 20)", resp.SystemOverlapObjects, resp.SystemOverlapBytes)
 	}
-	if resp.Attribution != AttributionHeapNative {
-		t.Fatalf("attribution = %q, want %q", resp.Attribution, AttributionHeapNative)
-	}
-
 	// IncludeSystemGoroutines flips the count and adds D into reachable.
 	resp, err = ComputeFromAnalysis(
 		Request{Labels: map[string]string{"job": "42"}},
@@ -221,7 +218,10 @@ func TestComputeFromAnalysis_StringMissingNoLabels(t *testing.T) {
 	}
 }
 
-func TestComputeFromAnalysis_IncompleteAttribution(t *testing.T) {
+func TestComputeFromAnalysis_StringMissingIsErrorEvenWithMatches(t *testing.T) {
+	// goroutine 1 decoded and matches the selector; goroutine 2 had a
+	// string_missing decode failure. The non-authoritative match count must
+	// NOT produce a 200 — return StringMissingError instead.
 	g := newTestGraph(t, []testObject{
 		{addr: 0x1000, size: 10},
 		{addr: 0x2000, size: 20},
@@ -232,30 +232,32 @@ func TestComputeFromAnalysis_IncompleteAttribution(t *testing.T) {
 		Graph:      g,
 		Goroutines: []snapshotgraph.GoroutineReachability{user1, user2},
 	}
-	// goroutine 2 had a string_missing error; goroutine 1 decoded.
 	labelsByGID := map[uint64]map[string]string{
 		1: {"job": "42"},
 	}
 	diag := Diagnostics{
 		StringMissingCount: 1,
 		FailedGoroutines:   1,
+		GoVersion:          "go1.26.3",
+		GOARCH:             "amd64",
 		Warnings:           []string{"some labels not readable"},
 	}
-	resp, err := ComputeFromAnalysis(
+	_, err := ComputeFromAnalysis(
 		Request{Labels: map[string]string{"job": "42"}},
 		analysis,
 		labelsByGID,
 		diag,
 		Options{},
 	)
-	if err != nil {
-		t.Fatalf("ComputeFromAnalysis: %v", err)
+	if err == nil {
+		t.Fatal("expected StringMissingError, got nil")
 	}
-	if resp.MatchedGoroutines != 1 || resp.ReachableObjects != 1 || resp.ReachableBytes != 10 {
-		t.Fatalf("response = %+v", resp)
+	var sme *StringMissingError
+	if !errors.As(err, &sme) {
+		t.Fatalf("error = %v, want StringMissingError", err)
 	}
-	if resp.Attribution != AttributionHeapNativeIncomplete {
-		t.Fatalf("attribution = %q, want %q", resp.Attribution, AttributionHeapNativeIncomplete)
+	if sme.GoVersion != "go1.26.3" || sme.GOARCH != "amd64" {
+		t.Fatalf("StringMissingError = %+v", sme)
 	}
 }
 
@@ -493,6 +495,55 @@ func TestDiagnosticsFromHeapLabels_FailedGoroutinesWarning(t *testing.T) {
 func TestCopyLabels_NilInput(t *testing.T) {
 	if copyLabels(nil) != nil {
 		t.Fatal("copyLabels(nil) should return nil")
+	}
+}
+
+func TestComputeFromAnalysis_SuccessOmitsDebugFields(t *testing.T) {
+	// Encode a successful Response to JSON and verify that debug fields
+	// removed from the struct are not present. This guards against
+	// re-introducing them via json tags or embedded structs.
+	resp := &Response{
+		Labels:            map[string]string{"job": "42"},
+		MatchedGoroutines: 1,
+		ReachableObjects:  1,
+		ReachableBytes:    10,
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, forbidden := range []string{"attribution", "go_version", "goarch", "warnings", "label_source"} {
+		if _, present := raw[forbidden]; present {
+			t.Errorf("success response must not contain %q, but it does: %s", forbidden, data)
+		}
+	}
+}
+
+func TestComputeFromAnalysis_ZeroOverlapFieldsPresent(t *testing.T) {
+	// Overlap fields must be included in JSON even when zero (no omitempty).
+	resp := &Response{
+		Labels:            map[string]string{"job": "42"},
+		MatchedGoroutines: 0,
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, field := range []string{
+		"global_overlap_objects", "global_overlap_bytes",
+		"system_overlap_objects", "system_overlap_bytes",
+	} {
+		if _, present := raw[field]; !present {
+			t.Errorf("overlap field %q must be present even when zero, but it is absent: %s", field, data)
+		}
 	}
 }
 

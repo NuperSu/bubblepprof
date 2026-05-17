@@ -53,9 +53,7 @@ When the layout is known, for each goroutine record in the heap dump:
    - heap dump object contents first (for heap-allocated label strings),
    - process memory reader second (for string literals in read-only program memory).
 
-Goroutines whose labels cannot be fully decoded are excluded from matching with a `string_missing` attribution.
-
-Label decoding runs before graph construction. If the runtime layout is verified but label strings are missing, the endpoint returns `422 string_missing` rather than silently returning zero matches.
+Label decoding runs before graph construction. Any label-decode failure (string bytes unavailable) causes the endpoint to return `422 string_missing` — an undecodable goroutine might also carry the requested labels, so even a partial match count is not authoritative.
 
 ### Step 6 — Build the structural object graph
 

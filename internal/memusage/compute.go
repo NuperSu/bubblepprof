@@ -87,7 +87,7 @@ func IntersectCountBytes(g *snapshotgraph.Graph, a, b map[snapshotgraph.ObjectID
 }
 
 // Diagnostics summarizes label-recovery state needed by ComputeFromAnalysis
-// to decide attribution and surface honest warnings/errors.
+// to decide whether to return a success response or an error.
 type Diagnostics struct {
 	GoVersion string
 	GOARCH    string
@@ -162,15 +162,19 @@ func (e *ParseFailedError) Unwrap() error { return e.Cause }
 // goroutine: for a selector matching S of N goroutines we now pay
 // O(reach(S)) instead of O(reach(N)).
 //
+// Any label-decode failure (StringMissingCount > 0 or FailedGoroutines > 0)
+// causes a StringMissingError: an undecodable goroutine might also carry
+// the requested labels, so a partial or zero match count is not authoritative.
+//
 // Validation runs first so direct callers (e.g. unit tests, future CLI
 // adapters) cannot bypass the same checks the HTTP handler applies.
 // Errors are reported via concrete types the handler can translate into
 // HTTP status codes:
 //
-//	*ValidationError       -> 400
+//	*ValidationError         -> 400
 //	*UnsupportedRuntimeError -> 422
-//	*StringMissingError    -> 422
-//	other                  -> 500
+//	*StringMissingError      -> 422
+//	other                    -> 500
 func ComputeFromAnalysis(
 	req Request,
 	analysis *snapshotgraph.Analysis,
@@ -211,13 +215,10 @@ func ComputeFromAnalysis(
 		matched = append(matched, gr)
 	}
 
-	// If the selector matched zero goroutines AND at least one decode
-	// attempt failed with string_missing, surface a 422 string_missing
-	// instead of a misleading 200 "no match". Some unrelated goroutines
-	// may have decoded successfully, but the caller cannot tell whether
-	// "no match" is authoritative or merely incomplete — string_missing
-	// is the honest answer.
-	if len(matched) == 0 && diag.StringMissingCount > 0 {
+	// Any label-decode failure makes the match set non-authoritative: an
+	// undecodable goroutine might also carry the requested labels. Return
+	// 422 string_missing rather than a partial (or zero) 200 response.
+	if diag.StringMissingCount > 0 || diag.FailedGoroutines > 0 {
 		return nil, &StringMissingError{
 			GoVersion: diag.GoVersion,
 			GOARCH:    diag.GOARCH,
@@ -241,12 +242,6 @@ func ComputeFromAnalysis(
 	globalCount, globalBytes := IntersectCountBytes(g, union, globalReach)
 	systemCount, systemBytes := IntersectCountBytes(g, union, systemReach)
 
-	attribution := AttributionHeapNative
-	if diag.StringMissingCount > 0 || diag.FailedGoroutines > 0 {
-		attribution = AttributionHeapNativeIncomplete
-	}
-
-	warnings := append([]string{}, diag.Warnings...)
 	resp := &Response{
 		Labels:               copyLabels(req.Labels),
 		MatchedGoroutines:    len(matched),
@@ -256,10 +251,6 @@ func ComputeFromAnalysis(
 		GlobalOverlapBytes:   globalBytes,
 		SystemOverlapObjects: systemCount,
 		SystemOverlapBytes:   systemBytes,
-		Attribution:          attribution,
-		GoVersion:            diag.GoVersion,
-		GOARCH:               diag.GOARCH,
-		Warnings:             warnings,
 	}
 	return resp, nil
 }

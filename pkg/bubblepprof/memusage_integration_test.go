@@ -76,13 +76,8 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode response: %v\n%s", err, rr.Body.String())
 		}
-		t.Logf("memusage 200: attribution=%q matched=%d reachable_objects=%d reachable_bytes=%d go=%s arch=%s",
-			resp.Attribution, resp.MatchedGoroutines, resp.ReachableObjects, resp.ReachableBytes,
-			resp.GoVersion, resp.GOARCH)
-		if resp.Attribution != memusage.AttributionHeapNative &&
-			resp.Attribution != memusage.AttributionHeapNativeIncomplete {
-			t.Fatalf("unexpected attribution %q (must be heap-native flavor)", resp.Attribution)
-		}
+		t.Logf("memusage 200: matched=%d reachable_objects=%d reachable_bytes=%d",
+			resp.MatchedGoroutines, resp.ReachableObjects, resp.ReachableBytes)
 		if resp.MatchedGoroutines < 1 {
 			t.Fatalf("matched_goroutines = %d, want >= 1; resp = %+v", resp.MatchedGoroutines, resp)
 		}
@@ -113,8 +108,7 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 // TestMemUsageHandler_RuntimePprofLiteralLabels exercises the Phase 3
 // path that recovers literal pprof.Labels strings from the in-process
 // address space. On supported runtimes (Linux + Go 1.26.x amd64), the
-// endpoint should return 200 with heap-native attribution; the
-// stricter end-to-end assertions live in
+// endpoint should return 200; the stricter end-to-end assertions live in
 // TestMemUsageHandler_Phase3_LiteralLabelsRecovered.
 //
 // A 422 string_missing is a hard failure: on Linux and Darwin the reader is
@@ -166,12 +160,8 @@ func TestMemUsageHandler_RuntimePprofLiteralLabels(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode response: %v\n%s", err, rr.Body.String())
 		}
-		if resp.Attribution != memusage.AttributionHeapNative &&
-			resp.Attribution != memusage.AttributionHeapNativeIncomplete {
-			t.Fatalf("unexpected attribution %q", resp.Attribution)
-		}
-		t.Logf("literal labels recoverable on this runtime: attribution=%q matched=%d",
-			resp.Attribution, resp.MatchedGoroutines)
+		t.Logf("literal labels recoverable on this runtime: matched=%d reachable_bytes=%d",
+			resp.MatchedGoroutines, resp.ReachableBytes)
 	case http.StatusUnprocessableEntity:
 		var er memusage.ErrorResponse
 		if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {

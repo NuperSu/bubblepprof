@@ -488,26 +488,38 @@ func TestComputer_Compute_WithProcReader(t *testing.T) {
 	}
 }
 
-func TestComputer_Compute_ProcWarning(t *testing.T) {
+func TestComputer_Compute_ProcWarningAppearsInStringMissingError(t *testing.T) {
+	// When the process memory reader is disabled and label decoding reports
+	// string_missing failures, the proc-reader warning must appear in the
+	// StringMissingError so error responses can surface it.
 	c := &Computer{
 		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
 		Recoverer: fakeRecoverer{result: heaplabels.Result{
 			LabelsByGID: map[uint64]map[string]string{},
+			Stats: heaplabels.Stats{
+				GoroutinesTotal:  1,
+				GoroutinesFailed: 1,
+				StringsMissing:   1,
+			},
 		}},
 		Opts: Options{DisableProcessMemoryReader: true},
 	}
-	resp, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
-	if err != nil {
-		t.Fatalf("Compute: %v", err)
+	_, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+	if err == nil {
+		t.Fatal("expected StringMissingError, got nil")
+	}
+	var sme *StringMissingError
+	if !errors.As(err, &sme) {
+		t.Fatalf("error = %v, want StringMissingError", err)
 	}
 	found := false
-	for _, w := range resp.Warnings {
+	for _, w := range sme.Warnings {
 		if strings.Contains(w, "process memory reader") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected proc-reader warning in response, got warnings=%v", resp.Warnings)
+		t.Fatalf("expected proc-reader warning in StringMissingError.Warnings, got %v", sme.Warnings)
 	}
 }

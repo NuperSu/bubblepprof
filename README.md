@@ -97,9 +97,7 @@ Success (`200 OK`):
   "global_overlap_objects": 12,
   "global_overlap_bytes": 49152,
   "system_overlap_objects": 3,
-  "system_overlap_bytes": 12288,
-  "attribution": "heap_native",
-  "warnings": []
+  "system_overlap_bytes": 12288
 }
 ```
 
@@ -112,16 +110,8 @@ Success (`200 OK`):
 | `global_overlap_bytes` | Bytes for those globally shared objects |
 | `system_overlap_objects` | Objects shared with system/background goroutines |
 | `system_overlap_bytes` | Bytes for those system-shared objects |
-| `attribution` | How labels were recovered (see below) |
-| `warnings` | Non-fatal issues encountered during the query |
 
-Attribution values:
-
-| Value | Meaning |
-|---|---|
-| `heap_native` | All labels decoded directly from heap dump runtime state |
-| `heap_native_incomplete` | Labels partially decoded; some goroutines' string bytes were unresolvable |
-| `unsupported_runtime` | No verified `runtime.g.labels` layout for this Go version / GOARCH |
+Diagnostic fields (`go_version`, `goarch`, `warnings`) appear on error responses only, not on successful measurements.
 
 Error (`422 Unprocessable Entity`):
 
