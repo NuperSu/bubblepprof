@@ -32,11 +32,15 @@ Object contents are retained in memory so the label decoder can read string byte
 
 After parsing, the temporary file is deleted.
 
-### Step 4 — Open the process memory reader (Linux)
+### Step 4 — Open the process string-body reader
 
-On Linux, `/proc/self/maps` is parsed to enumerate readable address-space mappings, and `/proc/self/mem` is opened for random reads. This reader lets the label decoder access string literal bytes that live in the executable's read-only data segment rather than inside heap objects.
+An in-process reader is opened to recover string literal bytes that live in the executable's read-only data segment rather than inside heap objects. The reader is platform-specific:
 
-If the reader cannot be opened (non-Linux host, `/proc/self/mem` denied, or `DisableProcessMemoryReader` set), the endpoint continues with heap-object contents only and adds a warning. Literal-allocated labels may later fail with `string_missing`.
+- **Linux / FreeBSD**: `/proc/self/maps` is parsed for readable mappings; `/proc/self/mem` is opened for random reads. FreeBSD falls back to ELF rodata when procfs is unavailable.
+- **macOS**: the current executable's Mach-O segments are parsed and read with ASLR slide correction.
+- **Windows** (including Wine): the current executable's PE sections are parsed and read with ASLR slide correction.
+
+If the reader cannot be opened (unsupported platform, access denied, or `DisableProcessMemoryReader` set), the endpoint continues with heap-object contents only and adds a warning. Literal-allocated labels may later fail with `string_missing`.
 
 ### Step 5 — Decode pprof labels and look up the runtime layout
 

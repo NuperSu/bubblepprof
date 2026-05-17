@@ -26,9 +26,9 @@ import (
 //   - No labels.json. No goroutine.pprof.
 //
 // The only skip is -short mode. A 422 string_missing is always a hard
-// failure, regardless of platform: on Linux and Darwin the reader is
-// implemented and must work; on platforms without an implementation yet
-// (e.g. Windows) the test failing is the correct signal that work remains.
+// failure: the process memory reader is implemented on Linux, macOS,
+// FreeBSD, and Windows, so literal label recovery must succeed on all of
+// those platforms.
 //
 // A 422 unsupported_runtime is also a hard failure: the Go version must be
 // in the verified layout table for this test to run.

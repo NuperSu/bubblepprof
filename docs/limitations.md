@@ -15,8 +15,8 @@ Ordinary pprof label strings created with `pprof.Labels("key", "value")` may hav
 `bubblepprof` recovers those bytes using an in-process reader:
 
 - **Linux / FreeBSD**: `/proc/self/mem` (FreeBSD requires procfs to be mounted; falls back to ELF rodata when absent)
-- **macOS**: Mach-O memory regions via `vm_read_overwrite`
-- **Windows** (including Wine): PE image read via `ReadProcessMemory`
+- **macOS**: current executable Mach-O segments with ASLR slide correction
+- **Windows** (including Wine): current executable PE sections with ASLR slide correction
 
 When the reader is unavailable or disabled (`DisableProcessMemoryReader=true`), literal-allocated label strings return `string_missing`.
 

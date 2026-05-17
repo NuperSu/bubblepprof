@@ -174,8 +174,8 @@ Latency is proportional to live heap size. Concurrent callers receive `429 Too M
 
 See [`docs/limitations.md`](docs/limitations.md) for a complete list. Key points:
 
-- Heap-native label recovery is verified only for **go1.26.\* on amd64**. Other Go versions or architectures return `unsupported_runtime`.
-- On Linux, ordinary string literal labels are recovered via `/proc/self/mem`. On other platforms they may return `string_missing`.
+- Heap-native label recovery is verified for **go1.24.\*–go1.26.\* on amd64, arm64, arm, and 386**. Other Go versions or architectures return `unsupported_runtime`.
+- Ordinary string literal labels are recovered via the in-process reader on Linux, macOS, FreeBSD, and Windows. On other platforms they may return `string_missing`.
 - Sizes are **shallow** (the object itself, not transitive) and counts are **BFS-reachable** from the matched goroutine roots, not total process heap.
 - Global and system overlap is reported separately; it is not subtracted automatically.
 

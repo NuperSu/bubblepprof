@@ -142,7 +142,8 @@ recovery reads string bytes through a composite address-space reader
 1. retained heap dump object contents (where the bytes are heap-owned),
 2. the current process's memory mappings (for the in-process endpoint:
    `addrspace.ProcessReader` reads via `/proc/self/mem` on Linux/FreeBSD,
-   Mach-O regions on macOS, or the PE image on Windows/Wine),
+   ASLR-corrected Mach-O segments on macOS, or ASLR-corrected PE sections
+   on Windows/Wine),
 3. the executable's load segments (`addrspace.ELFReader` — an internal
    library reader; `/debug/memusage` does not expose this as a
    user-facing option).
@@ -176,11 +177,10 @@ go run ./cmd/labeloffsetprobe
 - `runtime.g` layout is private; supported (Go version, pointer size)
   combinations are narrow.
 - Label key/value bytes from string literals are read from the running
-  process address space (Linux/FreeBSD: `/proc/self/mem`; macOS: Mach-O;
-  Windows/Wine: PE); on unsupported hosts or when
+  process address space (Linux/FreeBSD: `/proc/self/mem`; macOS: ASLR-corrected
+  Mach-O segments; Windows/Wine: ASLR-corrected PE sections); on unsupported hosts or when
   `DisableProcessMemoryReader` is set, literal-allocated labels return
   `string_missing`.
-- The current verified prototype layout covers a single Go release.
 - `addrspace.ELFReader` covers non-PIE binaries; PIE/ASLR binaries
   require a load bias that the snapshot does not yet record.
   `/debug/memusage` does not expose ELF reading.

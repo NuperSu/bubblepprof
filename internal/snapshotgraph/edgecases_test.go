@@ -189,7 +189,7 @@ func TestSummaryIncludesNewCounters(t *testing.T) {
 		"resolved object edges: 0",
 		"goroutines: 1 (system: 1)",
 		"goroutine roots: 0",
-		"bubble attribution: not implemented in this phase",
+		"selected-root reachability: computed by internal/memusage",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary missing %q:\n%s", want, got)

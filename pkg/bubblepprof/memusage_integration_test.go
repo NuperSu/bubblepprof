@@ -28,9 +28,10 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 		t.Skip("skipping live heap-dump integration test in short mode")
 	}
 
-	// Heap-native label recovery has to read the key/value strings out
-	// of heap-resident bytes. Cloning the literals onto the heap is the
-	// Phase 1 workaround until the rodata/executable reader lands.
+	// strings.Clone forces heap allocation so the label bytes appear in
+	// heap-dump object contents. This test exercises heap-object decoding;
+	// literal-string recovery via the process reader is covered by
+	// TestMemUsageHandler_RuntimePprofLiteralLabels.
 	bubbleKey := strings.Clone("job")
 	bubbleValue := strings.Clone("alpha")
 

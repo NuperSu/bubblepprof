@@ -6,8 +6,8 @@ import (
 )
 
 // PrintSummary writes a short, stable human-readable summary of the
-// analysis. It is intentionally bubble-agnostic — Phase 4 does not
-// attribute bubbles.
+// analysis. Selected-root reachability is computed by internal/memusage,
+// not here.
 func (a *Analysis) PrintSummary(w io.Writer) {
 	if a == nil {
 		fmt.Fprintln(w, "snapshot analysis: <nil>")
@@ -40,5 +40,5 @@ func (a *Analysis) PrintSummary(w io.Writer) {
 	for _, msg := range a.Warnings {
 		fmt.Fprintf(w, "  warning: %s\n", msg)
 	}
-	fmt.Fprintln(w, "bubble attribution: not implemented in this phase")
+	fmt.Fprintln(w, "selected-root reachability: computed by internal/memusage")
 }

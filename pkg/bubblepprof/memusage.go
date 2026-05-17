@@ -31,12 +31,12 @@ type MemUsageOptions struct {
 	IncludeSystemGoroutines bool
 
 	// DisableProcessMemoryReader turns off the in-process
-	// address-space reader the handler opens (when running on
-	// Linux) so the heap-label decoder can recover ordinary
-	// runtime/pprof string literals that live outside heap object
-	// contents. When true, label decoding sees heap object contents
-	// only, and ordinary pprof.Labels("job","42") may fail with
-	// status_missing. Default false (reader enabled).
+	// address-space reader the handler opens on Linux, macOS,
+	// FreeBSD, and Windows so the heap-label decoder can recover
+	// ordinary runtime/pprof string literals that live outside heap
+	// object contents. When true, label decoding sees heap object
+	// contents only, and ordinary pprof.Labels("job","42") may fail
+	// with string_missing. Default false (reader enabled).
 	DisableProcessMemoryReader bool
 
 	// MaxRequestBodyBytes caps the request body. Zero falls back to the
@@ -79,12 +79,13 @@ type MemUsageOptions struct {
 //	})
 //
 // Known limitations: heap-native label recovery is verified for
-// go1.26.* on amd64 (runtime.g.labels offset 0x160). On unsupported
+// go1.24.*–go1.26.* on amd64, arm64, arm, and 386. On unsupported
 // runtime versions the endpoint returns HTTP 422 with code
 // "unsupported_runtime". When pprof label strings reside outside heap
-// object contents (common for string literals), the Linux process
-// memory reader is consulted; on other platforms or when /proc/self/mem
-// is unavailable the endpoint may return 422 with code "string_missing".
+// object contents (common for string literals), the in-process reader
+// is consulted on Linux, macOS, FreeBSD, and Windows; on other
+// platforms or when disabled, the endpoint may return 422 with code
+// "string_missing".
 func MemUsageHandler() http.Handler {
 	return MemUsageHandlerWithOptions(MemUsageOptions{})
 }

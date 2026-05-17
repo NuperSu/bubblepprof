@@ -303,9 +303,9 @@ func (unnamedReader) Name() string { return "extra" }
 // when interpreted as a labelMap address, yields a label map containing
 // the requested label key/value pairs.
 //
-// The scan only works on 64-bit little-endian targets; on others it
-// returns an empty slice. Callers must treat candidates as candidates,
-// never as verified offsets.
+// The scan works on little-endian targets (both 32-bit and 64-bit); on
+// big-endian it returns an empty slice. Callers must treat candidates as
+// candidates, never as verified offsets.
 func FindOffsetCandidates(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map[string]string, opts Options) []OffsetCandidate {
 	opts = normalizeOptions(opts)
 	if snap == nil || len(want) == 0 {
