@@ -1,3 +1,50 @@
+// profiler_load is a high-load stress test and heap generator for bubblepprof.
+// It spawns a configurable pool of goroutines — each stamped with standard
+// runtime/pprof labels — and keeps a configurable amount of heap alive so
+// /debug/memusage has real attributed bytes to report per bubble.
+//
+// Worker types (distributed round-robin across -workers goroutines):
+//
+//   - role=cpu-hash,                   pool=compute   — SHA256-hashes 32 KiB buffers in a tight loop
+//   - role=sorter,                     pool=compute   — sorts a 4096-element int slice each iteration
+//   - role=allocator,                  pool=memory    — allocates 8–63 KiB chunks, retains the last four
+//   - role=heap-scan,                  pool=memory    — strides through the pinned resident heap array
+//   - role=channel-producer,           pool=pipeline  — pushes 128-byte jobs into a buffered channel
+//   - role=mutex-and-channel-consumer, pool=pipeline  — consumes jobs and contends on a shared map mutex
+//
+// Each worker also carries a shard label (worker_id % 32). A single reporter
+// goroutine (role=reporter, pool=monitor) logs goroutine count, heap stats, and
+// ops/sec every two seconds.
+//
+// Querying bubbles while the load test runs:
+//
+//	# All compute workers (CPU-hash + sorter)
+//	curl -X POST http://127.0.0.1:6060/debug/memusage \
+//	  -H 'Content-Type: application/json' \
+//	  -d '{"labels":{"pool":"compute"}}'
+//
+//	# Allocator workers only (dynamic heap churn)
+//	curl -X POST http://127.0.0.1:6060/debug/memusage \
+//	  -H 'Content-Type: application/json' \
+//	  -d '{"labels":{"role":"allocator"}}'
+//
+//	# Heap-scan workers (large resident heap visible from matched goroutines)
+//	curl -X POST http://127.0.0.1:6060/debug/memusage \
+//	  -H 'Content-Type: application/json' \
+//	  -d '{"labels":{"role":"heap-scan"}}'
+//
+// Usage:
+//
+//	go run ./examples/profiler_load
+//	go run ./examples/profiler_load -mem-mb 500 -workers 1024 -duration 2m
+//
+// Flags:
+//
+//	-addr      HTTP listen address for /debug/memusage (default 127.0.0.1:6060)
+//	-workers   number of labeled worker goroutines (default 768)
+//	-mem-mb    resident heap to keep alive in MiB (default 160; use 500+ for heavier loads)
+//	-duration  how long to run; 0 means until Ctrl+C/SIGTERM
+//	-queue     channel buffer size between producers and consumers (default 8192)
 package main
 
 import (

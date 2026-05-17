@@ -157,6 +157,48 @@ curl http://127.0.0.1:6060/stats
 go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 ```
 
+## Load-test example (`profiler_load`)
+
+`profiler_load` is a stress test that sustains a large number of labeled goroutines
+and a configurable resident heap, giving `/debug/memusage` meaningful bytes to attribute
+to each bubble.
+
+```bash
+# Default: 768 workers, 160 MiB pinned resident heap
+go run ./examples/profiler_load
+
+# Heavier load: 1024 workers, 500 MiB pinned heap, 2-minute run
+go run ./examples/profiler_load -mem-mb 500 -workers 1024 -duration 2m
+```
+
+Six worker types are distributed round-robin — each carries a `role` label,
+a `pool` label (`compute`, `memory`, or `pipeline`), and a `shard` label:
+
+```bash
+# Heap reachable from all compute workers (cpu-hash + sorter)
+curl -s -X POST http://127.0.0.1:6060/debug/memusage \
+  -H 'Content-Type: application/json' \
+  -d '{"labels":{"pool":"compute"}}' | jq .
+
+# Heap reachable from allocator workers (high churn pool)
+curl -s -X POST http://127.0.0.1:6060/debug/memusage \
+  -H 'Content-Type: application/json' \
+  -d '{"labels":{"role":"allocator"}}' | jq .
+
+# Heap reachable from heap-scan workers (resident heap visible from matched roots)
+curl -s -X POST http://127.0.0.1:6060/debug/memusage \
+  -H 'Content-Type: application/json' \
+  -d '{"labels":{"role":"heap-scan"}}' | jq .
+
+# Pipeline workers (channel producers + mutex consumers)
+curl -s -X POST http://127.0.0.1:6060/debug/memusage \
+  -H 'Content-Type: application/json' \
+  -d '{"labels":{"pool":"pipeline"}}' | jq .
+```
+
+The process prints goroutine count, heap stats, and ops/sec every two seconds.
+Use it to stress-test label recovery and reachability performance on realistic heap sizes.
+
 ## Security and performance
 
 `/debug/memusage` is equivalent in sensitivity to `/debug/pprof/heap`. Every call:
