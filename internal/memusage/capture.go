@@ -111,7 +111,7 @@ func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra ad
 // /debug/memusage request. It is a value with default-zero fields wired
 // to production implementations.
 //
-// The process memory reader (/proc/self/mem on Linux, Mach-O on Darwin, PE on Windows) is opened lazily on
+// The process memory reader (/proc/self/mem on Linux and FreeBSD, Mach-O on Darwin, PE on Windows) is opened lazily on
 // the first Compute call and reused across subsequent requests. Call Close
 // when the Computer is no longer needed to release the underlying file
 // descriptor. Close must not be called concurrently with Compute.
