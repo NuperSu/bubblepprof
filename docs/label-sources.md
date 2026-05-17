@@ -97,7 +97,7 @@ at exactly the moment the heap was captured.
 Heap-native recovery depends on **private Go runtime layout**:
 
 - The `runtime.g` struct layout, including the offset of the `labels`
-  field, is Go-version and GOARCH specific.
+  field, is Go-version and pointer-size specific.
 - The `runtime/pprof` label map type is internal and may change.
 - Label *key/value strings* may not live inside heap objects. When the
   caller writes `pprof.Labels("job", "42")` with ordinary string
@@ -107,18 +107,21 @@ Heap-native recovery depends on **private Go runtime layout**:
 
 ## Verified heap-native layouts
 
-The current prototype has a verified layout only for a narrow target:
+The current prototype has verified layouts for:
 
 ```
-Go 1.26.*
-amd64
-pointer size 8
-runtime.g.labels offset 0x160
+Go 1.24.* – 1.26.*
+64-bit little-endian (amd64, arm64): runtime.g.labels offsets 0x160 / 0x158 / 0x160
+32-bit little-endian (arm, 386):     runtime.g.labels offsets 0xd4 / 0xd0 / 0xd8
 ```
 
-This is **not** universal support. Other Go versions or architectures
-need their own verified entries (or a runtime layout provider) before
-heap-native recovery is reliable.
+Because `runtime.g` field offsets depend only on pointer width (not
+architecture), a single table entry covers all 64-bit LE platforms and another
+covers all 32-bit LE platforms for a given Go version.
+
+This is **not** universal support. Other Go versions need their own
+verified entries (or a runtime layout provider) before heap-native
+recovery is reliable.
 
 When the runtime layout is unsupported, the endpoint returns
 `unsupported_runtime` without building the object graph.
@@ -138,15 +141,15 @@ recovery reads string bytes through a composite address-space reader
 
 1. retained heap dump object contents (where the bytes are heap-owned),
 2. the current process's memory mappings (for the in-process endpoint:
-   `addrspace.ProcessReader` parses `/proc/self/maps` and reads via
-   `/proc/self/mem` on Linux),
+   `addrspace.ProcessReader` reads via `/proc/self/mem` on Linux/FreeBSD,
+   Mach-O regions on macOS, or the PE image on Windows/Wine),
 3. the executable's load segments (`addrspace.ELFReader` — an internal
    library reader; `/debug/memusage` does not expose this as a
    user-facing option).
 
-`/debug/memusage` opens the process memory reader by default on Linux.
-When the process reader is unavailable (non-Linux host, denied
-`/proc/self/mem`, or `DisableProcessMemoryReader=true`) the endpoint
+`/debug/memusage` opens the process memory reader by default on Linux,
+macOS, Windows, and FreeBSD. When the reader is unavailable (unsupported
+platform, denied access, or `DisableProcessMemoryReader=true`) the endpoint
 degrades honestly: decode failures surface as `string_missing` /
 `heap_native_incomplete` with a descriptive warning, never as a silent
 fallback.
@@ -180,12 +183,13 @@ go run ./cmd/labeloffsetprobe
 
 ## Known limitations
 
-- `runtime.g` layout is private; supported (Go version, GOARCH)
+- `runtime.g` layout is private; supported (Go version, pointer size)
   combinations are narrow.
 - Label key/value bytes from string literals are read from the running
-  process address space via `/proc/self/mem` on Linux; on other hosts
-  (or when `DisableProcessMemoryReader` is set), literal-allocated
-  labels return `string_missing`.
+  process address space (Linux/FreeBSD: `/proc/self/mem`; macOS: Mach-O;
+  Windows/Wine: PE); on unsupported hosts or when
+  `DisableProcessMemoryReader` is set, literal-allocated labels return
+  `string_missing`.
 - The current verified prototype layout covers a single Go release.
 - `addrspace.ELFReader` covers non-PIE binaries; PIE/ASLR binaries
   require a load bias that the snapshot does not yet record.

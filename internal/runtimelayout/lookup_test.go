@@ -39,7 +39,6 @@ func TestLookupVerifiedGo126AMD64(t *testing.T) {
 func TestLookupMisses(t *testing.T) {
 	cases := []LookupInput{
 		{GoVersion: "go1.27.0", GOARCH: "amd64", PtrSize: 8},
-		{GoVersion: "go1.26.3", GOARCH: "amd64", PtrSize: 4},
 		{GoVersion: "go1.26.3", GOARCH: "amd64", PtrSize: 8, BigEndian: true},
 		{GoVersion: "", GOARCH: "amd64", PtrSize: 8},
 		{GoVersion: "go1.23.0", GOARCH: "amd64", PtrSize: 8},

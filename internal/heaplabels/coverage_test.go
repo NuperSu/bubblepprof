@@ -80,8 +80,8 @@ func TestRangeContainingNilAndZeroAddr(t *testing.T) {
 func TestLookupLayoutMisses(t *testing.T) {
 	cases := []*heapsnapshot.HeapSnapshot{
 		nil,
-		{Params: heapsnapshot.DumpParams{GOARCH: "arm64", PtrSize: 4, BuildVersion: "go1.26.0"}},
-		{Params: heapsnapshot.DumpParams{GOARCH: "amd64", PtrSize: 4, BuildVersion: "go1.26.0"}},
+		{Params: heapsnapshot.DumpParams{GOARCH: "amd64", PtrSize: 8, BigEndian: true, BuildVersion: "go1.26.0"}},
+		{Params: heapsnapshot.DumpParams{GOARCH: "amd64", PtrSize: 2, BuildVersion: "go1.26.0"}},
 		{Params: heapsnapshot.DumpParams{GOARCH: "amd64", PtrSize: 8, BuildVersion: "go9.99-future"}},
 	}
 	for i, snap := range cases {

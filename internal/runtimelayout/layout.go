@@ -2,10 +2,12 @@
 // heap-native pprof label recovery depends on, and resolves it from a
 // small verified table.
 //
-// The runtime field offsets used to decode runtime.g.labels are Go-version
-// and GOARCH specific. Callers (heaplabels, /debug/memusage, debug CLI
-// tools) consume a Layout value through Lookup or Manual; they never embed
-// layout knowledge directly.
+// The runtime field offsets used to decode runtime.g.labels depend on the
+// Go version and pointer size (4 or 8 bytes) — not on the specific
+// architecture. All 64-bit little-endian platforms share one entry per Go
+// version; all 32-bit little-endian platforms share another. Callers
+// (heaplabels, /debug/memusage, debug CLI tools) consume a Layout value
+// through Lookup or Manual; they never embed layout knowledge directly.
 //
 // DWARF/ELF/process-memory based layout discovery is reserved for a later
 // phase. This package only resolves verified table entries and explicit
@@ -92,6 +94,10 @@ func (l Layout) ByteOrder() binary.ByteOrder {
 // LookupInput is the small request bundle used by Lookup. Callers fill it
 // from a parsed heap snapshot (snap.Params) or, for in-process probes,
 // from runtime.Version() / runtime.GOARCH.
+//
+// GOARCH is not used during table lookup (offsets depend only on PtrSize and
+// BigEndian), but it is echoed into the returned Layout.GOARCH for diagnostics
+// and surfaced verbatim in UnsupportedMessage.
 type LookupInput struct {
 	GoVersion string
 	GOARCH    string

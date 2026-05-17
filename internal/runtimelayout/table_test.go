@@ -37,16 +37,16 @@ func TestLookupBestEffort_NotFound(t *testing.T) {
 }
 
 func TestLookupBestEffort_PtrSizeMismatch(t *testing.T) {
-	// arm is in the table with PtrSize=4; requesting PtrSize=8 hits the PtrSize continue.
+	// PtrSize=2 has no table entry on any platform.
 	input := LookupInput{
 		GoVersion: "go1.99.0",
-		GOARCH:    "arm",
-		PtrSize:   8, // arm entries use PtrSize=4
+		GOARCH:    "amd64",
+		PtrSize:   2,
 		BigEndian: false,
 	}
 	_, ok := LookupBestEffort(input)
 	if ok {
-		t.Fatal("LookupBestEffort returned true for arm with PtrSize=8 (not in table)")
+		t.Fatal("LookupBestEffort returned true for PtrSize=2 (not in table)")
 	}
 }
 
@@ -70,23 +70,16 @@ func TestLookupBestEffort_BigEndianMismatch(t *testing.T) {
 func TestVerifiedTableShape(t *testing.T) {
 	type wantEntry struct {
 		versionPrefix string
-		goarch        string
 		ptrSize       int
 		gLabelsOffset uint64
 	}
 	want := []wantEntry{
-		{"go1.26.", "amd64", 8, 0x160},
-		{"go1.26.", "arm64", 8, 0x160},
-		{"go1.26.", "arm", 4, 0xd8},
-		{"go1.26.", "386", 4, 0xd8},
-		{"go1.25.", "amd64", 8, 0x158},
-		{"go1.25.", "arm64", 8, 0x158},
-		{"go1.25.", "arm", 4, 0xd0},
-		{"go1.25.", "386", 4, 0xd0},
-		{"go1.24.", "amd64", 8, 0x160},
-		{"go1.24.", "arm64", 8, 0x160},
-		{"go1.24.", "arm", 4, 0xd4},
-		{"go1.24.", "386", 4, 0xd4},
+		{"go1.26.", 8, 0x160},
+		{"go1.26.", 4, 0xd8},
+		{"go1.25.", 8, 0x158},
+		{"go1.25.", 4, 0xd0},
+		{"go1.24.", 8, 0x160},
+		{"go1.24.", 4, 0xd4},
 	}
 	if len(verifiedTable) != len(want) {
 		t.Fatalf("verifiedTable size = %d, want %d; add a regression test if expanding", len(verifiedTable), len(want))
@@ -95,9 +88,6 @@ func TestVerifiedTableShape(t *testing.T) {
 		e := verifiedTable[i]
 		if e.VersionPrefix != w.versionPrefix {
 			t.Errorf("[%d] VersionPrefix = %q, want %q", i, e.VersionPrefix, w.versionPrefix)
-		}
-		if e.GOARCH != w.goarch {
-			t.Errorf("[%d] GOARCH = %q, want %q", i, e.GOARCH, w.goarch)
 		}
 		if e.PtrSize != w.ptrSize {
 			t.Errorf("[%d] PtrSize = %d, want %d", i, e.PtrSize, w.ptrSize)

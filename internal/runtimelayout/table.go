@@ -2,13 +2,18 @@ package runtimelayout
 
 import "fmt"
 
-// TableEntry is one verified runtime layout. A match requires every field
-// (VersionPrefix, GOARCH, PtrSize, BigEndian) to agree with the input;
+// TableEntry is one verified runtime layout. A match requires
+// (VersionPrefix, PtrSize, BigEndian) to agree with the input;
 // version matching uses a strict prefix so build-info suffixes such as
 // "go1.26.3-X:nodwarf5" still resolve to the right entry.
+//
+// GOARCH is intentionally absent: runtime.g is a plain Go struct whose field
+// offsets depend only on pointer width and Go version, not on architecture.
+// All 64-bit LE platforms share one entry per Go version; all 32-bit LE
+// platforms share another. The input GOARCH is echoed into Layout.GOARCH
+// for diagnostics but never compared during lookup.
 type TableEntry struct {
 	VersionPrefix string
-	GOARCH        string
 	PtrSize       int
 	BigEndian     bool
 	Layout        Layout
@@ -17,178 +22,84 @@ type TableEntry struct {
 // verifiedTable lists every runtime layout this prototype has been
 // verified against. The verifier is cmd/labeloffsetprobe.
 //
-// Add a new entry only after running the probe and confirming the offset
-// against a heap dump produced by a live binary on that runtime.
+// Each entry covers all architectures that share the same (PtrSize, BigEndian)
+// for a given Go version — runtime.g field offsets depend only on pointer width
+// and Go version, not on the specific architecture. Add a new entry only after
+// running the probe and confirming the offset against a heap dump produced by a
+// live binary on that runtime.
 var verifiedTable = []TableEntry{
-	// Verified with cmd/labeloffsetprobe on linux/amd64
-	// (go1.26.0–go1.26.3 linux/amd64).
+	// Verified on linux/amd64 (go1.26.0–go1.26.3) and linux/arm64 (go1.26.0–go1.26.3).
+	// Applies to all 64-bit little-endian platforms for go1.26.*.
 	{
 		VersionPrefix: "go1.26.",
-		GOARCH:        "amd64",
 		PtrSize:       8,
 		BigEndian:     false,
 		Layout: with64BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
-			GOARCH:        "amd64",
 			GLabelsOffset: 0x160,
-			Description:   "verified go1.26.0–go1.26.3 linux/amd64 runtime.g.labels offset 0x160",
+			Description:   "verified go1.26.* 64-bit LE (amd64, arm64) runtime.g.labels offset 0x160",
 		}),
 	},
-	// Verified with cmd/labeloffsetprobe on linux/arm64
-	// (go1.26.0–go1.26.3 linux/arm64).
+	// Verified on linux/arm/v7 (go1.26.3); suggested for linux/386 (struct layout analysis).
+	// Applies to all 32-bit little-endian platforms for go1.26.*.
 	{
 		VersionPrefix: "go1.26.",
-		GOARCH:        "arm64",
-		PtrSize:       8,
-		BigEndian:     false,
-		Layout: with64BitLittleEndianDefaults(Layout{
-			Source:        SourceTable,
-			GOARCH:        "arm64",
-			GLabelsOffset: 0x160,
-			Description:   "verified go1.26.0–go1.26.3 linux/arm64 runtime.g.labels offset 0x160",
-		}),
-	},
-	// Verified with cmd/labeloffsetprobe on linux/arm/v7
-	// (go1.26.3 linux/arm).
-	{
-		VersionPrefix: "go1.26.",
-		GOARCH:        "arm",
 		PtrSize:       4,
 		BigEndian:     false,
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
-			GOARCH:        "arm",
 			GLabelsOffset: 0xd8,
-			Description:   "verified go1.26.3 linux/arm runtime.g.labels offset 0xd8",
+			Description:   "verified go1.26.* 32-bit LE (arm); suggested for 386. runtime.g.labels offset 0xd8",
 		}),
 	},
-	// Suggested for go1.26.* linux/386; offset derived from struct layout
-	// analysis (not yet run through cmd/labeloffsetprobe on 386 hardware).
-	{
-		VersionPrefix: "go1.26.",
-		GOARCH:        "386",
-		PtrSize:       4,
-		BigEndian:     false,
-		Layout: with32BitLittleEndianDefaults(Layout{
-			Source:        SourceTable,
-			GOARCH:        "386",
-			GLabelsOffset: 0xd8,
-			Description:   "suggested go1.26.* linux/386 runtime.g.labels offset 0xd8",
-		}),
-	},
-	// Verified with cmd/labeloffsetprobe on linux/amd64
-	// (go1.25.0–go1.25.10 linux/amd64).
+	// Verified on linux/amd64 (go1.25.0–go1.25.10) and linux/arm64 (go1.25.0–go1.25.10).
+	// Applies to all 64-bit little-endian platforms for go1.25.*.
 	{
 		VersionPrefix: "go1.25.",
-		GOARCH:        "amd64",
 		PtrSize:       8,
 		BigEndian:     false,
 		Layout: with64BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
-			GOARCH:        "amd64",
 			GLabelsOffset: 0x158,
-			Description:   "verified go1.25.0–go1.25.10 linux/amd64 runtime.g.labels offset 0x158",
+			Description:   "verified go1.25.* 64-bit LE (amd64, arm64) runtime.g.labels offset 0x158",
 		}),
 	},
-	// Verified with cmd/labeloffsetprobe on linux/arm64
-	// (go1.25.0–go1.25.10 linux/arm64).
+	// Verified on linux/arm/v7 (go1.25); suggested for linux/386 (struct layout analysis).
+	// Applies to all 32-bit little-endian platforms for go1.25.*.
 	{
 		VersionPrefix: "go1.25.",
-		GOARCH:        "arm64",
-		PtrSize:       8,
-		BigEndian:     false,
-		Layout: with64BitLittleEndianDefaults(Layout{
-			Source:        SourceTable,
-			GOARCH:        "arm64",
-			GLabelsOffset: 0x158,
-			Description:   "verified go1.25.0–go1.25.10 linux/arm64 runtime.g.labels offset 0x158",
-		}),
-	},
-	// Verified with cmd/labeloffsetprobe on linux/arm/v7
-	// (go1.25 linux/arm).
-	{
-		VersionPrefix: "go1.25.",
-		GOARCH:        "arm",
 		PtrSize:       4,
 		BigEndian:     false,
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
-			GOARCH:        "arm",
 			GLabelsOffset: 0xd0,
-			Description:   "verified go1.25 linux/arm runtime.g.labels offset 0xd0",
+			Description:   "verified go1.25.* 32-bit LE (arm); suggested for 386. runtime.g.labels offset 0xd0",
 		}),
 	},
-	// Suggested for go1.25.* linux/386; offset derived from struct layout
-	// analysis (not yet run through cmd/labeloffsetprobe on 386 hardware).
-	{
-		VersionPrefix: "go1.25.",
-		GOARCH:        "386",
-		PtrSize:       4,
-		BigEndian:     false,
-		Layout: with32BitLittleEndianDefaults(Layout{
-			Source:        SourceTable,
-			GOARCH:        "386",
-			GLabelsOffset: 0xd0,
-			Description:   "suggested go1.25.* linux/386 runtime.g.labels offset 0xd0",
-		}),
-	},
-	// Verified with cmd/labeloffsetprobe on linux/amd64
-	// (go1.24.0–go1.24.13 linux/amd64).
-	// go1.24 introduced internal/runtime/pprof and the struct-based label
-	// format ([]label.Label). go1.23 and earlier used map[string]string and
-	// are not supported by this decoder.
+	// Verified on linux/amd64 (go1.24.0–go1.24.13) and linux/arm64 (go1.24.0–go1.24.13).
+	// go1.24 introduced internal/runtime/pprof and the struct-based label format
+	// ([]label.Label). go1.23 and earlier used map[string]string and are not supported.
+	// Applies to all 64-bit little-endian platforms for go1.24.*.
 	{
 		VersionPrefix: "go1.24.",
-		GOARCH:        "amd64",
 		PtrSize:       8,
 		BigEndian:     false,
 		Layout: with64BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
-			GOARCH:        "amd64",
 			GLabelsOffset: 0x160,
-			Description:   "verified go1.24.0–go1.24.13 linux/amd64 runtime.g.labels offset 0x160",
+			Description:   "verified go1.24.* 64-bit LE (amd64, arm64) runtime.g.labels offset 0x160",
 		}),
 	},
-	// Verified with cmd/labeloffsetprobe on linux/arm64
-	// (go1.24.0–go1.24.13 linux/arm64).
+	// Verified on linux/arm/v7 (go1.24); suggested for linux/386 (struct layout analysis).
+	// Applies to all 32-bit little-endian platforms for go1.24.*.
 	{
 		VersionPrefix: "go1.24.",
-		GOARCH:        "arm64",
-		PtrSize:       8,
-		BigEndian:     false,
-		Layout: with64BitLittleEndianDefaults(Layout{
-			Source:        SourceTable,
-			GOARCH:        "arm64",
-			GLabelsOffset: 0x160,
-			Description:   "verified go1.24.0–go1.24.13 linux/arm64 runtime.g.labels offset 0x160",
-		}),
-	},
-	// Verified with cmd/labeloffsetprobe on linux/arm/v7
-	// (go1.24 linux/arm).
-	{
-		VersionPrefix: "go1.24.",
-		GOARCH:        "arm",
 		PtrSize:       4,
 		BigEndian:     false,
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
-			GOARCH:        "arm",
 			GLabelsOffset: 0xd4,
-			Description:   "verified go1.24 linux/arm runtime.g.labels offset 0xd4",
-		}),
-	},
-	// Suggested for go1.24.* linux/386; offset derived from struct layout
-	// analysis (not yet run through cmd/labeloffsetprobe on 386 hardware).
-	{
-		VersionPrefix: "go1.24.",
-		GOARCH:        "386",
-		PtrSize:       4,
-		BigEndian:     false,
-		Layout: with32BitLittleEndianDefaults(Layout{
-			Source:        SourceTable,
-			GOARCH:        "386",
-			GLabelsOffset: 0xd4,
-			Description:   "suggested go1.24.* linux/386 runtime.g.labels offset 0xd4",
+			Description:   "verified go1.24.* 32-bit LE (arm); suggested for 386. runtime.g.labels offset 0xd4",
 		}),
 	},
 }
@@ -202,9 +113,6 @@ func Lookup(input LookupInput) (Layout, bool) {
 		return Layout{}, false
 	}
 	for _, e := range verifiedTable {
-		if e.GOARCH != input.GOARCH {
-			continue
-		}
 		if e.PtrSize != input.PtrSize {
 			continue
 		}
@@ -216,20 +124,18 @@ func Lookup(input LookupInput) (Layout, bool) {
 		}
 		layout := e.Layout
 		layout.GoVersion = input.GoVersion
+		layout.GOARCH = input.GOARCH
 		return layout, true
 	}
 	return Layout{}, false
 }
 
-// LookupBestEffort returns the first table entry that matches GOARCH, PtrSize,
-// and BigEndian, ignoring GoVersion. It is used when AllowInferredLayout is
+// LookupBestEffort returns the first table entry that matches PtrSize and
+// BigEndian, ignoring GoVersion. It is used when AllowInferredLayout is
 // set: the caller gets a best-effort layout for an unverified Go version and
-// must surface a warning. Returns (zero, false) when no arch/width match exists.
+// must surface a warning. Returns (zero, false) when no width/endian match exists.
 func LookupBestEffort(input LookupInput) (Layout, bool) {
 	for _, e := range verifiedTable {
-		if e.GOARCH != input.GOARCH {
-			continue
-		}
 		if e.PtrSize != input.PtrSize {
 			continue
 		}
@@ -238,6 +144,7 @@ func LookupBestEffort(input LookupInput) (Layout, bool) {
 		}
 		layout := e.Layout
 		layout.GoVersion = input.GoVersion
+		layout.GOARCH = input.GOARCH
 		return layout, true
 	}
 	return Layout{}, false

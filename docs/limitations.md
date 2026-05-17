@@ -2,17 +2,23 @@
 
 ## Runtime layout dependency
 
-`runtime.g.labels` is a private field of the `runtime.g` struct. Its byte offset depends on the **exact Go version and GOARCH**. `bubblepprof` uses a static table of verified offsets.
+`runtime.g.labels` is a private field of the `runtime.g` struct. Its byte offset depends on the **exact Go version and pointer size** (4 or 8 bytes). `bubblepprof` uses a static table of verified offsets. Because the offset is determined by Go's struct layout rules — not by the specific architecture — all 64-bit little-endian platforms share one entry per Go version, and all 32-bit little-endian platforms share another.
 
-**Current verified support**: go1.26.\* on amd64 (pointer size 8, `runtime.g.labels` offset `0x160`).
+**Current verified support**: go1.24.\*–go1.26.\*, 64-bit little-endian (amd64, arm64) and 32-bit little-endian (arm, 386).
 
-On any other Go version or architecture the endpoint returns `422 unsupported_runtime` and does not proceed. Future work requires either manual verification of new Go releases or a DWARF-based layout discovery path.
+On any other Go version the endpoint returns `422 unsupported_runtime` and does not proceed. Future work requires either manual verification of new Go releases or a DWARF-based layout discovery path.
 
-## Label string recovery is Linux-first
+## Label string recovery
 
 Ordinary pprof label strings created with `pprof.Labels("key", "value")` may have their byte content stored in the executable's read-only data segment rather than in heap objects. The heap dump alone does not contain those bytes.
 
-On Linux, `bubblepprof` reads those bytes from the running process via `/proc/self/mem`. On all other platforms, or when `/proc/self/mem` is unavailable (permission denied, `DisableProcessMemoryReader=true`), literal-allocated label strings return `string_missing` and the endpoint returns `422`.
+`bubblepprof` recovers those bytes using an in-process reader:
+
+- **Linux / FreeBSD**: `/proc/self/mem` (FreeBSD requires procfs to be mounted; falls back to ELF rodata when absent)
+- **macOS**: Mach-O memory regions via `vm_read_overwrite`
+- **Windows** (including Wine): PE image read via `ReadProcessMemory`
+
+When the reader is unavailable or disabled (`DisableProcessMemoryReader=true`), literal-allocated label strings return `string_missing`.
 
 Heap-allocated label strings (e.g., from `strings.Clone("value")`) do not require the process reader and work on all platforms.
 
