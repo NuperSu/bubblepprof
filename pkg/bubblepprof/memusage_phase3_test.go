@@ -28,17 +28,15 @@ import (
 //     have unrecoverable bytes — the *matched* selector still resolves).
 //   - No labels.json. No goroutine.pprof.
 //
-// We skip only when:
-//
-//   - The process memory reader could not be opened on this host
-//     (e.g. /proc/self/mem permission denied), which the response
-//     reports via a warning.
+// We skip only when the platform has no process memory reader implementation
+// at all (ErrUnsupported, e.g. Windows). On Linux and Darwin the reader is
+// implemented; any failure there is a regression, not a reason to skip.
 //
 // A 422 unsupported_runtime is a hard failure: the Go version must be in
 // the verified layout table for this test to run.  A 422 string_missing
-// without the reader-unavailable warning means the Phase 3 in-process
-// reader did NOT fill in the literal label bytes — that is the regression
-// this test exists to catch.
+// on a platform with a reader implementation means the reader did NOT fill
+// in the literal label bytes — that is the regression this test exists to
+// catch.
 func TestMemUsageHandler_Phase3_LiteralLabelsRecovered(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live heap-dump integration test in short mode")
@@ -106,10 +104,10 @@ func TestMemUsageHandler_Phase3_LiteralLabelsRecovered(t *testing.T) {
 		case "unsupported_runtime":
 			t.Fatalf("runtime not in verified layout table: go=%s arch=%s", er.GoVersion, er.GOARCH)
 		case "string_missing":
-			if processReaderUnavailable(er.Warnings) {
-				t.Skipf("process memory reader unavailable on this host: warnings=%v", er.Warnings)
+			if processReaderUnimplemented(er.Warnings) {
+				t.Skipf("no process memory reader implementation on this platform: warnings=%v", er.Warnings)
 			}
-			t.Fatalf("string_missing despite Phase 3 reader: warnings=%v", er.Warnings)
+			t.Fatalf("string_missing on platform with reader implementation: warnings=%v", er.Warnings)
 		default:
 			t.Fatalf("unexpected 422 code %q: %s", er.Code, rr.Body.String())
 		}
@@ -196,9 +194,12 @@ func TestMemUsageHandler_Phase3_DisablingReaderBreaksLiterals(t *testing.T) {
 	}
 }
 
-func processReaderUnavailable(warnings []string) bool {
+// processReaderUnimplemented returns true only when the platform has no
+// implementation at all (ErrUnsupported). A reader that exists but failed
+// to open is a bug, not a reason to skip.
+func processReaderUnimplemented(warnings []string) bool {
 	for _, w := range warnings {
-		if strings.Contains(w, "process memory reader unavailable") {
+		if strings.Contains(w, "process memory reader unavailable on this platform") {
 			return true
 		}
 	}
