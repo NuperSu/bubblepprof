@@ -62,6 +62,20 @@ var verifiedTable = []TableEntry{
 			Description:   "verified go1.26.3 linux/arm runtime.g.labels offset 0xd8",
 		}),
 	},
+	// Suggested for go1.26.* linux/386; offset derived from struct layout
+	// analysis (not yet run through cmd/labeloffsetprobe on 386 hardware).
+	{
+		VersionPrefix: "go1.26.",
+		GOARCH:        "386",
+		PtrSize:       4,
+		BigEndian:     false,
+		Layout: with32BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "386",
+			GLabelsOffset: 0xd8,
+			Description:   "suggested go1.26.* linux/386 runtime.g.labels offset 0xd8",
+		}),
+	},
 	// Verified with cmd/labeloffsetprobe on linux/amd64
 	// (go1.25.0–go1.25.10 linux/amd64).
 	{
@@ -102,6 +116,20 @@ var verifiedTable = []TableEntry{
 			GOARCH:        "arm",
 			GLabelsOffset: 0xd0,
 			Description:   "verified go1.25 linux/arm runtime.g.labels offset 0xd0",
+		}),
+	},
+	// Suggested for go1.25.* linux/386; offset derived from struct layout
+	// analysis (not yet run through cmd/labeloffsetprobe on 386 hardware).
+	{
+		VersionPrefix: "go1.25.",
+		GOARCH:        "386",
+		PtrSize:       4,
+		BigEndian:     false,
+		Layout: with32BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "386",
+			GLabelsOffset: 0xd0,
+			Description:   "suggested go1.25.* linux/386 runtime.g.labels offset 0xd0",
 		}),
 	},
 	// Verified with cmd/labeloffsetprobe on linux/amd64
@@ -147,6 +175,20 @@ var verifiedTable = []TableEntry{
 			GOARCH:        "arm",
 			GLabelsOffset: 0xd4,
 			Description:   "verified go1.24 linux/arm runtime.g.labels offset 0xd4",
+		}),
+	},
+	// Suggested for go1.24.* linux/386; offset derived from struct layout
+	// analysis (not yet run through cmd/labeloffsetprobe on 386 hardware).
+	{
+		VersionPrefix: "go1.24.",
+		GOARCH:        "386",
+		PtrSize:       4,
+		BigEndian:     false,
+		Layout: with32BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GOARCH:        "386",
+			GLabelsOffset: 0xd4,
+			Description:   "suggested go1.24.* linux/386 runtime.g.labels offset 0xd4",
 		}),
 	},
 }
