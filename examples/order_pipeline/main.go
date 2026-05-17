@@ -92,7 +92,7 @@ var tenantList = []string{
 }
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:6060", "HTTP address for /debug/bubblepprof, /debug/pprof, and /stats")
+	addr := flag.String("addr", "127.0.0.1:6060", "HTTP address for /debug/memusage, /debug/pprof, and /stats")
 	rate := flag.Int("rate", 90, "synthetic orders per second")
 	apiWorkers := flag.Int("api-workers", 12, "concurrent order workflow workers")
 	notifyWorkers := flag.Int("notify-workers", 5, "async notification workers")
