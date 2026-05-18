@@ -19,37 +19,37 @@ jobs:
       matrix:
         include:
 
-          # ── darwin/amd64 (macos-15, Intel runner) ─────────────────────────
-          - {go: '1.24.0',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.1',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.2',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.3',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.4',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.5',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.6',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.7',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.8',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.9',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.10', runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.11', runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.12', runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.24.13', runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.0',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.1',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.2',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.3',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.4',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.5',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.6',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.7',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.8',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.9',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.25.10', runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.26.0',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.26.1',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.26.2',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: '1.26.3',  runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
-          - {go: tip,       runner: macos-15, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          # ── darwin/amd64 (macos-26-intel, Intel runner) ───────────────────
+          - {go: '1.24.0',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.1',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.2',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.3',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.4',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.5',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.6',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.7',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.8',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.9',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.10', runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.11', runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.12', runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.13', runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.0',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.1',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.2',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.3',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.4',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.5',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.6',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.7',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.8',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.9',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.10', runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.26.0',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.26.1',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.26.2',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.26.3',  runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: tip,       runner: macos-26-intel, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
 
           # ── darwin/arm64 (macos-latest = M-series) ────────────────────────
           - {go: '1.24.0',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: true}
