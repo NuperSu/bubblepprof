@@ -6,12 +6,31 @@ import (
 	"runtime/pprof"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"bubblepprof/internal/capture"
 	"bubblepprof/internal/heapdump"
 	"bubblepprof/internal/heaplabels"
 	"bubblepprof/internal/runtimelayout"
 )
+
+// runtimeIsClaimedSupported reports whether the current runtime's (version,
+// arch, ptrSize, endian) tuple is present in the verified-layout table.
+// It uses runtime.Version() and unsafe.Sizeof directly — not snapshot-derived
+// values — so a snapshot-parsing bug or table-lookup regression on a
+// known-good platform surfaces as Fatalf rather than a silent Skip.
+func runtimeIsClaimedSupported() bool {
+	ptrSize := int(unsafe.Sizeof(uintptr(0)))
+	var probe uint16 = 0x0102
+	bigEndian := *(*byte)(unsafe.Pointer(&probe)) == 0x01
+	_, ok := runtimelayout.Lookup(runtimelayout.LookupInput{
+		GoVersion: runtime.Version(),
+		GOARCH:    runtime.GOARCH,
+		PtrSize:   ptrSize,
+		BigEndian:  bigEndian,
+	})
+	return ok
+}
 
 func TestHeapNativeLabelRecovery(t *testing.T) {
 	ready := make(chan struct{})
@@ -45,7 +64,12 @@ func TestHeapNativeLabelRecovery(t *testing.T) {
 	}
 	layout, ok := runtimelayout.Lookup(heaplabels.LookupInputFromSnapshot(snap))
 	if !ok {
-		t.Skipf("no verified runtime.g.labels layout for %s %s", runtime.Version(), runtime.GOARCH)
+		if runtimeIsClaimedSupported() {
+			t.Fatalf("claimed-supported runtime %s/%s has no layout entry: snapshot params goarch=%s ptrSize=%d bigEndian=%v",
+				runtime.Version(), runtime.GOARCH,
+				snap.Params.GOARCH, snap.Params.PtrSize, snap.Params.BigEndian)
+		}
+		t.Skipf("no verified runtime.g.labels layout for %s/%s", runtime.Version(), runtime.GOARCH)
 	}
 	res := heaplabels.DecodeAll(snap, layout, heaplabels.Options{})
 	for _, labels := range res.LabelsByGID {
