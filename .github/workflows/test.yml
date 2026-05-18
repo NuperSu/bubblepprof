@@ -5,6 +5,14 @@ on:
     branches: ['**']
   pull_request:
 
+# Opt into Node.js 24 for all action runners. actions/checkout@v4,
+# actions/setup-go@v5, and docker/setup-qemu-action@v3 still ship with
+# Node.js 20 as their runtime; this flag forces the runner to execute them
+# under Node.js 24 instead. Remove once the actions themselves declare
+# node24 as their runtime in their action.yml files.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   test:
     name: Test / ${{ matrix.go }} / ${{ matrix.label }}
