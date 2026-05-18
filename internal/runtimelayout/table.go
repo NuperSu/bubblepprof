@@ -28,10 +28,12 @@ type TableEntry struct {
 // running the probe and confirming the offset against a heap dump produced by a
 // live binary on that runtime.
 var verifiedTable = []TableEntry{
-	// PRE-RELEASE: verified on go1.27-devel_e62d3e6e (64-bit LE offset 0x160).
-	// The go1.27 release has not happened yet; this entry may need updating if
-	// the runtime.g struct changes before the final release. Remove this comment
-	// once go1.27.0 ships and the offset is confirmed against the release build.
+	// PRE-RELEASE: verified on go1.27-devel_e62d3e6e (64-bit LE offset 0x160)
+	// on linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64,
+	// and freebsd/amd64 via CI tip jobs (not required). This entry may need
+	// updating if runtime.g struct changes before the final release. Remove
+	// this comment once go1.27.0 ships and the offset is confirmed against
+	// the release build.
 	{
 		VersionPrefix: "go1.27-devel",
 		PtrSize:       8,
@@ -42,7 +44,8 @@ var verifiedTable = []TableEntry{
 			Description:   "pre-release go1.27-devel 64-bit LE runtime.g.labels offset 0x160 (verified on commit e62d3e6e)",
 		}),
 	},
-	// PRE-RELEASE: verified on go1.27-devel_e62d3e6e (32-bit LE offset 0xd8).
+	// PRE-RELEASE: verified on go1.27-devel_e62d3e6e (32-bit LE offset 0xd8)
+	// on linux/386 and linux/arm/v7 via CI tip jobs (not required).
 	// Subject to change before go1.27 final release; see 64-bit entry above.
 	{
 		VersionPrefix: "go1.27-devel",
@@ -54,7 +57,9 @@ var verifiedTable = []TableEntry{
 			Description:   "pre-release go1.27-devel 32-bit LE runtime.g.labels offset 0xd8 (verified on commit e62d3e6e)",
 		}),
 	},
-	// Verified on linux/amd64 (go1.26.0–go1.26.3), linux/arm64 (go1.26.0–go1.26.3), and freebsd/amd64 (go1.26.*).
+	// Verified on linux/amd64, linux/arm64 (go1.26.0–go1.26.3),
+	// darwin/amd64, darwin/arm64, windows/amd64 (go1.26.0–go1.26.3),
+	// and freebsd/amd64, freebsd/arm64 (stable, go1.26.*).
 	// Applies to all 64-bit little-endian platforms for go1.26.*.
 	{
 		VersionPrefix: "go1.26.",
@@ -63,10 +68,11 @@ var verifiedTable = []TableEntry{
 		Layout: with64BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GLabelsOffset: 0x160,
-			Description:   "verified go1.26.* 64-bit LE (amd64, arm64, freebsd/amd64) runtime.g.labels offset 0x160",
+			Description:   "verified go1.26.* 64-bit LE (linux, darwin, windows, freebsd) runtime.g.labels offset 0x160",
 		}),
 	},
-	// Verified on linux/arm/v7 (go1.26.3); suggested for linux/386 (struct layout analysis).
+	// Verified on linux/arm/v7 (go1.26.0–go1.26.3), linux/386 (go1.26.0–go1.26.3),
+	// and freebsd/386 (stable, go1.26.*).
 	// Applies to all 32-bit little-endian platforms for go1.26.*.
 	{
 		VersionPrefix: "go1.26.",
@@ -75,10 +81,11 @@ var verifiedTable = []TableEntry{
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GLabelsOffset: 0xd8,
-			Description:   "verified go1.26.* 32-bit LE (arm); suggested for 386. runtime.g.labels offset 0xd8",
+			Description:   "verified go1.26.* 32-bit LE (arm, 386, freebsd/386) runtime.g.labels offset 0xd8",
 		}),
 	},
-	// Verified on linux/amd64 (go1.25.0–go1.25.10), linux/arm64 (go1.25.0–go1.25.10), and freebsd/amd64 (go1.25.*).
+	// Verified on linux/amd64, linux/arm64 (go1.25.0–go1.25.10),
+	// darwin/amd64, darwin/arm64, windows/amd64 (go1.25.0–go1.25.10).
 	// Applies to all 64-bit little-endian platforms for go1.25.*.
 	{
 		VersionPrefix: "go1.25.",
@@ -87,10 +94,10 @@ var verifiedTable = []TableEntry{
 		Layout: with64BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GLabelsOffset: 0x158,
-			Description:   "verified go1.25.* 64-bit LE (amd64, arm64, freebsd/amd64) runtime.g.labels offset 0x158",
+			Description:   "verified go1.25.* 64-bit LE (linux, darwin, windows) runtime.g.labels offset 0x158",
 		}),
 	},
-	// Verified on linux/arm/v7 (go1.25); suggested for linux/386 (struct layout analysis).
+	// Verified on linux/arm/v7 (go1.25.0–go1.25.10) and linux/386 (go1.25.0–go1.25.10).
 	// Applies to all 32-bit little-endian platforms for go1.25.*.
 	{
 		VersionPrefix: "go1.25.",
@@ -99,10 +106,11 @@ var verifiedTable = []TableEntry{
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GLabelsOffset: 0xd0,
-			Description:   "verified go1.25.* 32-bit LE (arm); suggested for 386. runtime.g.labels offset 0xd0",
+			Description:   "verified go1.25.* 32-bit LE (arm, 386) runtime.g.labels offset 0xd0",
 		}),
 	},
-	// Verified on linux/amd64 (go1.24.0–go1.24.13), linux/arm64 (go1.24.0–go1.24.13), and freebsd/amd64 (go1.24.*).
+	// Verified on linux/amd64, linux/arm64 (go1.24.0–go1.24.13),
+	// darwin/amd64, darwin/arm64, windows/amd64 (go1.24.0–go1.24.13).
 	// go1.24 introduced internal/runtime/pprof and the struct-based label format
 	// ([]label.Label). go1.23 and earlier used map[string]string and are not supported.
 	// Applies to all 64-bit little-endian platforms for go1.24.*.
@@ -113,10 +121,10 @@ var verifiedTable = []TableEntry{
 		Layout: with64BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GLabelsOffset: 0x160,
-			Description:   "verified go1.24.* 64-bit LE (amd64, arm64, freebsd/amd64) runtime.g.labels offset 0x160",
+			Description:   "verified go1.24.* 64-bit LE (linux, darwin, windows) runtime.g.labels offset 0x160",
 		}),
 	},
-	// Verified on linux/arm/v7 (go1.24); suggested for linux/386 (struct layout analysis).
+	// Verified on linux/arm/v7 (go1.24.0–go1.24.13) and linux/386 (go1.24.0–go1.24.13).
 	// Applies to all 32-bit little-endian platforms for go1.24.*.
 	{
 		VersionPrefix: "go1.24.",
@@ -125,7 +133,7 @@ var verifiedTable = []TableEntry{
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GLabelsOffset: 0xd4,
-			Description:   "verified go1.24.* 32-bit LE (arm); suggested for 386. runtime.g.labels offset 0xd4",
+			Description:   "verified go1.24.* 32-bit LE (arm, 386) runtime.g.labels offset 0xd4",
 		}),
 	},
 }

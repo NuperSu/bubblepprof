@@ -1,21 +1,23 @@
 // Package addrspace reads bytes at runtime virtual addresses for the
-// heap-native pprof label decoder.
-//
-// Phase 3 introduces this package so the heap-label decoder can recover
-// ordinary runtime/pprof label string bytes that are not stored in heap
-// dump object contents (typical for pprof.Labels("job", "42") where the
-// string headers point into the executable's read-only data segment).
+// heap-native pprof label decoder. It recovers ordinary runtime/pprof
+// label string bytes that are not stored in heap dump object contents
+// (typical for pprof.Labels("job", "42") where the string headers point
+// into the executable's read-only data segment).
 //
 // A Reader abstracts "give me size bytes starting at this virtual
 // address". Concrete implementations:
 //
 //	*RangeReader     — backed by an in-memory slice of byte ranges,
 //	                   used to expose heap dump object contents.
-//	*ProcessReader   — reads /proc/self/mem on Linux, or the Mach-O
-//	                   executable on Darwin, for the running process
-//	                   (used by /debug/memusage).
+//	*ProcessReader   — reads the running process address space:
+//	                     Linux / FreeBSD: read-only mappings via procfs
+//	                       (/proc/self/mem); FreeBSD falls back to ELF
+//	                       rodata when procfs is not mounted.
+//	                     macOS: ASLR-corrected Mach-O executable sections.
+//	                     Windows: ASLR-corrected PE executable sections.
+//	                   Used by /debug/memusage.
 //	*ELFReader       — reads PT_LOAD segments from an ELF executable
-//	                   on disk (fallback when process memory is unavailable).
+//	                   on disk (offline fallback; non-PIE only).
 //	Composite        — tries readers in order, returning the first hit.
 //
 // Readers never panic on malformed addresses, never silently truncate,

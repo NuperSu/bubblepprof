@@ -4,7 +4,7 @@
 
 `runtime.g.labels` is a private field of the `runtime.g` struct. Its byte offset depends on the **exact Go version and pointer size** (4 or 8 bytes). `bubblepprof` uses a static table of verified offsets. Because the offset is determined by Go's struct layout rules — not by the specific architecture — all 64-bit little-endian platforms share one entry per Go version, and all 32-bit little-endian platforms share another.
 
-**Current verified support**: go1.24.\*–go1.26.\*, 64-bit little-endian (amd64, arm64) and 32-bit little-endian (arm, 386).
+**Current verified support**: go1.24.\*–go1.26.\*, 64-bit little-endian (amd64, arm64) on Linux, macOS, Windows, and FreeBSD; 32-bit little-endian (arm, 386) on Linux and FreeBSD. Experimental (not required in CI) support exists for go1.27-devel (tip) builds; the pre-release offset may change before go1.27.0 ships.
 
 On any other Go version the endpoint returns `422 unsupported_runtime` and does not proceed. Future work requires either manual verification of new Go releases or a DWARF-based layout discovery path.
 
@@ -59,6 +59,12 @@ The in-process `/debug/memusage` endpoint is not affected by this limitation bec
 System goroutines (GC workers, finalizer goroutine, `g0`, `gsignal`, background scavenger, etc.) are excluded from label matching by default. Classification is heuristic: goroutines with no user-visible pprof labels and whose stack frames start in known runtime packages are treated as system goroutines.
 
 The heuristic may misclassify unusual goroutines. Set `IncludeSystemGoroutines: true` in `MemUsageOptions` to include all goroutines in label matching.
+
+## Interface field records
+
+The heap dump format marks fields as `iface` (non-empty interface) or `eface` (empty interface). `bubblepprof` records these fields and reports skipped counts in warnings, but does not decode them into graph edges. Decoding an interface data word safely requires resolving the dynamic runtime type, which is not available from the heap dump alone without type metadata — guessing could create false roots.
+
+Objects reachable only through such interface slots may be undercounted in `reachable_objects` and `reachable_bytes`. Practically, the GC-visible pointer fields of concrete types held inside interfaces are still emitted in the heap dump and are followed; the limitation applies to the interface slot itself (the data pointer inside the iface/eface header), not to the transitive graph.
 
 ## Interior pointer resolution
 
