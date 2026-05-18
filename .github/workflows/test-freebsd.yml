@@ -47,7 +47,7 @@ jobs:
           usesh: true
           prepare: |
             pkg update -q
-            pkg install -y go git ca_root_nss
+            pkg install -y go git ca_root_nss bash
           run: |
             set -eux
             freebsd-version
