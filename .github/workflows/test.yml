@@ -273,8 +273,6 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
-      # For gotip: bootstrap with stable Go, fetch tip, then prepend
-      # tip's GOROOT/bin to PATH so all subsequent steps invoke tip's 'go'.
       - name: Set up bootstrap Go (for gotip only)
         if: matrix.go == 'tip'
         uses: actions/setup-go@v5
@@ -282,26 +280,55 @@ jobs:
           go-version: stable
           cache: false
 
+      # Installs golang.org/dl/gotip via the bootstrap Go, then downloads
+      # the development tree. gotip is called explicitly in Build/Test steps
+      # below rather than shadowing 'go' via PATH, which is fragile.
       - name: Install gotip
         if: matrix.go == 'tip'
         shell: bash
         run: |
+          set -euo pipefail
+
           go install golang.org/dl/gotip@latest
-          gotip download
-          echo "$(gotip env GOROOT)/bin" >> "$GITHUB_PATH"
+
+          gobin="$(go env GOBIN)"
+          if [ -z "$gobin" ]; then
+            gobin="$(go env GOPATH)/bin"
+          fi
+
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            gotip_bin="$(cygpath -u "$gobin")/gotip.exe"
+            echo "$gobin" >> "$GITHUB_PATH"
+          else
+            gotip_bin="$gobin/gotip"
+            echo "$gobin" >> "$GITHUB_PATH"
+          fi
+
+          "$gotip_bin" download
+          "$gotip_bin" version
 
       # Cross-compile check for targets where the binary cannot be executed on
       # the runner (FreeBSD). Verifies the code compiles cleanly; no tests run.
       - name: Build
-        if: matrix.build-only == true
+        if: matrix.build-only == true && matrix.go != 'tip'
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: ${{ matrix.cgo || '1' }}
         run: go build ./...
 
+      - name: Build with gotip
+        if: matrix.build-only == true && matrix.go == 'tip'
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: ${{ matrix.cgo || '1' }}
+        run: gotip build ./...
+
       - name: Test
-        if: matrix.build-only != true
+        if: matrix.build-only != true && matrix.go != 'tip'
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -312,6 +339,15 @@ jobs:
           # (linux/386, linux/arm). Native targets leave it unset → defaults to '1'.
           CGO_ENABLED: ${{ matrix.cgo || '1' }}
         run: go test ./...
+
+      - name: Test with gotip
+        if: matrix.build-only != true && matrix.go == 'tip'
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: ${{ matrix.cgo || '1' }}
+        run: gotip test ./...
 
   # ── Gate job ─────────────────────────────────────────────────────────────────
   # Add "All required checks passed" as the single required status check in
