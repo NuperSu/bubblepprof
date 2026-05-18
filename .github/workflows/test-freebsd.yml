@@ -31,6 +31,10 @@ jobs:
           - {release: '13.5', arch: aarch64, goarch: arm64,  label: freebsd-vm-13.5-arm64, required: true}
           - {release: '14.4', arch: aarch64, goarch: arm64,  label: freebsd-vm-14.4-arm64, required: true}
           - {release: '15.0', arch: aarch64, goarch: arm64,  label: freebsd-vm-15.0-arm64, required: true}
+          # ── gotip (not required) ───────────────────────────────────────────
+          - {release: '14.4', arch: x86_64,  goarch: amd64,  use_gotip: true, label: freebsd-vm-gotip-amd64, required: false}
+          - {release: '14.4', arch: x86_64,  goarch: '386',  use_gotip: true, label: freebsd-vm-gotip-386,   required: false}
+          - {release: '14.4', arch: aarch64, goarch: arm64,  use_gotip: true, label: freebsd-vm-gotip-arm64, required: false}
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +57,17 @@ jobs:
 
             GOARCH="${{ matrix.goarch }}"
             CGO_ENABLED="$( [ "$GOARCH" = "386" ] && echo 0 || echo 1 )"
-            GOARCH="$GOARCH" CGO_ENABLED="$CGO_ENABLED" go test ./...
+
+            if [ "${{ matrix.use_gotip }}" = "true" ]; then
+              GOBIN="$(go env GOPATH)/bin"
+              export PATH="$GOBIN:$PATH"
+              go install golang.org/dl/gotip@latest
+              gotip download
+              gotip version
+              GOARCH="$GOARCH" CGO_ENABLED="$CGO_ENABLED" gotip test ./...
+            else
+              GOARCH="$GOARCH" CGO_ENABLED="$CGO_ENABLED" go test ./...
+            fi
 
   # ── Gate job ─────────────────────────────────────────────────────────────────
   all-required:
