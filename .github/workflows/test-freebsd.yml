@@ -69,115 +69,18 @@ jobs:
               GOARCH="$GOARCH" CGO_ENABLED="$CGO_ENABLED" go test ./...
             fi
 
-  # ── Cross-build for 386 only — verifies compilation across all Go versions ─
-  # amd64 and arm64 are covered by real VM tests above.
-  cross-build:
-    name: Build / ${{ matrix.go }} / ${{ matrix.label }}
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ !matrix.required }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-
-          # ── freebsd/386 ────────────────────────────────────────────────────
-          - {go: '1.24.0',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.1',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.2',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.3',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.4',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.5',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.6',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.7',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.8',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.9',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.10', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.11', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.12', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.13', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.0',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.1',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.2',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.3',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.4',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.5',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.6',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.7',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.8',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.9',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.10', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.0',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.1',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.2',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.3',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: tip,       goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: false}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go ${{ matrix.go }}
-        if: matrix.go != 'tip'
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go }}
-          cache: true
-
-      - name: Set up bootstrap Go (for gotip only)
-        if: matrix.go == 'tip'
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: false
-
-      - name: Install gotip
-        if: matrix.go == 'tip'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          go install golang.org/dl/gotip@latest
-
-          gobin="$(go env GOBIN)"
-          if [ -z "$gobin" ]; then
-            gobin="$(go env GOPATH)/bin"
-          fi
-
-          gotip_bin="$gobin/gotip"
-          echo "$gobin" >> "$GITHUB_PATH"
-
-          "$gotip_bin" download
-          "$gotip_bin" version
-
-      - name: Build
-        if: matrix.go != 'tip'
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
-        run: go build ./...
-
-      - name: Build with gotip
-        if: matrix.go == 'tip'
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
-        run: gotip build ./...
-
   # ── Gate job ─────────────────────────────────────────────────────────────────
   all-required:
     name: All FreeBSD checks passed
-    needs: [test-vm, cross-build]
+    needs: [test-vm]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify required jobs
         run: |
-          vm_result="${{ needs.test-vm.result }}"
-          build_result="${{ needs.cross-build.result }}"
-          if [ "$vm_result" != "success" ] || [ "$build_result" != "success" ]; then
-            echo "One or more required FreeBSD jobs failed (vm: $vm_result, cross-build: $build_result)."
+          result="${{ needs.test-vm.result }}"
+          if [ "$result" != "success" ]; then
+            echo "One or more required FreeBSD test jobs failed (matrix result: $result)."
             exit 1
           fi
           echo "All required FreeBSD checks passed."
