@@ -61,7 +61,7 @@ func OpenSelfProcessReader() (*ProcessReader, error) {
 		return nil, fmt.Errorf("addrspace: parse Mach-O %q: %w", exe, err)
 	}
 	segs, slide, parseErr := parseMachOSegments(mf)
-	mf.Close()
+	_ = mf.Close()
 	if parseErr != nil {
 		return nil, fmt.Errorf("addrspace: %w", parseErr)
 	}

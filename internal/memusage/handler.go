@@ -174,10 +174,7 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
-	if err := enc.Encode(body); err != nil {
-		// Best-effort: status header already sent.
-		_, _ = io.WriteString(w, "")
-	}
+	_ = enc.Encode(body) // best-effort: status header already sent
 }
 
 func writeError(w http.ResponseWriter, status int, body *ErrorResponse) {

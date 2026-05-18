@@ -53,7 +53,7 @@ func OpenSelfProcessReader() (*ProcessReader, error) {
 		return nil, fmt.Errorf("addrspace: parse PE %q: %w", exe, err)
 	}
 	imageBase, sects, parseErr := parsePE(pf)
-	pf.Close()
+	_ = pf.Close()
 	if parseErr != nil {
 		return nil, fmt.Errorf("addrspace: %w", parseErr)
 	}
