@@ -510,10 +510,10 @@ type routeNode struct {
 
 type routePQ []routeNode
 
-func (pq routePQ) Len() int            { return len(pq) }
-func (pq routePQ) Less(i, j int) bool  { return pq[i].cost < pq[j].cost }
-func (pq routePQ) Swap(i, j int)       { pq[i], pq[j] = pq[j], pq[i] }
-func (pq *routePQ) Push(x any)         { *pq = append(*pq, x.(routeNode)) }
+func (pq routePQ) Len() int           { return len(pq) }
+func (pq routePQ) Less(i, j int) bool { return pq[i].cost < pq[j].cost }
+func (pq routePQ) Swap(i, j int)      { pq[i], pq[j] = pq[j], pq[i] }
+func (pq *routePQ) Push(x any)        { *pq = append(*pq, x.(routeNode)) }
 func (pq *routePQ) Pop() any {
 	old := *pq
 	last := old[len(old)-1]
