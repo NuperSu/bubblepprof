@@ -17,51 +17,184 @@ jobs:
   test:
     name: Test / ${{ matrix.go }} / ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
-    # Nice-to-have entries set required:false → continue-on-error:true, so they
-    # don't block the gate job even when they fail.
+    # Nice-to-have entries have continue-on-error: true so they don't block the gate.
     continue-on-error: ${{ !matrix.required }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ── Required: must-have platforms × minimum Go versions ──────────────
-          #
-          # linux/amd64 — native x86-64 runner
-          - {go: '1.24.0', runner: ubuntu-latest,    goos: linux,   goarch: amd64, label: linux-amd64,   required: true}
-          - {go: '1.25.0', runner: ubuntu-latest,    goos: linux,   goarch: amd64, label: linux-amd64,   required: true}
-          - {go: '1.26.0', runner: ubuntu-latest,    goos: linux,   goarch: amd64, label: linux-amd64,   required: true}
-          # linux/arm64 — native arm64 runner; faster and more reliable than QEMU.
-          # ubuntu-22.04-arm is GitHub's hosted arm64 Linux runner.
-          - {go: '1.24.0', runner: ubuntu-22.04-arm, goos: linux,   goarch: arm64, label: linux-arm64,   required: true}
-          - {go: '1.25.0', runner: ubuntu-22.04-arm, goos: linux,   goarch: arm64, label: linux-arm64,   required: true}
-          - {go: '1.26.0', runner: ubuntu-22.04-arm, goos: linux,   goarch: arm64, label: linux-arm64,   required: true}
-          # darwin/amd64 — macos-13 is the last Intel runner; macos-14+ are M1/M2
-          - {go: '1.24.0', runner: macos-13,         goos: darwin,  goarch: amd64, label: darwin-amd64,  required: true}
-          - {go: '1.25.0', runner: macos-13,         goos: darwin,  goarch: amd64, label: darwin-amd64,  required: true}
-          - {go: '1.26.0', runner: macos-13,         goos: darwin,  goarch: amd64, label: darwin-amd64,  required: true}
-          # darwin/arm64 — macos-latest resolves to M1/M2 (arm64)
-          - {go: '1.24.0', runner: macos-latest,     goos: darwin,  goarch: arm64, label: darwin-arm64,  required: true}
-          - {go: '1.25.0', runner: macos-latest,     goos: darwin,  goarch: arm64, label: darwin-arm64,  required: true}
-          - {go: '1.26.0', runner: macos-latest,     goos: darwin,  goarch: arm64, label: darwin-arm64,  required: true}
-          # windows/amd64
-          - {go: '1.24.0', runner: windows-latest,   goos: windows, goarch: amd64, label: windows-amd64, required: true}
-          - {go: '1.25.0', runner: windows-latest,   goos: windows, goarch: amd64, label: windows-amd64, required: true}
-          - {go: '1.26.0', runner: windows-latest,   goos: windows, goarch: amd64, label: windows-amd64, required: true}
 
-          # ── Nice-to-have: go1.24.x patch versions (linux/amd64 as canary) ────
-          - {go: '1.24.1', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: false}
-          - {go: '1.24.2', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: false}
-          - {go: '1.24.3', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: false}
+          # ── linux/amd64 — all versions, all required ───────────────────────
+          # Mirrors test_all_go_versions.sh: every supported version is a
+          # hard requirement on the primary CI platform.
+          - {go: '1.24.0',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.1',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.2',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.3',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.4',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.5',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.6',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.7',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.8',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.9',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.10', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.11', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.12', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.13', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.0',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.1',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.2',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.3',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.4',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.5',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.6',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.7',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.8',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.9',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.10', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.26.0',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.26.1',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.26.2',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.26.3',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
 
-          # ── Nice-to-have: linux/386 ───────────────────────────────────────────
+          # ── linux/arm64 — all versions, all required ───────────────────────
+          # Native arm64 runner; low marginal cost and validates the verified
+          # arm64 runtimelayout entries across every supported patch.
+          - {go: '1.24.0',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.1',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.2',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.3',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.4',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.5',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.6',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.7',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.8',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.9',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.10', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.11', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.12', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.13', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.0',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.1',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.2',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.3',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.4',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.5',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.6',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.7',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.8',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.9',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.10', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.26.0',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.26.1',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.26.2',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.26.3',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+
+          # ── darwin/amd64 — .0 versions required, patches nice-to-have ─────
+          # macos-13 is the last Intel runner; macos-14+ are M1/M2.
+          # macOS runners are billed at 10× — patch versions are nice-to-have.
+          - {go: '1.24.0',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.24.1',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.2',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.3',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.4',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.5',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.6',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.7',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.8',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.9',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.10', runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.11', runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.12', runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.24.13', runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.0',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.25.1',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.2',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.3',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.4',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.5',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.6',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.7',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.8',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.9',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.25.10', runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.26.0',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: true}
+          - {go: '1.26.1',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.26.2',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+          - {go: '1.26.3',  runner: macos-13, goos: darwin, goarch: amd64, label: darwin-amd64, required: false}
+
+          # ── darwin/arm64 — .0 versions required, patches nice-to-have ─────
+          # macos-latest resolves to the current M-series (arm64) runner.
+          - {go: '1.24.0',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: true}
+          - {go: '1.24.1',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.2',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.3',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.4',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.5',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.6',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.7',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.8',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.9',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.10', runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.11', runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.12', runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.24.13', runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.0',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: true}
+          - {go: '1.25.1',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.2',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.3',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.4',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.5',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.6',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.7',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.8',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.9',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.25.10', runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.26.0',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: true}
+          - {go: '1.26.1',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.26.2',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+          - {go: '1.26.3',  runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
+
+          # ── windows/amd64 — .0 versions required, patches nice-to-have ────
+          - {go: '1.24.0',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.1',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.2',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.3',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.4',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.5',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.6',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.7',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.8',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.9',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.10', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.11', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.12', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.24.13', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.0',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.1',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.2',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.3',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.4',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.5',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.6',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.7',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.8',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.9',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.25.10', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.26.0',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.26.1',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.26.2',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+          - {go: '1.26.3',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+
+          # ── linux/386 — .0 versions, nice-to-have ─────────────────────────
           # Pure-Go (CGO_ENABLED=0): x86-64 Linux can execute 32-bit x86 ELF
           # natively via the kernel's IA-32 emulation; no 32-bit libc needed.
           - {go: '1.24.0', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, cgo: '0', required: false}
           - {go: '1.25.0', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, cgo: '0', required: false}
           - {go: '1.26.0', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, cgo: '0', required: false}
 
-          # ── Nice-to-have: linux/arm 32-bit via QEMU user-space ───────────────
+          # ── linux/arm 32-bit via QEMU user-space — .0 versions, nice-to-have
           # docker/setup-qemu-action registers binfmt_misc handlers. Go cross-
           # compiles an ARMv7 binary; QEMU transparently executes it. GOARM=7
           # matches the verified linux/arm/v7 target in the runtimelayout table.
@@ -69,14 +202,14 @@ jobs:
           - {go: '1.25.0', runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, cgo: '0', required: false}
           - {go: '1.26.0', runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, cgo: '0', required: false}
 
-          # ── Nice-to-have: windows/386 ─────────────────────────────────────────
+          # ── windows/386 — .0 versions, nice-to-have ───────────────────────
           - {go: '1.24.0', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: false}
           - {go: '1.25.0', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: false}
           - {go: '1.26.0', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: false}
 
-          # ── Nice-to-have: FreeBSD cross-build ────────────────────────────────
-          # GitHub's free plan has no FreeBSD runners, so we can only verify that
-          # the code compiles. go test cannot execute FreeBSD binaries on Linux.
+          # ── FreeBSD cross-build — .0 versions, nice-to-have ───────────────
+          # GitHub's free plan has no FreeBSD runners, so we can only verify
+          # that the code compiles. go test cannot run FreeBSD binaries on Linux.
           - {go: '1.24.0', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', build-only: true, required: false}
           - {go: '1.25.0', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', build-only: true, required: false}
           - {go: '1.26.0', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', build-only: true, required: false}
@@ -123,8 +256,7 @@ jobs:
           # the default (GOARM=6). Arm entries override it to 7 via matrix.goarm.
           GOARM: ${{ matrix.goarm }}
           # matrix.cgo is '0' for cross-compile targets that lack 32-bit libc
-          # (linux/386, linux/arm) and for FreeBSD. Native targets leave it unset,
-          # which defaults to '1' here.
+          # (linux/386, linux/arm). Native targets leave it unset → defaults to '1'.
           CGO_ENABLED: ${{ matrix.cgo || '1' }}
         run: go test ./...
 
