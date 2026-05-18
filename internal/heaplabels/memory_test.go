@@ -82,6 +82,32 @@ func TestNewMemory_SameStartAddr(t *testing.T) {
 	}
 }
 
+func TestMemory_ReadString_ZeroLength(t *testing.T) {
+	mem := NewMemory(&heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Contents: []byte("hello")}},
+	})
+	s, ok := mem.ReadString(0x1000, 0)
+	if !ok {
+		t.Fatal("ReadString with length=0 must succeed")
+	}
+	if s != "" {
+		t.Fatalf("ReadString with length=0 = %q, want empty string", s)
+	}
+}
+
+func TestMemory_ReadString_Success(t *testing.T) {
+	mem := NewMemory(&heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Contents: []byte("hello")}},
+	})
+	s, ok := mem.ReadString(0x1000, 5)
+	if !ok {
+		t.Fatal("ReadString must succeed for valid addr+length in memory")
+	}
+	if s != "hello" {
+		t.Fatalf("ReadString = %q, want %q", s, "hello")
+	}
+}
+
 func TestMemoryReadUintptr(t *testing.T) {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, 0x1122334455667788)

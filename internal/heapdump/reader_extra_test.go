@@ -9,6 +9,28 @@ import (
 	"testing"
 )
 
+// errReader is a minimal io.Reader that always returns the configured error.
+type errReader struct{ err error }
+
+func (r errReader) Read(_ []byte) (int, error) { return 0, r.err }
+
+// TestReadLine_NonEOFError exercises the `return "", err` path in readLine
+// triggered when the underlying bufio.Reader returns a non-EOF read error.
+func TestReadLine_NonEOFError(t *testing.T) {
+	readErr := errors.New("disk read error")
+	r := newReader(bufio.NewReader(errReader{err: readErr}), Limits{})
+	_, err := r.readLine()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("got EOF-type error, want original read error; err = %v", err)
+	}
+	if !errors.Is(err, readErr) {
+		t.Fatalf("err = %v, want to wrap %v", err, readErr)
+	}
+}
+
 func TestNewReaderWithBufio(t *testing.T) {
 	src := bufio.NewReader(strings.NewReader("hi\n"))
 	r := newReader(src, Limits{})

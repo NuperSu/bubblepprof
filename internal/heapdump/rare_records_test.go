@@ -1,6 +1,7 @@
 package heapdump
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -206,6 +207,70 @@ func TestParseAllocSample(t *testing.T) {
 	}
 	if snap.Stats.AllocSampleCount != 1 {
 		t.Fatalf("AllocSampleCount = %d", snap.Stats.AllocSampleCount)
+	}
+}
+
+// TestParseFinalizer_OtTruncation writes all finalizer fields through fint
+// but omits ot, exercising the "ot" error-return path in parseFinalizer and
+// parseQueuedFinalizer.
+func TestParseFinalizer_OtTruncation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tag  uint64
+	}{
+		{"finalizer", tagFinalizer},
+		{"queuedFinalizer", tagQueuedFinalizer},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			buf := newSyntheticBuffer()
+			writeUvarint(buf, tc.tag)
+			writeUvarint(buf, 0x1000) // obj addr
+			writeUvarint(buf, 0x2000) // fn val
+			writeUvarint(buf, 0x3000) // fn pc
+			writeUvarint(buf, 0x4000) // fint
+			// ot missing → error at "ot" read
+			_, err := Parse(buf, Options{})
+			if err == nil {
+				t.Fatalf("expected error for truncated %s at ot field", tc.name)
+			}
+		})
+	}
+}
+
+// TestParseOSThread_OsidTruncation writes m addr and m id but omits os id,
+// exercising the "os id" error-return path in parseOSThread.
+func TestParseOSThread_OsidTruncation(t *testing.T) {
+	buf := newSyntheticBuffer()
+	writeUvarint(buf, tagOSThread)
+	writeUvarint(buf, 0xdead) // m addr
+	writeUvarint(buf, 7)      // m id
+	// os id missing → error
+	_, err := Parse(buf, Options{})
+	if err == nil {
+		t.Fatal("expected error for OSThread truncated at os id")
+	}
+}
+
+// TestParseDataLike_BeforeParams writes a data record before the params
+// record so p.haveParams is false, exercising the !p.haveParams branch in
+// parseDataLike (pointer extraction is skipped but the segment is still stored).
+func TestParseDataLike_BeforeParams(t *testing.T) {
+	var buf bytes.Buffer
+	writeHeader(&buf)
+	// data record before tagParams
+	writeUvarint(&buf, tagData)
+	writeUvarint(&buf, 0x1000)
+	writeBytes(&buf, make([]byte, 8))
+	writeFieldList(&buf, nil)
+	writeUvarint(&buf, tagEOF)
+
+	snap, err := Parse(&buf, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(snap.Data) != 1 {
+		t.Fatalf("expected 1 data segment, got %d", len(snap.Data))
 	}
 }
 

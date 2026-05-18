@@ -163,6 +163,59 @@ func TestReachableFromNilGraphReturnsEmptySet(t *testing.T) {
 	}
 }
 
+// TestReachableFrom_InvalidRootID verifies that a root with an out-of-bounds
+// ObjectID is silently skipped rather than panicking.
+func TestReachableFrom_InvalidRootID(t *testing.T) {
+	g := &Graph{
+		Objects: []Object{{ID: 0, Addr: 0x1000, Size: 8}},
+		ByAddr:  map[uint64]ObjectID{0x1000: 0},
+	}
+	// ObjectID 5 does not exist in a 1-element graph.
+	got := ReachableFrom(g, []RootRef{{ObjectID: 5, Kind: "stack"}})
+	if len(got) != 0 {
+		t.Fatalf("expected empty reachable set for invalid root ID, got %v", got)
+	}
+}
+
+// TestReachableFrom_InvalidChildEdge verifies that a child edge pointing to a
+// non-existent object ID is skipped rather than panicking.
+func TestReachableFrom_InvalidChildEdge(t *testing.T) {
+	g := &Graph{
+		Objects: []Object{
+			{ID: 0, Addr: 0x1000, Size: 8, Children: []ObjectID{99}}, // 99 is invalid
+		},
+		ByAddr: map[uint64]ObjectID{0x1000: 0},
+	}
+	got := ReachableFrom(g, []RootRef{{ObjectID: 0, Kind: "stack"}})
+	if _, ok := got[0]; !ok {
+		t.Fatal("root object must be in reachable set")
+	}
+	if len(got) != 1 {
+		t.Fatalf("invalid child edge must be skipped, reachable = %v", got)
+	}
+}
+
+// TestReachableFrom_DuplicateRoots verifies that when the same valid ObjectID
+// appears twice in the roots slice, the second occurrence is skipped via the
+// already-seen dedup check.
+func TestReachableFrom_DuplicateRoots(t *testing.T) {
+	g := &Graph{
+		Objects: []Object{{ID: 0, Addr: 0x1000, Size: 8}},
+		ByAddr:  map[uint64]ObjectID{0x1000: 0},
+	}
+	roots := []RootRef{
+		{ObjectID: 0, Kind: "stack"},
+		{ObjectID: 0, Kind: "stack"}, // duplicate — should be deduped
+	}
+	got := ReachableFrom(g, roots)
+	if _, ok := got[0]; !ok {
+		t.Fatal("root object must be in reachable set")
+	}
+	if len(got) != 1 {
+		t.Fatalf("reachable = %v, want exactly 1 object", got)
+	}
+}
+
 func TestPrintSummaryNilAnalysis(t *testing.T) {
 	var a *Analysis
 	var out bytes.Buffer
@@ -320,6 +373,66 @@ func TestAddSegmentGlobalRoots_EmptyKind(t *testing.T) {
 	})
 	if gotKind != "data" {
 		t.Fatalf("kind = %q, want %q", gotKind, "data")
+	}
+}
+
+// TestBuild_ZeroPtrFinalizerSkipped verifies that a Finalizer/QueuedFinalizer
+// with ObjectAddr==0 is skipped (ptr==0 guard) without panicking or adding
+// any global root.
+// TestBuild_SizeOverflowStrictError verifies that an object whose Addr+Size
+// overflows uint64 causes Build to return an error when Strict=true.
+func TestBuild_SizeOverflowStrictError(t *testing.T) {
+	snap := makeSnap([]heapsnapshot.Object{
+		{Addr: math.MaxUint64 - 8, Size: 32}, // Addr + Size overflows
+	})
+	if _, err := Build(snap, Options{Strict: true}); err == nil {
+		t.Fatal("expected strict-mode error for object size overflow, got nil")
+	}
+}
+
+// TestBuild_OverlappingRangesStrictError verifies that overlapping object ranges
+// cause Build to return an error when Strict=true.
+func TestBuild_OverlappingRangesStrictError(t *testing.T) {
+	snap := makeSnap([]heapsnapshot.Object{
+		{Addr: 0x1000, Size: 0x300},
+		{Addr: 0x1100, Size: 0x10}, // overlaps with first
+	})
+	if _, err := Build(snap, Options{Strict: true}); err == nil {
+		t.Fatal("expected strict-mode error for overlapping ranges, got nil")
+	}
+}
+
+func TestBuild_ZeroPtrFinalizerSkipped(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Size: 8}},
+		Finalizers: []heapsnapshot.Finalizer{
+			{ObjectAddr: 0},     // zero ptr → skipped
+			{ObjectAddr: 0x1000}, // valid
+		},
+		QueuedFinalizers: []heapsnapshot.QueuedFinalizer{
+			{ObjectAddr: 0}, // zero ptr → skipped
+		},
+	}
+	a := mustBuild(t, snap)
+	// Only the valid Finalizer with ObjectAddr=0x1000 becomes a global root.
+	if a.Stats.GlobalRoots != 1 {
+		t.Fatalf("GlobalRoots = %d, want 1 (zero-ptr finalizers skipped)", a.Stats.GlobalRoots)
+	}
+}
+
+// TestBuild_ZeroPtrGlobalRootSkipped verifies that a snap.Globals entry with
+// PointerAddr==0 is silently skipped by resolveGlobalRoot.
+func TestBuild_ZeroPtrGlobalRootSkipped(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Size: 8}},
+		Globals: []heapsnapshot.Root{
+			{Kind: "data", PointerAddr: 0},      // zero ptr → skipped
+			{Kind: "data", PointerAddr: 0x1000}, // valid
+		},
+	}
+	a := mustBuild(t, snap)
+	if a.Stats.GlobalRoots != 1 {
+		t.Fatalf("GlobalRoots = %d, want 1 (zero-ptr global root skipped)", a.Stats.GlobalRoots)
 	}
 }
 

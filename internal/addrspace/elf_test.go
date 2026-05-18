@@ -1,6 +1,7 @@
 package addrspace
 
 import (
+	"math"
 	"os"
 	"testing"
 )
@@ -68,6 +69,62 @@ func TestOpenELFReader_SelfExe(t *testing.T) {
 	}
 	if len(got) != 8 {
 		t.Fatalf("read length = %d, want 8", len(got))
+	}
+}
+
+// TestELFReader_ReadAtAddr_FileOffOverflow exercises the fileOff > math.MaxInt64
+// guard by injecting a segment with Off == math.MaxInt64 so addr > Vaddr makes
+// fileOff overflow an int64.
+func TestELFReader_ReadAtAddr_FileOffOverflow(t *testing.T) {
+	f, err := os.CreateTemp("", "elf-off-overflow-*.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	r := &ELFReader{
+		file: f,
+		path: f.Name(),
+		segments: []ELFSegment{
+			{
+				Vaddr:  100,
+				Filesz: 1000,
+				Memsz:  1000,
+				Off:    math.MaxInt64, // Off + (101-100) = MaxInt64+1 > MaxInt64
+			},
+		},
+	}
+	if _, ok := r.ReadAtAddr(101, 8); ok {
+		t.Fatal("fileOff overflow must return false")
+	}
+}
+
+// TestELFReader_ReadAtAddr_SegmentEndOverflow exercises the AddUint64 overflow
+// guard on Vaddr+Filesz by injecting a segment with Filesz == MaxUint64.
+func TestELFReader_ReadAtAddr_SegmentEndOverflow(t *testing.T) {
+	f, err := os.CreateTemp("", "elf-segend-overflow-*.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	r := &ELFReader{
+		file: f,
+		path: f.Name(),
+		segments: []ELFSegment{
+			{
+				Vaddr:  0x1000,
+				Filesz: math.MaxUint64, // 0x1000 + MaxUint64 overflows → segment skipped
+				Memsz:  math.MaxUint64,
+				Off:    0,
+			},
+		},
+	}
+	// The segment overflows so it is skipped; the addr is not matched.
+	if _, ok := r.ReadAtAddr(0x1000, 8); ok {
+		t.Fatal("segment end overflow must cause segment to be skipped")
 	}
 }
 

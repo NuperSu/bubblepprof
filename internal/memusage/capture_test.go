@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heaplabels"
@@ -197,6 +199,42 @@ func TestComputer_Close_WithProcReader(t *testing.T) {
 	}
 }
 
+// nthCallContext is a context.Context that returns a cancelError on the Nth
+// call to Err(), allowing tests to cancel a context mid-flight.
+type nthCallContext struct {
+	context.Context
+	mu      sync.Mutex
+	call    int
+	failAt  int
+}
+
+func (c *nthCallContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.call++
+	if c.call >= c.failAt {
+		return context.Canceled
+	}
+	return nil
+}
+
+func (c *nthCallContext) Done() <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		for {
+			c.mu.Lock()
+			if c.call >= c.failAt {
+				c.mu.Unlock()
+				close(ch)
+				return
+			}
+			c.mu.Unlock()
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	return ch
+}
+
 // --- RuntimeHeapDumpCapturer.CaptureHeapDump ---
 
 func TestRuntimeHeapDumpCapturer_CtxCancelled(t *testing.T) {
@@ -208,6 +246,24 @@ func TestRuntimeHeapDumpCapturer_CtxCancelled(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+// TestRuntimeHeapDumpCapturer_CtxCancelledAfterGC verifies the ctx.Err() check
+// that fires after GC but before debug.WriteHeapDump. The nthCallContext returns
+// nil on the first Err() call (before CreateTemp) and Canceled on the second
+// (after GC).
+func TestRuntimeHeapDumpCapturer_CtxCancelledAfterGC(t *testing.T) {
+	ctx := &nthCallContext{
+		Context: context.Background(),
+		failAt:  2,
+	}
+	_, _, err := RuntimeHeapDumpCapturer{}.CaptureHeapDump(ctx, true)
+	if err == nil {
+		t.Fatal("expected error from context cancelled after GC, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
 

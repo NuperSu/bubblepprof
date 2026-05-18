@@ -3,6 +3,8 @@
 package addrspace
 
 import (
+	"math"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -207,6 +209,31 @@ func TestParseProcMaps_EdgeCases(t *testing.T) {
 				t.Fatalf("len = %d, want %d (got %+v)", len(got), tc.count, got)
 			}
 		})
+	}
+}
+
+// TestProcessReader_ReadAtAddr_AddrBeyondMaxInt64 exercises the addr > math.MaxInt64
+// guard inside ReadAtAddr. We inject a synthetic mapping with a virtual address in
+// the high half of uint64 space so the loop enters the mapping-match branch and
+// then hits the overflow guard before calling ReadAt.
+func TestProcessReader_ReadAtAddr_AddrBeyondMaxInt64(t *testing.T) {
+	mem, err := os.Open("/proc/self/mem")
+	if err != nil {
+		t.Skipf("open /proc/self/mem: %v", err)
+	}
+	defer mem.Close()
+
+	const beyondMax = uint64(math.MaxInt64) + 1
+	r := &ProcessReader{
+		maps: []Mapping{{
+			Start: beyondMax,
+			End:   math.MaxUint64,
+			Read:  true, // eligible (no Write flag)
+		}},
+		mem: mem,
+	}
+	if _, ok := r.ReadAtAddr(beyondMax, 8); ok {
+		t.Fatal("ReadAtAddr with addr > MaxInt64 must return false")
 	}
 }
 
