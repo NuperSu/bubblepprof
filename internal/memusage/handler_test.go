@@ -360,7 +360,7 @@ func TestHandler_SuccessOmitsDebugFields(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	for _, forbidden := range []string{"attribution", "go_version", "goarch", "warnings"} {
+	for _, forbidden := range []string{"attribution", "go_version", "goarch", "warnings", "label_source", "label_recovery"} {
 		if _, present := raw[forbidden]; present {
 			t.Errorf("success response must not contain %q: %s", forbidden, rr.Body.String())
 		}

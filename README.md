@@ -21,7 +21,7 @@ It captures a heap dump, recovers pprof labels from goroutine runtime state, and
 | Unit | process | label-selected goroutine group |
 | Question | where are allocations coming from? | how much heap does job/tenant X hold? |
 | Mechanism | sampling (allocs/heap) | stop-the-world heap dump + BFS |
-| Requires instrumentation? | no | no (uses existing pprof labels) |
+| Requires standard pprof labels? | no | yes (without labels the endpoint always returns 0 matches) |
 | Cost per query | low | high (stop-the-world) |
 
 ## Registering the endpoint

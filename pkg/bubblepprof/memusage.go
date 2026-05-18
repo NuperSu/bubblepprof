@@ -79,13 +79,15 @@ type MemUsageOptions struct {
 //	})
 //
 // Known limitations: heap-native label recovery is verified for
-// go1.24.*–go1.26.* on amd64, arm64, arm, and 386. On unsupported
-// runtime versions the endpoint returns HTTP 422 with code
-// "unsupported_runtime". When pprof label strings reside outside heap
-// object contents (common for string literals), the in-process reader
-// is consulted on Linux, macOS, FreeBSD, and Windows; on other
-// platforms or when disabled, the endpoint may return 422 with code
-// "string_missing".
+// go1.24.*–go1.26.* on Linux, macOS, Windows, and FreeBSD for
+// little-endian 64-bit (amd64, arm64) and 32-bit (arm, 386) families;
+// go1.27-devel (tip) is experimental. On unsupported runtime versions
+// the endpoint returns HTTP 422 with code "unsupported_runtime". When
+// pprof label strings reside outside heap object contents (common for
+// string literals), the in-process reader is consulted on Linux, macOS,
+// FreeBSD, and Windows; on other platforms or when disabled, the
+// endpoint may return 422 with code "string_missing". Other structural
+// label recovery failures return 422 with code "label_recovery_failed".
 func MemUsageHandler() http.Handler {
 	return MemUsageHandlerWithOptions(MemUsageOptions{})
 }

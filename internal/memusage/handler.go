@@ -28,8 +28,8 @@ type HandlerOptions struct {
 //	other methods -> 405 with Allow: POST
 //
 // On structural errors (bad JSON, validation failures) the body is a
-// JSON ErrorResponse with HTTP 400. Unsupported-runtime and
-// string-missing diagnostics map to HTTP 422.
+// JSON ErrorResponse with HTTP 400. Unsupported-runtime, string-missing,
+// and structural label-recovery diagnostics map to HTTP 422.
 func Handler(compute ComputeFunc, hopts HandlerOptions) http.Handler {
 	if compute == nil {
 		panic("memusage.Handler: nil compute func")

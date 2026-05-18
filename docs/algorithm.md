@@ -46,7 +46,7 @@ If the reader cannot be opened (unsupported platform, access denied, or `Disable
 
 The heap dump parameters contain the exact Go build version and pointer size. The label decoder uses these to consult a static table of verified `runtime.g.labels` field offsets.
 
-If no entry exists for the current Go version and GOARCH, the decoder marks every goroutine as unsupported and the endpoint returns `422 unsupported_runtime` before building the object graph.
+If no entry exists for the current Go version and pointer size (GOARCH is diagnostic only; lookup is by Go version, pointer size, and endianness), the decoder marks every goroutine as unsupported and the endpoint returns `422 unsupported_runtime` before building the object graph.
 
 When the layout is known, for each goroutine record in the heap dump:
 
@@ -57,7 +57,7 @@ When the layout is known, for each goroutine record in the heap dump:
    - heap dump object contents first (for heap-allocated label strings),
    - process memory reader second (for string literals in read-only program memory).
 
-Label decoding runs before graph construction. Any label-decode failure (string bytes unavailable) causes the endpoint to return `422 string_missing` — an undecodable goroutine might also carry the requested labels, so even a partial match count is not authoritative.
+Label decoding runs before graph construction. Any label-decode failure makes the match set non-authoritative — an undecodable goroutine might also carry the requested labels, so even a partial match count is not returned as a 200 response. Missing label string bytes return `422 string_missing`. Other structural label recovery failures (e.g. `g_object_missing`, `malformed`) return `422 label_recovery_failed`.
 
 ### Step 6 — Build the structural object graph
 
