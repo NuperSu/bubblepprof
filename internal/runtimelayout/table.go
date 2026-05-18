@@ -28,6 +28,32 @@ type TableEntry struct {
 // running the probe and confirming the offset against a heap dump produced by a
 // live binary on that runtime.
 var verifiedTable = []TableEntry{
+	// PRE-RELEASE: verified on go1.27-devel_e62d3e6e (64-bit LE offset 0x160).
+	// The go1.27 release has not happened yet; this entry may need updating if
+	// the runtime.g struct changes before the final release. Remove this comment
+	// once go1.27.0 ships and the offset is confirmed against the release build.
+	{
+		VersionPrefix: "go1.27-devel",
+		PtrSize:       8,
+		BigEndian:     false,
+		Layout: with64BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GLabelsOffset: 0x160,
+			Description:   "pre-release go1.27-devel 64-bit LE runtime.g.labels offset 0x160 (verified on commit e62d3e6e)",
+		}),
+	},
+	// PRE-RELEASE: verified on go1.27-devel_e62d3e6e (32-bit LE offset 0xd8).
+	// Subject to change before go1.27 final release; see 64-bit entry above.
+	{
+		VersionPrefix: "go1.27-devel",
+		PtrSize:       4,
+		BigEndian:     false,
+		Layout: with32BitLittleEndianDefaults(Layout{
+			Source:        SourceTable,
+			GLabelsOffset: 0xd8,
+			Description:   "pre-release go1.27-devel 32-bit LE runtime.g.labels offset 0xd8 (verified on commit e62d3e6e)",
+		}),
+	},
 	// Verified on linux/amd64 (go1.26.0–go1.26.3), linux/arm64 (go1.26.0–go1.26.3), and freebsd/amd64 (go1.26.*).
 	// Applies to all 64-bit little-endian platforms for go1.26.*.
 	{

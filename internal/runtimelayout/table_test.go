@@ -74,6 +74,8 @@ func TestVerifiedTableShape(t *testing.T) {
 		gLabelsOffset uint64
 	}
 	want := []wantEntry{
+		{"go1.27-devel", 8, 0x160},
+		{"go1.27-devel", 4, 0xd8},
 		{"go1.26.", 8, 0x160},
 		{"go1.26.", 4, 0xd8},
 		{"go1.25.", 8, 0x158},
