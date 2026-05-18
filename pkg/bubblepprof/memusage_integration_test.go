@@ -161,6 +161,18 @@ func TestMemUsageHandler_RuntimePprofLiteralLabels(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode response: %v\n%s", err, rr.Body.String())
 		}
+		// A 200 must actually match the labeled goroutine; otherwise the
+		// endpoint silently returned an empty result and the test would
+		// have falsely "succeeded".
+		if resp.MatchedGoroutines < 1 {
+			t.Fatalf("matched_goroutines = %d, want >= 1; resp = %+v", resp.MatchedGoroutines, resp)
+		}
+		if resp.ReachableBytes == 0 {
+			t.Fatalf("reachable_bytes = 0, want > 0; resp = %+v", resp)
+		}
+		if resp.Labels["job"] != "literal-test" {
+			t.Fatalf("response labels = %#v, want job=literal-test", resp.Labels)
+		}
 		t.Logf("literal labels recoverable on this runtime: matched=%d reachable_bytes=%d",
 			resp.MatchedGoroutines, resp.ReachableBytes)
 	case http.StatusUnprocessableEntity:

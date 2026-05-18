@@ -3,7 +3,6 @@
 package addrspace
 
 import (
-	"strings"
 	"testing"
 	"unsafe"
 )
@@ -191,16 +190,25 @@ func TestProcessReader_SegmentsAreReadOnly(t *testing.T) {
 }
 
 func TestOpenSelfProcessReader_SlideProbeRoundTrip(t *testing.T) {
-	// Integration check: the slide is correct when we can re-derive it
-	// by independently reading a known string.
+	// Integration check: the slide is correct when we can independently
+	// read multiple known rodata strings. A wrong slide is unlikely to
+	// satisfy more than one probe, so a consistent multi-string round-trip
+	// verifies more than the single-string read in TestProcessReader_ReadsLiteralString.
 	r, err := OpenSelfProcessReader()
 	if err != nil {
 		t.Fatalf("OpenSelfProcessReader: %v", err)
 	}
 	defer r.Close()
 
-	// Multiple strings verify the slide is consistent, not just a
-	// lucky single-match.
-	strs := []string{probeStr, "process", strings.Repeat("x", 1)}
-	_ = strs // just ensure they're in rodata; the probeStr test is the real check
+	const secondProbe = "addrspace-darwin-second-probe-9b3f4d21"
+	for _, s := range []string{probeStr, secondProbe} {
+		addr := uint64(uintptr(unsafe.Pointer(unsafe.StringData(s))))
+		got, ok := r.ReadAtAddr(addr, uint64(len(s)))
+		if !ok {
+			t.Fatalf("ReadAtAddr(%q) at 0x%x failed; slide may be wrong", s, addr)
+		}
+		if string(got) != s {
+			t.Fatalf("ReadAtAddr(%q) returned %q", s, string(got))
+		}
+	}
 }
