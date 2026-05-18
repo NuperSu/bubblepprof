@@ -171,7 +171,6 @@ func TestMemUsageHandler_Phase3_DisablingReaderBreaksLiterals(t *testing.T) {
 	}
 }
 
-
 func containsWarning(warnings []string, substr string) bool {
 	for _, w := range warnings {
 		if strings.Contains(w, substr) {

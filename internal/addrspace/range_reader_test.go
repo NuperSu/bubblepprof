@@ -31,10 +31,10 @@ func TestRangeReaderReadAndBoundaries(t *testing.T) {
 
 func TestRangeReaderDropsInvalidRanges(t *testing.T) {
 	r := NewRangeReader("heap", []Range{
-		{Start: 0x1000, End: 0x1000, Data: nil},                  // empty
-		{Start: 0x2000, End: 0x2004, Data: nil},                  // nil data
-		{Start: 0x3000, End: 0x3002, Data: []byte{1, 2, 3, 4}},   // size mismatch
-		{Start: 0x4000, End: 0x4002, Data: []byte{8, 9}},         // valid
+		{Start: 0x1000, End: 0x1000, Data: nil},                // empty
+		{Start: 0x2000, End: 0x2004, Data: nil},                // nil data
+		{Start: 0x3000, End: 0x3002, Data: []byte{1, 2, 3, 4}}, // size mismatch
+		{Start: 0x4000, End: 0x4002, Data: []byte{8, 9}},       // valid
 	})
 	ranges := r.Ranges()
 	if len(ranges) != 1 || ranges[0].Start != 0x4000 {

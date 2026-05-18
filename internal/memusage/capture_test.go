@@ -110,15 +110,15 @@ func putString(w *bytes.Buffer, s string) {
 func minimalValidDump(arch, version string) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("go1.7 heap dump\n")
-	putUvarint(&buf, 6)           // tagParams
-	putUvarint(&buf, 0)           // bigEndian=false
-	putUvarint(&buf, 8)           // ptrSize=8
-	putUvarint(&buf, 0)           // heapStart
-	putUvarint(&buf, 0)           // heapEnd
-	putString(&buf, arch)         // goarch
-	putString(&buf, version)      // buildVersion
-	putUvarint(&buf, 1)           // numCPU
-	putUvarint(&buf, 0)           // tagEOF
+	putUvarint(&buf, 6)      // tagParams
+	putUvarint(&buf, 0)      // bigEndian=false
+	putUvarint(&buf, 8)      // ptrSize=8
+	putUvarint(&buf, 0)      // heapStart
+	putUvarint(&buf, 0)      // heapEnd
+	putString(&buf, arch)    // goarch
+	putString(&buf, version) // buildVersion
+	putUvarint(&buf, 1)      // numCPU
+	putUvarint(&buf, 0)      // tagEOF
 	return buf.Bytes()
 }
 
@@ -203,9 +203,9 @@ func TestComputer_Close_WithProcReader(t *testing.T) {
 // call to Err(), allowing tests to cancel a context mid-flight.
 type nthCallContext struct {
 	context.Context
-	mu      sync.Mutex
-	call    int
-	failAt  int
+	mu     sync.Mutex
+	call   int
+	failAt int
 }
 
 func (c *nthCallContext) Err() error {

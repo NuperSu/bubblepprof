@@ -250,8 +250,8 @@ func TestDecodeString_HeaderLengthUnavailable(t *testing.T) {
 func TestDecodeString_NilDataPtr(t *testing.T) {
 	layout := mustManualLayout(t, 0)
 	headerBytes := make([]byte, 16)
-	binary.LittleEndian.PutUint64(headerBytes[0:], 0)  // dataPtr = 0 (nil)
-	binary.LittleEndian.PutUint64(headerBytes[8:], 1)  // length = 1
+	binary.LittleEndian.PutUint64(headerBytes[0:], 0) // dataPtr = 0 (nil)
+	binary.LittleEndian.PutUint64(headerBytes[8:], 1) // length = 1
 
 	snap := &heapsnapshot.HeapSnapshot{
 		Params:  heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64"},
@@ -361,9 +361,9 @@ func TestDecodeLabelMap_ArraySizeOverflow(t *testing.T) {
 	const hugeLen = uint64(1)<<59 + 1 // (1<<59+1)*32 > math.MaxUint64
 
 	objBytes := make([]byte, 24)
-	binary.LittleEndian.PutUint64(objBytes[0:], 0x5000)    // dataPtr (non-nil)
-	binary.LittleEndian.PutUint64(objBytes[8:], hugeLen)   // length
-	binary.LittleEndian.PutUint64(objBytes[16:], hugeLen)  // capacity
+	binary.LittleEndian.PutUint64(objBytes[0:], 0x5000)   // dataPtr (non-nil)
+	binary.LittleEndian.PutUint64(objBytes[8:], hugeLen)  // length
+	binary.LittleEndian.PutUint64(objBytes[16:], hugeLen) // capacity
 
 	snap := &heapsnapshot.HeapSnapshot{
 		Params:  heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64"},

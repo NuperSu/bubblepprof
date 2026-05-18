@@ -29,15 +29,15 @@ func writeMinimalGoroutine(buf *bytes.Buffer, addr, goid uint64) {
 // writeMinimalStackFrame writes a complete stack frame record to buf.
 func writeMinimalStackFrame(buf *bytes.Buffer, sp uint64, name string) {
 	writeUvarint(buf, tagStackFrame)
-	writeUvarint(buf, sp)      // sp
-	writeUvarint(buf, 0)       // depth
-	writeUvarint(buf, 0)       // childSP
-	writeBytes(buf, []byte{})  // contents (empty)
-	writeUvarint(buf, 0)       // entryPC
-	writeUvarint(buf, 0)       // curPC
-	writeUvarint(buf, 0)       // contPC
-	writeString(buf, name)     // func name
-	writeFieldList(buf, nil)   // no fields
+	writeUvarint(buf, sp)     // sp
+	writeUvarint(buf, 0)      // depth
+	writeUvarint(buf, 0)      // childSP
+	writeBytes(buf, []byte{}) // contents (empty)
+	writeUvarint(buf, 0)      // entryPC
+	writeUvarint(buf, 0)      // curPC
+	writeUvarint(buf, 0)      // contPC
+	writeString(buf, name)    // func name
+	writeFieldList(buf, nil)  // no fields
 }
 
 // TestParseRecords_TruncatedAtFirstField exercises the p.wrap(...) dispatch in
@@ -170,9 +170,9 @@ func TestParseObject_BeforeParams(t *testing.T) {
 	writeHeader(&buf)
 	// tagObject without preceding tagParams.
 	writeUvarint(&buf, tagObject)
-	writeUvarint(&buf, 0x1000)   // addr
-	writeBytes(&buf, []byte{})   // empty contents
-	writeFieldList(&buf, nil)    // no fields
+	writeUvarint(&buf, 0x1000) // addr
+	writeBytes(&buf, []byte{}) // empty contents
+	writeFieldList(&buf, nil)  // no fields
 	writeUvarint(&buf, tagEOF)
 
 	snap, err := Parse(&buf, Options{})
@@ -323,9 +323,9 @@ func TestParseObject_UnknownFieldKind(t *testing.T) {
 	writeUvarint(buf, 0x2000)
 	writeBytes(buf, contents)
 	// Field kind 99 is unknown.
-	writeUvarint(buf, 99)                                   // unknown kind
-	writeUvarint(buf, 0)                                    // offset
-	writeUvarint(buf, uint64(heapsnapshot.FieldKindEol))   // terminate
+	writeUvarint(buf, 99)                                // unknown kind
+	writeUvarint(buf, 0)                                 // offset
+	writeUvarint(buf, uint64(heapsnapshot.FieldKindEol)) // terminate
 	writeUvarint(buf, tagEOF)
 
 	snap, err := Parse(buf, Options{})
@@ -390,7 +390,7 @@ func TestParseStackFrame_AllFieldTruncations(t *testing.T) {
 		n := n
 		t.Run("truncate_at_field_"+itoa10(n+1), func(t *testing.T) {
 			buf := newSyntheticBuffer()
-			writeMinimalGoroutine(buf, 0x1000, 1)  // need curG set
+			writeMinimalGoroutine(buf, 0x1000, 1) // need curG set
 			writeUvarint(buf, tagStackFrame)
 			for i := 0; i < n; i++ {
 				fields[i](buf)
@@ -435,7 +435,10 @@ func TestParseMemProf_AllFieldTruncations(t *testing.T) {
 // TestParseFinalizer_LateFieldTruncations covers error paths for the later
 // fields of parseFinalizer / parseQueuedFinalizer.
 func TestParseFinalizer_LateFieldTruncations(t *testing.T) {
-	for _, tc := range []struct{ name string; tag uint64 }{
+	for _, tc := range []struct {
+		name string
+		tag  uint64
+	}{
 		{"finalizer", tagFinalizer},
 		{"queuedfinalizer", tagQueuedFinalizer},
 	} {
@@ -553,46 +556,46 @@ func TestParseParams_LateFieldTruncations(t *testing.T) {
 		{
 			"at_heapStart",
 			[]func(*bytes.Buffer){
-				func(b *bytes.Buffer) { writeBool(b, false) },  // bigEndian
-				func(b *bytes.Buffer) { writeUvarint(b, 8) },   // ptrSize
+				func(b *bytes.Buffer) { writeBool(b, false) }, // bigEndian
+				func(b *bytes.Buffer) { writeUvarint(b, 8) },  // ptrSize
 			},
 		},
 		{
 			"at_heapEnd",
 			[]func(*bytes.Buffer){
-				func(b *bytes.Buffer) { writeBool(b, false) },  // bigEndian
-				func(b *bytes.Buffer) { writeUvarint(b, 8) },   // ptrSize
-				func(b *bytes.Buffer) { writeUvarint(b, 0) },   // heapStart
+				func(b *bytes.Buffer) { writeBool(b, false) }, // bigEndian
+				func(b *bytes.Buffer) { writeUvarint(b, 8) },  // ptrSize
+				func(b *bytes.Buffer) { writeUvarint(b, 0) },  // heapStart
 			},
 		},
 		{
 			"at_goarch",
 			[]func(*bytes.Buffer){
-				func(b *bytes.Buffer) { writeBool(b, false) },  // bigEndian
-				func(b *bytes.Buffer) { writeUvarint(b, 8) },   // ptrSize
-				func(b *bytes.Buffer) { writeUvarint(b, 0) },   // heapStart
-				func(b *bytes.Buffer) { writeUvarint(b, 0) },   // heapEnd
+				func(b *bytes.Buffer) { writeBool(b, false) }, // bigEndian
+				func(b *bytes.Buffer) { writeUvarint(b, 8) },  // ptrSize
+				func(b *bytes.Buffer) { writeUvarint(b, 0) },  // heapStart
+				func(b *bytes.Buffer) { writeUvarint(b, 0) },  // heapEnd
 			},
 		},
 		{
 			"at_buildVersion",
 			[]func(*bytes.Buffer){
-				func(b *bytes.Buffer) { writeBool(b, false) },       // bigEndian
-				func(b *bytes.Buffer) { writeUvarint(b, 8) },        // ptrSize
-				func(b *bytes.Buffer) { writeUvarint(b, 0) },        // heapStart
-				func(b *bytes.Buffer) { writeUvarint(b, 0) },        // heapEnd
-				func(b *bytes.Buffer) { writeString(b, "amd64") },   // goarch
+				func(b *bytes.Buffer) { writeBool(b, false) },     // bigEndian
+				func(b *bytes.Buffer) { writeUvarint(b, 8) },      // ptrSize
+				func(b *bytes.Buffer) { writeUvarint(b, 0) },      // heapStart
+				func(b *bytes.Buffer) { writeUvarint(b, 0) },      // heapEnd
+				func(b *bytes.Buffer) { writeString(b, "amd64") }, // goarch
 			},
 		},
 		{
 			"at_numCPU",
 			[]func(*bytes.Buffer){
-				func(b *bytes.Buffer) { writeBool(b, false) },         // bigEndian
-				func(b *bytes.Buffer) { writeUvarint(b, 8) },          // ptrSize
-				func(b *bytes.Buffer) { writeUvarint(b, 0) },          // heapStart
-				func(b *bytes.Buffer) { writeUvarint(b, 0) },          // heapEnd
-				func(b *bytes.Buffer) { writeString(b, "amd64") },     // goarch
-				func(b *bytes.Buffer) { writeString(b, "go1.26.0") },  // buildVersion
+				func(b *bytes.Buffer) { writeBool(b, false) },        // bigEndian
+				func(b *bytes.Buffer) { writeUvarint(b, 8) },         // ptrSize
+				func(b *bytes.Buffer) { writeUvarint(b, 0) },         // heapStart
+				func(b *bytes.Buffer) { writeUvarint(b, 0) },         // heapEnd
+				func(b *bytes.Buffer) { writeString(b, "amd64") },    // goarch
+				func(b *bytes.Buffer) { writeString(b, "go1.26.0") }, // buildVersion
 			},
 		},
 	}
@@ -676,7 +679,10 @@ func TestParseObject_TruncatedAtContents(t *testing.T) {
 // TestParseFinalizer_AllTruncations covers all error paths in parseFinalizer
 // and parseQueuedFinalizer.
 func TestParseFinalizer_AllTruncations(t *testing.T) {
-	for _, tc := range []struct{ name string; tag uint64 }{
+	for _, tc := range []struct {
+		name string
+		tag  uint64
+	}{
 		{"finalizer", tagFinalizer},
 		{"queuedfinalizer", tagQueuedFinalizer},
 	} {
@@ -787,14 +793,14 @@ func TestParseStackFrame_FieldListTruncation(t *testing.T) {
 	buf := newSyntheticBuffer()
 	writeMinimalGoroutine(buf, 0x1000, 1)
 	writeUvarint(buf, tagStackFrame)
-	writeUvarint(buf, 0x8000)     // sp
-	writeUvarint(buf, 0)          // depth
-	writeUvarint(buf, 0)          // childSP
-	writeBytes(buf, []byte{})     // contents
-	writeUvarint(buf, 0)          // entryPC
-	writeUvarint(buf, 0)          // curPC
-	writeUvarint(buf, 0)          // contPC
-	writeString(buf, "func")      // name
+	writeUvarint(buf, 0x8000) // sp
+	writeUvarint(buf, 0)      // depth
+	writeUvarint(buf, 0)      // childSP
+	writeBytes(buf, []byte{}) // contents
+	writeUvarint(buf, 0)      // entryPC
+	writeUvarint(buf, 0)      // curPC
+	writeUvarint(buf, 0)      // contPC
+	writeString(buf, "func")  // name
 	// FieldList missing → error
 	_, err := Parse(buf, Options{})
 	if err == nil {

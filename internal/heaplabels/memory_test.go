@@ -71,7 +71,7 @@ func TestNewMemory_SameStartAddr(t *testing.T) {
 	// Two objects with the same Addr trigger the sort.Slice tie-breaker.
 	snap := &heapsnapshot.HeapSnapshot{
 		Objects: []heapsnapshot.Object{
-			{Addr: 0x1000, Contents: []byte{1, 2, 3, 4, 5, 6, 7, 8}},         // [0x1000, 0x1008)
+			{Addr: 0x1000, Contents: []byte{1, 2, 3, 4, 5, 6, 7, 8}},        // [0x1000, 0x1008)
 			{Addr: 0x1000, Contents: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}}, // [0x1000, 0x100a)
 		},
 	}

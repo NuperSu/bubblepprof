@@ -422,8 +422,8 @@ func TestDecodeLabelMap_SetAddrOverflows(t *testing.T) {
 func TestDecodeLabelMap_SetListAddrOverflows(t *testing.T) {
 	mem := NewMemory(nil)
 	layout := mustManualLayout(t, 0x18)
-	layout.LabelMapSetOffset = 0         // setAddr = addr (no overflow)
-	layout.SetListOffset = ^uint64(0)    // setAddr + MaxUint64 overflows
+	layout.LabelMapSetOffset = 0      // setAddr = addr (no overflow)
+	layout.SetListOffset = ^uint64(0) // setAddr + MaxUint64 overflows
 	_, err := DecodeLabelMap(mem, mem, layout, Options{}, 1)
 	if err == nil || statusOf(err) != StatusMalformed {
 		t.Fatalf("expected malformed for list addr overflow, got %v", err)

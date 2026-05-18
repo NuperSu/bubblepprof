@@ -337,7 +337,7 @@ func TestDataSegmentPointerSlots_NonPtrField(t *testing.T) {
 		PointerAddrs: []uint64{0x2000},
 		Fields: []heapsnapshot.Field{
 			{Kind: heapsnapshot.FieldKindIface, Offset: 0}, // non-ptr field → continue
-			{Kind: heapsnapshot.FieldKindPtr, Offset: 8},  // ptr field
+			{Kind: heapsnapshot.FieldKindPtr, Offset: 8},   // ptr field
 		},
 	}
 	slots := dataSegmentPointerSlots(seg)
@@ -406,7 +406,7 @@ func TestBuild_ZeroPtrFinalizerSkipped(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Objects: []heapsnapshot.Object{{Addr: 0x1000, Size: 8}},
 		Finalizers: []heapsnapshot.Finalizer{
-			{ObjectAddr: 0},     // zero ptr → skipped
+			{ObjectAddr: 0},      // zero ptr → skipped
 			{ObjectAddr: 0x1000}, // valid
 		},
 		QueuedFinalizers: []heapsnapshot.QueuedFinalizer{

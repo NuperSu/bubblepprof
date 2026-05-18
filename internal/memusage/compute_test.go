@@ -350,10 +350,10 @@ func TestDiagnosticsFromHeapLabels(t *testing.T) {
 	// String_missing path surfaces warning.
 	res = heaplabels.Result{
 		Stats: heaplabels.Stats{
-			GoroutinesTotal:    2,
-			GoroutinesDecoded:  1,
-			GoroutinesFailed:   1,
-			StringsMissing:     1,
+			GoroutinesTotal:   2,
+			GoroutinesDecoded: 1,
+			GoroutinesFailed:  1,
+			StringsMissing:    1,
 		},
 	}
 	diag = DiagnosticsFromHeapLabels(snap, res)
