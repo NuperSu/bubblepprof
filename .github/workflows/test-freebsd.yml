@@ -9,9 +9,62 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  test:
-    name: Test / ${{ matrix.go }} / ${{ matrix.label }}
-    runs-on: ${{ matrix.runner }}
+  # ── Real FreeBSD VM tests — amd64, system Go from ports ──────────────────
+  test-vm:
+    name: Test / FreeBSD ${{ matrix.release }} / ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ !matrix.required }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {release: '13.5', goarch: amd64, label: freebsd-vm-13.5-amd64, required: true}
+          - {release: '14.4', goarch: amd64, label: freebsd-vm-14.4-amd64, required: true}
+          - {release: '15.0', goarch: amd64, label: freebsd-vm-15.0-amd64, required: true}
+          - {release: '13.5', goarch: '386', label: freebsd-vm-13.5-386,   required: true}
+          - {release: '14.4', goarch: '386', label: freebsd-vm-14.4-386,   required: true}
+          - {release: '15.0', goarch: '386', label: freebsd-vm-15.0-386,   required: true}
+          - {release: '14.4', goarch: amd64, use_gotip: true, label: freebsd-vm-gotip-amd64, required: false}
+          - {release: '14.4', goarch: '386', use_gotip: true, label: freebsd-vm-gotip-386,   required: false}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test inside FreeBSD ${{ matrix.release }} / ${{ matrix.goarch }}
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: ${{ matrix.release }}
+          usesh: true
+          prepare: |
+            pkg update -q
+            pkg install -y go git ca_root_nss
+          run: |
+            set -eux
+            freebsd-version
+            uname -a
+            go version
+            go mod download
+
+            GOARCH="${{ matrix.goarch }}"
+            CGO_ENABLED="$( [ "$GOARCH" = "386" ] && echo 0 || echo 1 )"
+
+            if [ "${{ matrix.use_gotip }}" = "true" ]; then
+              GOBIN="$(go env GOPATH)/bin"
+              export PATH="$GOBIN:$PATH"
+              go install golang.org/dl/gotip@latest
+              gotip download
+              gotip version
+              GOARCH="$GOARCH" CGO_ENABLED="$CGO_ENABLED" gotip test ./...
+            else
+              GOARCH="$GOARCH" CGO_ENABLED="$CGO_ENABLED" go test ./...
+            fi
+
+  # ── Cross-build for non-amd64 FreeBSD architectures ──────────────────────
+  # amd64 is covered by real VM tests above; arm64 and 386 have no hosted runner.
+  cross-build:
+    name: Build / ${{ matrix.go }} / ${{ matrix.label }}
+    runs-on: ubuntu-latest
     continue-on-error: ${{ !matrix.required }}
 
     strategy:
@@ -19,103 +72,69 @@ jobs:
       matrix:
         include:
 
-          # ── freebsd/amd64 cross-build ──────────────────────────────────────
-          # No FreeBSD runners on GitHub's hosted plan; cross-compile only.
-          # CGO_ENABLED=0 because there is no FreeBSD libc on the Linux runner.
-          - {go: '1.24.0',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.1',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.2',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.3',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.4',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.5',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.6',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.7',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.8',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.9',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.10', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.11', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.12', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.24.13', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.0',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.1',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.2',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.3',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.4',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.5',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.6',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.7',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.8',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.9',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.25.10', runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.26.0',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.26.1',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.26.2',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: '1.26.3',  runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: true}
-          - {go: tip,       runner: ubuntu-latest, goos: freebsd, goarch: amd64, label: freebsd-amd64, cgo: '0', required: false}
+          # ── freebsd/arm64 ──────────────────────────────────────────────────
+          - {go: '1.24.0',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.1',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.2',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.3',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.4',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.5',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.6',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.7',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.8',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.9',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.10', goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.11', goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.12', goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.24.13', goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.0',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.1',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.2',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.3',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.4',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.5',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.6',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.7',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.8',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.9',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.25.10', goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.26.0',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.26.1',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.26.2',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: '1.26.3',  goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
+          - {go: tip,       goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: false}
 
-          # ── freebsd/arm64 cross-build ──────────────────────────────────────
-          - {go: '1.24.0',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.1',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.2',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.3',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.4',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.5',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.6',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.7',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.8',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.9',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.10', runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.11', runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.12', runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.24.13', runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.0',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.1',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.2',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.3',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.4',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.5',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.6',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.7',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.8',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.9',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.25.10', runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.26.0',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.26.1',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.26.2',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: '1.26.3',  runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: true}
-          - {go: tip,       runner: ubuntu-latest, goos: freebsd, goarch: arm64, label: freebsd-arm64, cgo: '0', required: false}
-
-          # ── freebsd/386 cross-build ────────────────────────────────────────
-          - {go: '1.24.0',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.1',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.2',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.3',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.4',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.5',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.6',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.7',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.8',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.9',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.10', runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.11', runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.12', runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.24.13', runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.0',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.1',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.2',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.3',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.4',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.5',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.6',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.7',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.8',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.9',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.25.10', runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.0',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.1',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.2',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: '1.26.3',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
-          - {go: tip,       runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: false}
+          # ── freebsd/386 ────────────────────────────────────────────────────
+          - {go: '1.24.0',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.1',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.2',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.3',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.4',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.5',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.6',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.7',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.8',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.9',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.10', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.11', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.12', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.24.13', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.0',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.1',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.2',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.3',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.4',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.5',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.6',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.7',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.8',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.9',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.25.10', goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.26.0',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.26.1',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.26.2',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: '1.26.3',  goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: true}
+          - {go: tip,       goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', required: false}
 
     steps:
       - uses: actions/checkout@v4
@@ -153,8 +172,6 @@ jobs:
           "$gotip_bin" download
           "$gotip_bin" version
 
-      # FreeBSD: cross-compile only. No runner available; verify the build
-      # compiles cleanly for each target but do not attempt to run tests.
       - name: Build
         if: matrix.go != 'tip'
         env:
@@ -174,15 +191,16 @@ jobs:
   # ── Gate job ─────────────────────────────────────────────────────────────────
   all-required:
     name: All FreeBSD checks passed
-    needs: [test]
+    needs: [test-vm, cross-build]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify required jobs
         run: |
-          result="${{ needs.test.result }}"
-          if [ "$result" != "success" ]; then
-            echo "One or more required FreeBSD build jobs failed (matrix result: $result)."
+          vm_result="${{ needs.test-vm.result }}"
+          build_result="${{ needs.cross-build.result }}"
+          if [ "$vm_result" != "success" ] || [ "$build_result" != "success" ]; then
+            echo "One or more required FreeBSD jobs failed (vm: $vm_result, cross-build: $build_result)."
             exit 1
           fi
-          echo "All required FreeBSD build jobs passed."
+          echo "All required FreeBSD checks passed."
