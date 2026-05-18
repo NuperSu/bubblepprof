@@ -19,13 +19,17 @@ type ELFSegment struct {
 
 // ELFReader reads bytes from an ELF executable's PT_LOAD segments at
 // the segment's virtual addresses (Vaddr). It recovers label string
-// literals from the executable's read-only data when ProcessReader is
-// unavailable (e.g. offline analysis).
+// literals from the executable's read-only data when no live process
+// memory source is available — including offline analysis and FreeBSD
+// hosts without procfs mounted, where ProcessReader uses it internally
+// as its primary address-space source.
 //
 // CAVEAT: Position-independent / ASLR-loaded executables run at a base
-// different from their on-disk Vaddrs. Without a load bias from the
-// snapshot, raw ELF reading is only reliable for non-PIE binaries.
-// /debug/memusage avoids this by using ProcessReader instead.
+// different from their on-disk Vaddrs. Without a load-bias correction,
+// ELF reading is only reliable for non-PIE binaries. On platforms where
+// ProcessReader has a live-memory source (Linux /proc/self/mem, Darwin
+// Mach VM, Windows ReadProcessMemory, or FreeBSD with procfs mounted),
+// that source is preferred because it handles PIE correctly.
 type ELFReader struct {
 	file     *os.File
 	path     string

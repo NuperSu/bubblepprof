@@ -14,23 +14,32 @@ import (
 )
 
 // ProcessReader reads bytes from the current process's virtual address
-// space. It first tries /proc/self/map + /proc/self/mem (requires procfs to
-// be mounted), gating every read against read-only mappings exactly as the
-// Linux implementation does. When procfs is unavailable it falls back to
-// ELFReader, which reads on-disk PT_LOAD segments; that path is only fully
-// correct for non-PIE binaries because no load-bias correction is applied.
+// space using one of two sources, in order of preference:
+//
+//   - procfs (/proc/self/map + /proc/self/mem), when procfs is mounted.
+//     Uses live runtime addresses; correct for both PIE and non-PIE binaries.
+//     Matches the Linux implementation's read-only mapping gate.
+//   - the on-disk ELF executable, when procfs is not mounted. This is the
+//     modal path on FreeBSD, where procfs is deprecated and unmounted by
+//     default. It reads file-backed PT_LOAD segments at their on-disk Vaddrs
+//     and is only correct when runtime addresses equal on-disk Vaddrs — i.e.
+//     for non-PIE binaries (no load-bias correction is applied).
+//
+// Both are real production paths; the ELF source is not a degraded fallback.
 type ProcessReader struct {
-	maps []Mapping  // populated on procfs path; nil on ELF path
+	maps []Mapping  // populated when procfs is in use; nil otherwise
 	mem  *os.File   // non-nil when /proc/self/mem is in use
-	elf  *ELFReader // non-nil when ELF fallback is in use
+	elf  *ELFReader // non-nil when the on-disk ELF source is in use
 	path string
 }
 
-// OpenSelfProcessReader opens the best available address-space reader for
-// the current process. On the procfs path it parses /proc/self/map to build
-// a read-only mapping filter before opening /proc/self/mem, so writable
-// mappings (heap, stack) are never served. If procfs is unavailable it falls
-// back to ELFReader. Callers must Close the returned reader.
+// OpenSelfProcessReader opens an address-space reader for the current
+// process. It prefers procfs (parsing /proc/self/map for a read-only
+// mapping filter, then opening /proc/self/mem) because that source handles
+// PIE binaries at their live runtime addresses; when procfs is not mounted
+// — the default on FreeBSD — it opens the on-disk ELF executable instead,
+// which is correct for non-PIE binaries. Callers must Close the returned
+// reader.
 func OpenSelfProcessReader() (*ProcessReader, error) {
 	maps, err := readSelfMap()
 	if err == nil {
@@ -75,8 +84,8 @@ func (r *ProcessReader) Close() error {
 // Name implements NamedReader.
 func (r *ProcessReader) Name() string { return "process" }
 
-// Mappings returns a copy of the readable mappings the reader is aware of on
-// the procfs path, or nil on the ELF fallback path. Safe to mutate.
+// Mappings returns a copy of the readable mappings the reader is aware of
+// when using procfs, or nil when using the on-disk ELF source. Safe to mutate.
 func (r *ProcessReader) Mappings() []Mapping {
 	if r == nil {
 		return nil
@@ -89,10 +98,10 @@ func (r *ProcessReader) Mappings() []Mapping {
 	return out
 }
 
-// ReadAtAddr implements Reader. On the procfs path it only serves addresses
-// that fall entirely within a single read-only mapping (same policy as Linux).
-// On the ELF fallback path addr must match an on-disk PT_LOAD Vaddr, which is
-// only correct for non-PIE binaries.
+// ReadAtAddr implements Reader. With procfs it only serves addresses that
+// fall entirely within a single read-only mapping (same policy as Linux).
+// With the on-disk ELF source addr must lie inside a file-backed PT_LOAD
+// segment at its on-disk Vaddr, which is only correct for non-PIE binaries.
 func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 	if r == nil {
 		return nil, false
