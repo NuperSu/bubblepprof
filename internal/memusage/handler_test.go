@@ -132,6 +132,31 @@ func TestHandler_StringMissing(t *testing.T) {
 	}
 }
 
+func TestHandler_LabelRecoveryFailed(t *testing.T) {
+	h := Handler(stubCompute(nil, &LabelRecoveryFailedError{
+		GoVersion:        "go1.26.3",
+		GOARCH:           "amd64",
+		FailedGoroutines: 2,
+		Warnings:         []string{"g_object_missing"},
+	}), HandlerOptions{})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"job":"42"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rr.Code)
+	}
+	var body ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Code != "label_recovery_failed" {
+		t.Fatalf("code = %q, want label_recovery_failed", body.Code)
+	}
+	if len(body.Warnings) != 1 {
+		t.Fatalf("warnings = %v", body.Warnings)
+	}
+}
+
 func TestHandler_Busy(t *testing.T) {
 	// Block the first compute call until we explicitly release it; then
 	// fire a second concurrent request and assert it gets 429.

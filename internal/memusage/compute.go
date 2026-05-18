@@ -122,10 +122,9 @@ func (e *UnsupportedRuntimeError) Error() string {
 	return fmt.Sprintf("heap-native pprof label recovery is unsupported for this Go runtime (%s %s)", e.GoVersion, e.GOARCH)
 }
 
-// StringMissingError is returned by ComputeFromAnalysis when no requested
-// labels could be matched because every candidate goroutine's labels
-// failed to decode with status string_missing. The handler turns this
-// into HTTP 422 with code "string_missing".
+// StringMissingError is returned by ComputeFromAnalysis when label decode
+// failed because string bytes (key or value) were unavailable in the heap
+// dump. The handler turns this into HTTP 422 with code "string_missing".
 type StringMissingError struct {
 	GoVersion string
 	GOARCH    string
@@ -134,6 +133,21 @@ type StringMissingError struct {
 
 func (e *StringMissingError) Error() string {
 	return "pprof labels were found but some label string bytes were unavailable"
+}
+
+// LabelRecoveryFailedError is returned by ComputeFromAnalysis when heap-native
+// label decode failed for reasons other than missing string bytes (e.g.
+// g_object_missing, labels_object_missing, malformed map). The handler turns
+// this into HTTP 422 with code "label_recovery_failed".
+type LabelRecoveryFailedError struct {
+	GoVersion        string
+	GOARCH           string
+	FailedGoroutines int
+	Warnings         []string
+}
+
+func (e *LabelRecoveryFailedError) Error() string {
+	return fmt.Sprintf("heap-native pprof label recovery failed for %d goroutine(s)", e.FailedGoroutines)
 }
 
 // CaptureFailedError is returned when the heap dump could not be written.
@@ -162,19 +176,23 @@ func (e *ParseFailedError) Unwrap() error { return e.Cause }
 // goroutine: for a selector matching S of N goroutines we now pay
 // O(reach(S)) instead of O(reach(N)).
 //
-// Any label-decode failure (StringMissingCount > 0 or FailedGoroutines > 0)
-// causes a StringMissingError: an undecodable goroutine might also carry
-// the requested labels, so a partial or zero match count is not authoritative.
+// Any label-decode failure makes the match set non-authoritative: an
+// undecodable goroutine might also carry the requested labels, so a partial
+// or zero match count is not returned as 200. Two distinct 422 codes:
+//
+//   - StringMissingCount > 0 → StringMissingError (string bytes unavailable)
+//   - FailedGoroutines > 0 (and no StringMissingCount) → LabelRecoveryFailedError
 //
 // Validation runs first so direct callers (e.g. unit tests, future CLI
 // adapters) cannot bypass the same checks the HTTP handler applies.
 // Errors are reported via concrete types the handler can translate into
 // HTTP status codes:
 //
-//	*ValidationError         -> 400
-//	*UnsupportedRuntimeError -> 422
-//	*StringMissingError      -> 422
-//	other                    -> 500
+//	*ValidationError           -> 400
+//	*UnsupportedRuntimeError   -> 422
+//	*StringMissingError        -> 422
+//	*LabelRecoveryFailedError  -> 422
+//	other                      -> 500
 func ComputeFromAnalysis(
 	req Request,
 	analysis *snapshotgraph.Analysis,
@@ -216,13 +234,22 @@ func ComputeFromAnalysis(
 	}
 
 	// Any label-decode failure makes the match set non-authoritative: an
-	// undecodable goroutine might also carry the requested labels. Return
-	// 422 string_missing rather than a partial (or zero) 200 response.
-	if diag.StringMissingCount > 0 || diag.FailedGoroutines > 0 {
+	// undecodable goroutine might also carry the requested labels.
+	// string_missing (unavailable string bytes) takes priority over other
+	// decode failures because it is the more actionable diagnosis.
+	if diag.StringMissingCount > 0 {
 		return nil, &StringMissingError{
 			GoVersion: diag.GoVersion,
 			GOARCH:    diag.GOARCH,
 			Warnings:  append([]string{}, diag.Warnings...),
+		}
+	}
+	if diag.FailedGoroutines > 0 {
+		return nil, &LabelRecoveryFailedError{
+			GoVersion:        diag.GoVersion,
+			GOARCH:           diag.GOARCH,
+			FailedGoroutines: diag.FailedGoroutines,
+			Warnings:         append([]string{}, diag.Warnings...),
 		}
 	}
 

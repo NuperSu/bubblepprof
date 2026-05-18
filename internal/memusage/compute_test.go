@@ -261,6 +261,69 @@ func TestComputeFromAnalysis_StringMissingIsErrorEvenWithMatches(t *testing.T) {
 	}
 }
 
+func TestComputeFromAnalysis_LabelRecoveryFailed(t *testing.T) {
+	// FailedGoroutines > 0 but StringMissingCount == 0 → LabelRecoveryFailedError.
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
+	user := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
+	analysis := &snapshotgraph.Analysis{
+		Graph:      g,
+		Goroutines: []snapshotgraph.GoroutineReachability{user},
+	}
+	diag := Diagnostics{
+		FailedGoroutines: 1,
+		GoVersion:        "go1.26.3",
+		GOARCH:           "amd64",
+	}
+	_, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"job": "42"}},
+		analysis,
+		map[uint64]map[string]string{},
+		diag,
+		Options{},
+	)
+	if err == nil {
+		t.Fatal("expected LabelRecoveryFailedError, got nil")
+	}
+	var lrfe *LabelRecoveryFailedError
+	if !errors.As(err, &lrfe) {
+		t.Fatalf("error = %v (%T), want LabelRecoveryFailedError", err, err)
+	}
+	if lrfe.GoVersion != "go1.26.3" || lrfe.GOARCH != "amd64" || lrfe.FailedGoroutines != 1 {
+		t.Fatalf("LabelRecoveryFailedError = %+v", lrfe)
+	}
+}
+
+func TestComputeFromAnalysis_StringMissingTakesPriorityOverFailed(t *testing.T) {
+	// When both StringMissingCount and FailedGoroutines are set,
+	// StringMissingError is returned (string_missing is the primary cause).
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
+	user := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
+	analysis := &snapshotgraph.Analysis{
+		Graph:      g,
+		Goroutines: []snapshotgraph.GoroutineReachability{user},
+	}
+	diag := Diagnostics{
+		StringMissingCount: 1,
+		FailedGoroutines:   2,
+		GoVersion:          "go1.26.3",
+		GOARCH:             "amd64",
+	}
+	_, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"job": "42"}},
+		analysis,
+		map[uint64]map[string]string{},
+		diag,
+		Options{},
+	)
+	if err == nil {
+		t.Fatal("expected StringMissingError, got nil")
+	}
+	var sme *StringMissingError
+	if !errors.As(err, &sme) {
+		t.Fatalf("error = %v (%T), want StringMissingError", err, err)
+	}
+}
+
 func TestDiagnosticsFromHeapLabels(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{

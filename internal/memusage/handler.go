@@ -148,6 +148,17 @@ func writeComputeError(w http.ResponseWriter, err error) {
 		})
 		return
 	}
+	var labelRecoveryFailed *LabelRecoveryFailedError
+	if errors.As(err, &labelRecoveryFailed) {
+		writeError(w, http.StatusUnprocessableEntity, &ErrorResponse{
+			Error:     labelRecoveryFailed.Error(),
+			Code:      "label_recovery_failed",
+			GoVersion: labelRecoveryFailed.GoVersion,
+			GOARCH:    labelRecoveryFailed.GOARCH,
+			Warnings:  labelRecoveryFailed.Warnings,
+		})
+		return
+	}
 	var captureFailed *CaptureFailedError
 	if errors.As(err, &captureFailed) {
 		writeError(w, http.StatusInternalServerError, &ErrorResponse{
