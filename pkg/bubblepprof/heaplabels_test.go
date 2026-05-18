@@ -27,7 +27,7 @@ func runtimeIsClaimedSupported() bool {
 		GoVersion: runtime.Version(),
 		GOARCH:    runtime.GOARCH,
 		PtrSize:   ptrSize,
-		BigEndian:  bigEndian,
+		BigEndian: bigEndian,
 	})
 	return ok
 }
