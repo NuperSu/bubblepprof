@@ -370,6 +370,23 @@ jobs:
           - {go: '1.26.2',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', build-only: true, required: true}
           - {go: '1.26.3',  runner: ubuntu-latest, goos: freebsd, goarch: '386', label: freebsd-386, cgo: '0', build-only: true, required: true}
 
+          # ── gotip (Go development tip, HEAD) ──────────────────────────────
+          # Non-required smoke tests against Go HEAD. go1.27-devel is already
+          # in verifiedTable; these jobs surface layout regressions before a
+          # release ships. All entries are required:false — failures are
+          # informational only and never block merge.
+          - {go: tip, runner: ubuntu-latest,    goos: linux,   goarch: amd64,  label: linux-amd64,   required: false}
+          - {go: tip, runner: ubuntu-22.04-arm, goos: linux,   goarch: arm64,  label: linux-arm64,   required: false}
+          - {go: tip, runner: ubuntu-latest,    goos: linux,   goarch: '386',  label: linux-386,     cgo: '0', required: false}
+          - {go: tip, runner: ubuntu-latest,    goos: linux,   goarch: arm,    goarm: '7', label: linux-arm, qemu: true, cgo: '0', required: false}
+          - {go: tip, runner: macos-13,         goos: darwin,  goarch: amd64,  label: darwin-amd64,  required: false}
+          - {go: tip, runner: macos-latest,     goos: darwin,  goarch: arm64,  label: darwin-arm64,  required: false}
+          - {go: tip, runner: windows-latest,   goos: windows, goarch: amd64,  label: windows-amd64, required: false}
+          - {go: tip, runner: windows-latest,   goos: windows, goarch: '386',  label: windows-386,   required: false}
+          - {go: tip, runner: ubuntu-latest,    goos: freebsd, goarch: amd64,  label: freebsd-amd64, cgo: '0', build-only: true, required: false}
+          - {go: tip, runner: ubuntu-latest,    goos: freebsd, goarch: arm64,  label: freebsd-arm64, cgo: '0', build-only: true, required: false}
+          - {go: tip, runner: ubuntu-latest,    goos: freebsd, goarch: '386',  label: freebsd-386,   cgo: '0', build-only: true, required: false}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -382,10 +399,28 @@ jobs:
           platforms: arm
 
       - name: Set up Go ${{ matrix.go }}
+        if: matrix.go != 'tip'
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
           cache: true
+
+      # For gotip: bootstrap with stable Go, fetch tip, then prepend
+      # tip's GOROOT/bin to PATH so all subsequent steps invoke tip's 'go'.
+      - name: Set up bootstrap Go (for gotip only)
+        if: matrix.go == 'tip'
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install gotip
+        if: matrix.go == 'tip'
+        shell: bash
+        run: |
+          go install golang.org/dl/gotip@latest
+          gotip download
+          echo "$(gotip env GOROOT)/bin" >> "$GITHUB_PATH"
 
       # Cross-compile check for targets where the binary cannot be executed on
       # the runner (FreeBSD). Verifies the code compiles cleanly; no tests run.
