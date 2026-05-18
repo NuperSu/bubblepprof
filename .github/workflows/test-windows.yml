@@ -1,0 +1,152 @@
+name: Test (Windows)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  test:
+    name: Test / ${{ matrix.go }} / ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ !matrix.required }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+
+          # ── windows/amd64 ──────────────────────────────────────────────────
+          - {go: '1.24.0',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.1',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.2',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.3',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.4',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.5',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.6',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.7',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.8',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.9',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.10', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.11', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.12', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.24.13', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.0',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.1',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.2',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.3',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.4',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.5',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.6',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.7',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.8',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.9',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.25.10', runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.26.0',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.26.1',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.26.2',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: '1.26.3',  runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: true}
+          - {go: tip,       runner: windows-latest, goos: windows, goarch: amd64, label: windows-amd64, required: false}
+
+          # ── windows/386 ────────────────────────────────────────────────────
+          - {go: '1.24.0',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.1',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.2',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.3',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.4',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.5',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.6',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.7',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.8',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.9',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.10', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.11', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.12', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.24.13', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.0',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.1',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.2',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.3',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.4',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.5',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.6',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.7',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.8',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.9',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.25.10', runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.26.0',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.26.1',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.26.2',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: '1.26.3',  runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: true}
+          - {go: tip,       runner: windows-latest, goos: windows, goarch: '386', label: windows-386, required: false}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go }}
+        if: matrix.go != 'tip'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Set up bootstrap Go (for gotip only)
+        if: matrix.go == 'tip'
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      # gotip.exe is invoked via its full path during download (GOBIN is not in
+      # PATH until the next step), then called by name in the Test step below.
+      - name: Install gotip
+        if: matrix.go == 'tip'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          go install golang.org/dl/gotip@latest
+
+          gobin="$(go env GOBIN)"
+          if [ -z "$gobin" ]; then
+            gobin="$(go env GOPATH)/bin"
+          fi
+
+          gotip_bin="$(cygpath -u "$gobin")/gotip.exe"
+          echo "$gobin" >> "$GITHUB_PATH"
+
+          "$gotip_bin" download
+          "$gotip_bin" version
+
+      - name: Test
+        if: matrix.go != 'tip'
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go test ./...
+
+      - name: Test with gotip
+        if: matrix.go == 'tip'
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: gotip test ./...
+
+  # ── Gate job ─────────────────────────────────────────────────────────────────
+  all-required:
+    name: All Windows checks passed
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs
+        run: |
+          result="${{ needs.test.result }}"
+          if [ "$result" != "success" ]; then
+            echo "One or more required Windows test jobs failed (matrix result: $result)."
+            exit 1
+          fi
+          echo "All required Windows test jobs passed."
