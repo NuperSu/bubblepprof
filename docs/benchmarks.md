@@ -1,0 +1,131 @@
+# Benchmarks
+
+This document describes how `bubblepprof`'s `/debug/memusage` endpoint is
+measured for the thesis: what is measured, how, and how to reproduce.
+
+## What is measured
+
+Per-iteration metrics captured by `cmd/bench`:
+
+| Metric | What it is | Source |
+| --- | --- | --- |
+| `wall_ns` | End-to-end wall-clock time of `memusage.Compute` | `time.Now()` |
+| `max_heartbeat_pause_ns` | Max gap observed by a tight-loop heartbeat goroutine during the call. Upper bound on the longest scheduling pause any user goroutine saw — i.e. the stop-the-world pause caused by `runtime/debug.WriteHeapDump`. | Heartbeat goroutine |
+| `go_heap_alloc_delta_b` | `HeapAlloc` delta around `Compute` (Go-managed live heap) | `runtime.ReadMemStats` |
+| `go_total_alloc_delta_b` | `TotalAlloc` delta (cumulative bytes allocated) | `runtime.ReadMemStats` |
+| `vm_rss_after_kb` / `vm_hwm_after_kb` | Process resident set after the call; high-water mark | `/proc/self/status` |
+| `matched_goroutines`, `reachable_bytes` | Sanity-check fields from the JSON response | endpoint output |
+
+For per-stage timing (`capture` / `parse` / `labels` / `build` /
+`compute_from_analysis`) the binary writes one `runtime/trace` capture per
+configuration via `-trace <path>`. Open with `go tool trace`.
+
+Per-configuration aggregates emitted in the JSON `summary` map: `mean`,
+`stddev`, `min`, `max`, `p50`, `p95`, `p99`.
+
+Independent OS-level cross-check via `/usr/bin/time -v`: `Maximum resident set
+size`, user CPU, system CPU, major/minor page faults, voluntary/involuntary
+context switches. Parsed by `bench/aggregate.py` into the summary CSV.
+
+## Why a heartbeat for STW
+
+`runtime/debug.WriteHeapDump` calls `runtime.stopTheWorld` directly. Its
+pause is **not** reflected in `MemStats.PauseNs` (which only covers GC
+phases). The heartbeat goroutine — a tight loop sampling `time.Now()` and
+recording the max consecutive-sample gap — registers any scheduling pause,
+including the WriteHeapDump STW. Cross-checked against a `runtime/trace`
+capture, which records STW spans explicitly.
+
+## Inter-iteration cleanup
+
+`cmd/bench` runs two passes of `runtime.GC()` immediately before each
+measurement so the Go heap from the previous iteration (parsed snapshot,
+graph, label map) cannot accumulate and inflate the next call's WriteHeapDump
+size and wall time. Without this, iterations drift upward by ≈100 MiB each
+because Go does not eagerly reclaim large structures between calls.
+
+The cost of the inter-iteration GC is excluded from the measurement window.
+
+## Configuration sweep
+
+| Knob | Quick | Full |
+| --- | --- | --- |
+| `heap-mb` | 50, 200 | 50, 200, 500, 1000, 2000 |
+| `goroutines` | 100, 1 000 | 100, 1 000, 5 000, 10 000 |
+| `match-fraction` | 1.0 | 0.01, 0.5, 1.0 |
+| `gc-pre` | false | false, true |
+| iterations × warmup | 5 × 2 | 20 × 3 |
+
+`match-fraction` controls the fraction of workers whose pprof labels match
+the query (`job=alpha`). The rest carry `job=beta`. Sweeping this isolates
+the cost of the per-query BFS from the cost of the structural graph build.
+
+## Reproducing
+
+Requires Linux + `/usr/bin/time` (GNU time) + `python3`.
+
+```bash
+# quick: 2 configs, validates end-to-end
+bash bench/run.sh --quick
+
+# full: thesis sweep (~40 configs × 23 iterations, hours)
+bash bench/run.sh --full
+
+# inspect a single configuration:
+cmd/bench/bench -heap-mb 500 -goroutines 1000 \
+  -iterations 20 -warmup 3 \
+  -trace bench/results/single.trace \
+  -out bench/results/single.json
+```
+
+Results land in `bench/results/`:
+- `<tag>.json` — full iteration list + summary per configuration
+- `<tag>.time.txt` — raw `/usr/bin/time -v` output
+- `<tag>.trace` — runtime/trace capture for one iteration (open with `go tool trace`)
+- `summary.csv` — aggregated table across all configurations
+
+## Stage-level micro-benchmarks
+
+`go test -bench` benchmarks under `internal/memusage/` give the classic
+`ns/op`, `B/op`, `allocs/op` numbers per pipeline stage against a fixture
+heap captured once in-process:
+
+```bash
+go test -bench=. -benchmem -run=^$ ./internal/memusage/
+```
+
+| Benchmark | What it measures |
+| --- | --- |
+| `BenchmarkWriteHeapDump/heap=NMB` | Live `runtime/debug.WriteHeapDump` under N MiB retained heap |
+| `BenchmarkParse` | `heapdump.Parse` of a captured fixture (in-memory reader) |
+| `BenchmarkBuildGraph` | `snapshotgraph.Build` of a parsed snapshot |
+| `BenchmarkRecoverLabels` | `DefaultLabelRecoverer.Recover` (heap-native label decode) |
+| `BenchmarkReachableFromGoroutines` | Single-BFS union from all non-system goroutines |
+| `BenchmarkComputeEndToEnd` | Full `Computer.Compute` pipeline against the live runtime |
+
+These complement `cmd/bench`: the Go bench reports `ns/op` and `allocs/op`
+which `cmd/bench` does not; `cmd/bench` reports RSS, STW pause, and
+cross-process aggregates which the Go bench cannot.
+
+## Caveats
+
+- **Linux only** — `/proc/self/status` and `/usr/bin/time -v` are required.
+  `cmd/bench` will still run elsewhere but RSS columns will be zero.
+- **Inter-iteration GC removes drift but adds cost outside the window.** The
+  drift it removes is artifactual (stale objects from previous Computes).
+  Production callers paying for `/debug/memusage` infrequently see numbers
+  closer to the first measured iteration; back-to-back rapid-fire callers
+  pay the accumulation.
+- **`match-fraction=0.01`** still walks the graph from one goroutine's roots;
+  it does not measure "zero-match" since the runtime always has system
+  goroutines whose roots count for global overlap calculations.
+- **Heartbeat ≠ exact STW.** The heartbeat upper-bounds STW with scheduling
+  jitter on top; cross-check against the `.trace` file. Discrepancy of a few
+  hundred microseconds is normal.
+- **Process reader** (`/proc/self/mem`) is opened lazily on the first
+  `Compute` call; the warmup iterations cover that one-off cost.
+
+## Headline results
+
+To be filled in after `bench/run.sh --full` completes. Cite
+`bench/results/summary.csv` and selected `.trace` files in the thesis.

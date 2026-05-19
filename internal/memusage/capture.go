@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"runtime/trace"
 	"sync"
 
 	"bubblepprof/internal/addrspace"
@@ -45,14 +46,18 @@ func (RuntimeHeapDumpCapturer) CaptureHeapDump(ctx context.Context, gcBefore boo
 	}
 
 	if gcBefore {
+		region := trace.StartRegion(ctx, "memusage/gc_pre")
 		runtime.GC()
+		region.End()
 	}
 	if err := ctx.Err(); err != nil {
 		cleanup()
 		return "", nil, err
 	}
 
+	region := trace.StartRegion(ctx, "memusage/write_heap_dump")
 	debug.WriteHeapDump(f.Fd())
+	region.End()
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		cleanup()
@@ -66,12 +71,18 @@ func (RuntimeHeapDumpCapturer) CaptureHeapDump(ctx context.Context, gcBefore boo
 // pprof labels from a parsed snapshot. The default implementation is
 // DefaultLabelRecoverer, which delegates to internal/heaplabels.
 //
+// mem is an optional pre-built heap-memory source. When non-nil, the
+// recoverer delegates structural reads to it (used by the lazy parse
+// path so structural reads go through a heapdump.ContentResolver
+// instead of materialized object content bytes). Pass nil to let the
+// recoverer build an eager Memory from snap.Objects[i].Contents.
+//
 // extra is an optional addrspace.Reader (typically an
 // addrspace.ProcessReader on Linux/Darwin for /debug/memusage) consulted when
 // label string bytes are not present in heap object contents. nil
 // disables the fallback.
 type LabelRecoverer interface {
-	Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error)
+	Recover(snap *heapsnapshot.HeapSnapshot, mem *heaplabels.Memory, extra addrspace.Reader) (heaplabels.Result, error)
 }
 
 // DefaultLabelRecoverer recovers labels via internal/heaplabels using the
@@ -82,7 +93,7 @@ type LabelRecoverer interface {
 type DefaultLabelRecoverer struct{}
 
 // Recover implements LabelRecoverer.
-func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error) {
+func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, mem *heaplabels.Memory, extra addrspace.Reader) (heaplabels.Result, error) {
 	if snap == nil {
 		return heaplabels.Result{}, fmt.Errorf("memusage: nil heap snapshot")
 	}
@@ -91,7 +102,10 @@ func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra ad
 	if !ok {
 		return heaplabels.UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input)), nil
 	}
-	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{ExtraStringMemory: extra}), nil
+	return heaplabels.DecodeAll(snap, layout, heaplabels.Options{
+		ExtraStringMemory: extra,
+		HeapMemory:        mem,
+	}), nil
 }
 
 // Computer captures, parses, and analyzes a heap dump to answer one
@@ -142,8 +156,9 @@ func (c *Computer) processReader() (*addrspace.ProcessReader, string) {
 // Compute runs the full /debug/memusage pipeline:
 //
 //  1. Capture a heap dump to a temp file.
-//  2. Parse it with KeepObjectContents=true (required for heap-native
-//     label recovery).
+//  2. Parse it with ParseLazyContents so object content bytes are not
+//     retained in the Go heap; instead a ContentResolver fetches them
+//     from the dump file on demand during label recovery.
 //  3. Open an in-process address-space reader (Linux and Darwin; gated by
 //     Opts.DisableProcessMemoryReader) so the heap-label decoder can
 //     recover ordinary runtime/pprof string literals that live outside
@@ -172,7 +187,9 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		recoverer = DefaultLabelRecoverer{}
 	}
 
+	captureRegion := trace.StartRegion(ctx, "memusage/capture")
 	path, cleanup, err := capturer.CaptureHeapDump(ctx, c.Opts.GCBeforeHeapDump)
+	captureRegion.End()
 	if err != nil {
 		return nil, &CaptureFailedError{Cause: err}
 	}
@@ -188,7 +205,9 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	}
 	defer f.Close()
 
-	snap, err := heapdump.Parse(f, heapdump.Options{KeepObjectContents: true, Strict: true})
+	parseRegion := trace.StartRegion(ctx, "memusage/parse")
+	snap, resolver, err := heapdump.ParseLazyContents(f, f, heapdump.Options{Strict: true})
+	parseRegion.End()
 	if err != nil {
 		return nil, &ParseFailedError{Cause: err}
 	}
@@ -205,7 +224,14 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	if procReader != nil {
 		extra = procReader
 	}
-	result, err := recoverer.Recover(snap, extra)
+	// Back the structural read Memory with the lazy resolver so we do
+	// not retain ~the workload heap worth of object content bytes in
+	// the Go heap. The decoder fetches bytes from f on demand via
+	// io.ReaderAt; f stays open until Compute returns (defer below).
+	heapMem := heaplabels.NewMemoryFromReader(resolver)
+	labelsRegion := trace.StartRegion(ctx, "memusage/labels")
+	result, err := recoverer.Recover(snap, heapMem, extra)
+	labelsRegion.End()
 	if err != nil {
 		return nil, fmt.Errorf("recover heap-native labels: %w", err)
 	}
@@ -221,12 +247,32 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		return nil, err
 	}
 
+	// Drop per-object content bytes now that label recovery has consumed
+	// them. snapshotgraph.Build never reads Contents — only PointerAddrs,
+	// Addr, Size. Nilling out here lets the GC reclaim ~the workload's
+	// heap worth of bytes before Build allocates the graph.
+	for i := range snap.Objects {
+		snap.Objects[i].Contents = nil
+	}
+
+	buildRegion := trace.StartRegion(ctx, "memusage/build")
 	analysis, err := snapshotgraph.Build(snap, snapshotgraph.Options{})
+	buildRegion.End()
 	if err != nil {
 		return nil, fmt.Errorf("build object graph: %w", err)
 	}
 
-	return ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, c.Opts)
+	// Build no longer needs the per-object PointerAddrs slices. Drop them
+	// so ComputeFromAnalysis runs against the graph alone.
+	for i := range snap.Objects {
+		snap.Objects[i].PointerAddrs = nil
+	}
+	snap = nil
+
+	computeRegion := trace.StartRegion(ctx, "memusage/compute_from_analysis")
+	resp, err := ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, c.Opts)
+	computeRegion.End()
+	return resp, err
 }
 
 // openProcessReader tries to open the in-process address-space reader

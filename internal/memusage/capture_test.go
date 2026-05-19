@@ -46,7 +46,7 @@ type fakeRecoverer struct {
 	err    error
 }
 
-func (f fakeRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error) {
+func (f fakeRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, mem *heaplabels.Memory, extra addrspace.Reader) (heaplabels.Result, error) {
 	return f.result, f.err
 }
 
@@ -304,7 +304,7 @@ func TestRuntimeHeapDumpCapturer_Happy(t *testing.T) {
 
 func TestDefaultLabelRecoverer_NilSnap(t *testing.T) {
 	r := DefaultLabelRecoverer{}
-	_, err := r.Recover(nil, nil)
+	_, err := r.Recover(nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil snapshot, got nil")
 	}
@@ -319,7 +319,7 @@ func TestDefaultLabelRecoverer_SupportedLayout(t *testing.T) {
 		},
 	}
 	r := DefaultLabelRecoverer{}
-	res, err := r.Recover(snap, nil)
+	res, err := r.Recover(snap, nil, nil)
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestDefaultLabelRecoverer_UnsupportedLayout(t *testing.T) {
 		},
 	}
 	r := DefaultLabelRecoverer{}
-	res, err := r.Recover(snap, nil)
+	res, err := r.Recover(snap, nil, nil)
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -389,8 +389,8 @@ type cancelAfterParse struct {
 	delegate LabelRecoverer
 }
 
-func (c *cancelAfterParse) Recover(snap *heapsnapshot.HeapSnapshot, extra addrspace.Reader) (heaplabels.Result, error) {
-	res, err := c.delegate.Recover(snap, extra)
+func (c *cancelAfterParse) Recover(snap *heapsnapshot.HeapSnapshot, mem *heaplabels.Memory, extra addrspace.Reader) (heaplabels.Result, error) {
+	res, err := c.delegate.Recover(snap, mem, extra)
 	c.cancel()
 	return res, err
 }

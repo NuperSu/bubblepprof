@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"sort"
 
+	"bubblepprof/internal/addrspace"
 	"bubblepprof/internal/heapsnapshot"
 )
 
@@ -12,8 +13,16 @@ import (
 // addrspace.NamedReader). Structural label reads (runtime.g, labelMap,
 // slice headers, string headers) use a Memory directly; string body
 // reads may use a composite that falls through to ExtraStringMemory.
+//
+// Memory has two source modes. The eager mode (NewMemory) indexes
+// snap.Objects[i].Contents directly; the lazy mode (NewMemoryFromReader)
+// delegates every address-keyed read to an external addrspace.Reader —
+// in practice, the *heapdump.ContentResolver produced by
+// heapdump.ParseLazyContents, which fetches object bytes from the dump
+// file on demand instead of holding them all in the Go heap.
 type Memory struct {
 	ranges []Range
+	lazy   addrspace.Reader
 }
 
 // Range is a contiguous mapping of bytes at virtual addresses
@@ -57,12 +66,26 @@ func NewMemory(snap *heapsnapshot.HeapSnapshot) *Memory {
 	return m
 }
 
+// NewMemoryFromReader builds a Memory whose address-keyed reads are
+// satisfied by r. This is the lazy path: r is expected to be a
+// *heapdump.ContentResolver that fetches heap object bytes from the
+// dump file on demand. Compared with NewMemory, this avoids retaining
+// every object's content bytes in the Go heap.
+//
+// A nil reader produces a Memory whose Read always returns ok=false.
+func NewMemoryFromReader(r addrspace.Reader) *Memory {
+	return &Memory{lazy: r}
+}
+
 // Read returns the byte slice at [addr, addr+size). It returns ok=true
 // with an empty slice on size==0, and ok=false on addr==0 (size>0),
 // overflow, or a range that crosses a heap object boundary.
 func (m *Memory) Read(addr uint64, size uint64) ([]byte, bool) {
 	if m == nil {
 		return nil, false
+	}
+	if m.lazy != nil {
+		return m.lazy.ReadAtAddr(addr, size)
 	}
 	if size == 0 {
 		return []byte{}, true

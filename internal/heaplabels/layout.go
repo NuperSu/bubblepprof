@@ -31,6 +31,13 @@ type Options struct {
 	// string literals (which live in executable read-only data) are
 	// recovered. Nil disables the fallback.
 	ExtraStringMemory addrspace.Reader
+
+	// HeapMemory, when non-nil, replaces the Memory that DecodeAll would
+	// otherwise build internally from snap.Objects. Use this with the
+	// lazy parse path (heapdump.ParseLazyContents) so structural reads
+	// hit a ContentResolver-backed Memory instead of materialized object
+	// content bytes.
+	HeapMemory *Memory
 }
 
 // LookupInputFromSnapshot extracts the runtime-layout lookup key from a
