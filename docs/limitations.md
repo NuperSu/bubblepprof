@@ -53,7 +53,7 @@ The endpoint captures a full heap dump, which may contain any data currently in 
 
 The offline ELF reader (`internal/addrspace.ELFReader`) reads string bytes from executable load segments. It works reliably only for **non-PIE / non-ASLR** binaries: PIE binaries are loaded at a randomized base address at runtime, so static ELF `Vaddr` values do not match the addresses recorded in a heap dump captured from a running process.
 
-The in-process `/debug/memusage` endpoint is not affected by this limitation because it uses the process memory reader, which reads live virtual addresses directly.
+The normal Linux, macOS, and Windows in-process readers are not affected by this limitation because they correct to live runtime addresses. The FreeBSD in-process reader is also unaffected when procfs is mounted (`/proc/self/mem` reads live virtual memory directly). However, when procfs is unavailable on FreeBSD, the reader falls back to the on-disk ELF — the same static-`Vaddr` path as `addrspace.ELFReader` — and is then subject to the same PIE restriction: it works correctly only for non-PIE binaries.
 
 ## System goroutine classification
 

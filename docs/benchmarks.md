@@ -65,14 +65,14 @@ the cost of the per-query BFS from the cost of the structural graph build.
 Requires Linux + `/usr/bin/time` (GNU time) + `python3`.
 
 ```bash
-# quick: 2 configs, validates end-to-end
+# quick: 4 configs (2 heap × 2 goroutines), validates end-to-end
 bash bench/run.sh --quick
 
-# full: thesis sweep (~40 configs × 23 iterations, hours)
+# full: thesis sweep (120 configs × 20 iterations, several hours)
 bash bench/run.sh --full
 
 # inspect a single configuration:
-cmd/bench/bench -heap-mb 500 -goroutines 1000 \
+go run ./cmd/bench -heap-mb 500 -goroutines 1000 \
   -iterations 20 -warmup 3 \
   -trace bench/results/single.trace \
   -out bench/results/single.json
@@ -107,6 +107,13 @@ These complement `cmd/bench`: the Go bench reports `ns/op` and `allocs/op`
 which `cmd/bench` does not; `cmd/bench` reports RSS, STW pause, and
 cross-process aggregates which the Go bench cannot.
 
+Note: `BenchmarkParse` and `BenchmarkRecoverLabels` use the eager
+`KeepObjectContents=true` parse path, which retains all object bytes in memory.
+The production `Computer.Compute` path uses `ParseLazyContents`, which reads
+object bytes on demand without retaining them. Both paths produce identical
+label results (verified by the lazy-parity test), but the stage benchmarks
+measure slightly higher peak allocation than the production pipeline.
+
 ## Caveats
 
 - **Linux only** — `/proc/self/status` and `/usr/bin/time -v` are required.
@@ -116,14 +123,23 @@ cross-process aggregates which the Go bench cannot.
   Production callers paying for `/debug/memusage` infrequently see numbers
   closer to the first measured iteration; back-to-back rapid-fire callers
   pay the accumulation.
-- **`match-fraction=0.01`** still walks the graph from one goroutine's roots;
-  it does not measure "zero-match" since the runtime always has system
-  goroutines whose roots count for global overlap calculations.
+- **`match-fraction=0.01`** still walks the graph from at least one matched
+  goroutine's roots; it does not measure zero-match because `0.01 × N` rounds
+  to at least one worker for every goroutine count in the sweep. Use
+  `match-fraction=0` explicitly to benchmark the zero-match path.
+- **`cmd/bench` defaults to `gc-pre=false`**, while the public `MemUsageHandler`
+  defaults to GC before the dump. The full sweep includes both modes; the
+  `gc_pre=false` rows isolate the pipeline cost without the pre-dump GC pause,
+  and `gc_pre=true` rows reflect the production default.
 - **Heartbeat ≠ exact STW.** The heartbeat upper-bounds STW with scheduling
   jitter on top; cross-check against the `.trace` file. Discrepancy of a few
   hundred microseconds is normal.
 - **Process reader** (`/proc/self/mem`) is opened lazily on the first
   `Compute` call; the warmup iterations cover that one-off cost.
+- **Trace iteration excluded from summary.** When `-trace` is set, the traced
+  iteration is stored in the JSON `iterations` array with `under_trace: true`
+  but is excluded from the `summary` statistics. Trace overhead would otherwise
+  inflate mean/p50/p95/p99.
 
 ## Headline results
 

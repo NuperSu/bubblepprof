@@ -61,7 +61,7 @@ type MemUsageOptions struct {
 // system/background goroutines are excluded from label matching.
 //
 // On each request the handler stops all goroutines, captures a full heap
-// dump, parses it with object contents retained, recovers pprof labels
+// dump, parses it lazily without retaining object contents, recovers pprof labels
 // directly from heap-dump runtime state, builds a process-wide reachability
 // graph, and returns the heap memory reachable from goroutines whose
 // recovered labels contain every requested key/value pair.

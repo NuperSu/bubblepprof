@@ -5,8 +5,8 @@
 # aggregates per-config JSONs into bench/results/summary.csv.
 #
 # Modes:
-#   --quick  small sweep (2 configs × 5 iterations) for end-to-end validation.
-#   --full   full sweep (~40 configs × 23 iterations) for the thesis run.
+#   --quick  small sweep (4 configs × 5 iterations) for end-to-end validation.
+#   --full   full sweep (120 configs × 20 iterations) for the thesis run.
 #
 # Requirements: Linux + /usr/bin/time (GNU time) + python3.
 

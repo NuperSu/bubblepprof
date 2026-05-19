@@ -62,7 +62,7 @@ def row_for_json(path: Path) -> dict[str, str]:
         "heap_mb": str(cfg.get("heap_mb", "")),
         "goroutines": str(cfg.get("goroutines", "")),
         "match_fraction": str(cfg.get("match_fraction", "")),
-        "gc_pre": str(cfg.get("gc_pre", "")),
+        "gc_pre": str(cfg.get("gc_pre", "")).lower(),
         "iterations": str(cfg.get("iterations", "")),
         "warmup": str(cfg.get("warmup", "")),
         "go_version": str(data.get("go", {}).get("version", "")),
