@@ -253,3 +253,7 @@ go test ./...
 # Vet
 go vet ./...
 ```
+
+## License
+
+BSD 3-Clause. See [LICENSE](LICENSE).
