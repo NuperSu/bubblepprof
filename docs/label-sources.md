@@ -141,9 +141,10 @@ recovery reads string bytes through a composite address-space reader
 
 1. retained heap dump object contents (where the bytes are heap-owned),
 2. the current process's memory mappings (for the in-process endpoint:
-   `addrspace.ProcessReader` reads via `/proc/self/mem` on Linux/FreeBSD,
-   ASLR-corrected Mach-O segments on macOS, or ASLR-corrected PE sections
-   on Windows/Wine),
+   `addrspace.ProcessReader` reads via `/proc/self/mem` on Linux; on
+   FreeBSD it tries `/proc/self/mem` first and falls back to the on-disk ELF
+   (non-PIE only) when procfs is absent; ASLR-corrected Mach-O segments on
+   macOS; ASLR-corrected PE sections on Windows/Wine),
 3. the executable's load segments (`addrspace.ELFReader` — an internal
    library reader; `/debug/memusage` does not expose this as a
    user-facing option).
