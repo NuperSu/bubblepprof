@@ -1,7 +1,5 @@
 # Local/project-generated files
-/.idea/copilot.data.migration.agent.xml
-/.idea/copilot.data.migration.ask.xml
-/.idea/copilot.data.migration.edit.xml
+/.idea
 /AGENTS.md
 /CLAUDE.md
 /bubblepprof
@@ -9,6 +7,5 @@
 /coverage.out
 /order_pipeline
 /tracked-files.zip
-/zip_tracked.py
 /labeloffsetprobe
-
+/bench/results
