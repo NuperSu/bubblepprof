@@ -37,6 +37,12 @@ type MemUsageOptions struct {
 	// object contents. When true, label decoding sees heap object
 	// contents only, and ordinary pprof.Labels("job","42") may fail
 	// with string_missing. Default false (reader enabled).
+	//
+	// FreeBSD caveat: the reader prefers procfs (/proc/self/mem) and
+	// falls back to the on-disk ELF. The ELF fallback is only correct
+	// for non-PIE binaries. On a FreeBSD host with procfs unmounted
+	// AND a PIE binary, the reader will still open successfully but
+	// literal-string labels surface as string_missing.
 	DisableProcessMemoryReader bool
 
 	// MaxRequestBodyBytes caps the request body. Zero falls back to the
@@ -85,9 +91,13 @@ type MemUsageOptions struct {
 // the endpoint returns HTTP 422 with code "unsupported_runtime". When
 // pprof label strings reside outside heap object contents (common for
 // string literals), the in-process reader is consulted on Linux, macOS,
-// FreeBSD, and Windows; on other platforms or when disabled, the
-// endpoint may return 422 with code "string_missing". Other structural
-// label recovery failures return 422 with code "label_recovery_failed".
+// FreeBSD, and Windows; on FreeBSD the reader requires procfs mounted
+// at /proc OR a non-PIE binary (the ELF fallback assumes static
+// PT_LOAD Vaddrs). On other platforms — or on a FreeBSD host where
+// neither FreeBSD condition holds, or when DisableProcessMemoryReader
+// is set — the endpoint may return 422 with code "string_missing".
+// Other structural label recovery failures return 422 with code
+// "label_recovery_failed".
 func MemUsageHandler() http.Handler {
 	return MemUsageHandlerWithOptions(MemUsageOptions{})
 }

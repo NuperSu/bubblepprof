@@ -10,9 +10,12 @@
 //	*RangeReader     — backed by an in-memory slice of byte ranges,
 //	                   used to expose heap dump object contents.
 //	*ProcessReader   — reads the running process address space:
-//	                     Linux / FreeBSD: read-only mappings via procfs
-//	                       (/proc/self/mem); FreeBSD falls back to ELF
-//	                       rodata when procfs is not mounted.
+//	                     Linux: /proc/self/mem (read-only mappings only).
+//	                     FreeBSD: /proc/self/mem when procfs is mounted;
+//	                       otherwise the on-disk ELF executable, which is
+//	                       correct only for non-PIE binaries (PIE shifts
+//	                       the runtime load bias and the ELF fallback does
+//	                       not correct for it).
 //	                     macOS: ASLR-corrected Mach-O executable sections.
 //	                     Windows: ASLR-corrected PE executable sections.
 //	                   Used by /debug/memusage.

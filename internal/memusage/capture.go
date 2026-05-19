@@ -112,10 +112,20 @@ func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, mem *hea
 // /debug/memusage request. It is a value with default-zero fields wired
 // to production implementations.
 //
-// The process memory reader (/proc/self/mem on Linux and FreeBSD, Mach-O on Darwin, PE on Windows) is opened lazily on
-// the first Compute call and reused across subsequent requests. Call Close
-// when the Computer is no longer needed to release the underlying file
-// descriptor. Close must not be called concurrently with Compute.
+// The process memory reader is opened lazily on the first Compute call
+// and reused across subsequent requests. Sources by platform:
+//
+//   - Linux: /proc/self/mem.
+//   - FreeBSD: /proc/self/mem when procfs is mounted; otherwise the on-disk
+//     ELF executable (correct only for non-PIE binaries).
+//   - Darwin: Mach-O segments of the running executable with ASLR slide
+//     correction.
+//   - Windows: PE sections of the running executable with ASLR slide
+//     correction.
+//
+// Call Close when the Computer is no longer needed to release the
+// underlying file descriptor. Close must not be called concurrently with
+// Compute.
 type Computer struct {
 	Capturer  HeapDumpCapturer
 	Recoverer LabelRecoverer
@@ -159,10 +169,12 @@ func (c *Computer) processReader() (*addrspace.ProcessReader, string) {
 //  2. Parse it with ParseLazyContents so object content bytes are not
 //     retained in the Go heap; instead a ContentResolver fetches them
 //     from the dump file on demand during label recovery.
-//  3. Open an in-process address-space reader (Linux and Darwin; gated by
-//     Opts.DisableProcessMemoryReader) so the heap-label decoder can
-//     recover ordinary runtime/pprof string literals that live outside
-//     heap object contents.
+//  3. Open an in-process address-space reader (Linux, macOS, FreeBSD,
+//     Windows; gated by Opts.DisableProcessMemoryReader) so the heap-label
+//     decoder can recover ordinary runtime/pprof string literals that live
+//     outside heap object contents. On FreeBSD the reader requires procfs
+//     mounted at /proc or a non-PIE binary; if neither condition holds,
+//     literal labels surface as string_missing.
 //  4. Resolve the runtime layout via runtimelayout.Lookup and recover
 //     pprof labels via the configured LabelRecoverer.
 //  5. If the runtime layout is unsupported, return UnsupportedRuntimeError

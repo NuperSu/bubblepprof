@@ -112,11 +112,14 @@ func TestMemUsageHandler_RuntimePprofLabels(t *testing.T) {
 // endpoint should return 200; the stricter end-to-end assertions live in
 // TestMemUsageHandler_Phase3_LiteralLabelsRecovered.
 //
-// A 422 string_missing is a hard failure: on Linux and Darwin the reader is
-// implemented; on other platforms failing here is the correct signal that
-// literal string recovery is not yet supported. A 422 unsupported_runtime
-// is also a hard failure. The response must NEVER silently fall back to
-// labels.json or goroutine.pprof.
+// A 422 string_missing is a hard failure on Linux, macOS, Windows, and on
+// FreeBSD when procfs is mounted at /proc or the binary is non-PIE — those
+// are the configurations where the in-process reader is implemented.
+// On FreeBSD-PIE without procfs (and on platforms where the reader is not
+// implemented), failing here is the correct signal that literal string
+// recovery is not yet supported. A 422 unsupported_runtime is also a hard
+// failure. The response must NEVER silently fall back to labels.json or
+// goroutine.pprof.
 func TestMemUsageHandler_RuntimePprofLiteralLabels(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live heap-dump integration test in short mode")

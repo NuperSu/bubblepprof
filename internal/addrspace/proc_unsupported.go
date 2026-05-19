@@ -7,22 +7,27 @@ package addrspace
 // ErrUnsupported.
 type ProcessReader struct{}
 
-// OpenSelfProcessReader returns ErrUnsupported on non-Linux builds.
+// OpenSelfProcessReader returns ErrUnsupported on platforms without an
+// implementation (i.e. anything other than Linux, macOS, Windows, FreeBSD).
 func OpenSelfProcessReader() (*ProcessReader, error) {
 	return nil, ErrUnsupported
 }
 
-// Close is a no-op on non-Linux builds.
+// Close is a no-op on platforms without a process-memory implementation.
 func (r *ProcessReader) Close() error { return nil }
 
 // Name implements NamedReader.
 func (r *ProcessReader) Name() string { return "process" }
 
-// Mappings always returns nil on non-Linux builds.
+// Source returns a fixed "unsupported" sentinel on platforms without an
+// implementation. Used for diagnostics (e.g. by cmd/labeloffsetprobe).
+func (r *ProcessReader) Source() string { return "unsupported" }
+
+// Mappings always returns nil on platforms without an implementation.
 func (r *ProcessReader) Mappings() []Mapping { return nil }
 
 // ReadAtAddr always returns ok=false (with the size==0 exception) on
-// non-Linux builds because there is no implementation.
+// platforms without an implementation.
 func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 	if size == 0 {
 		return []byte{}, true

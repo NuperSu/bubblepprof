@@ -206,8 +206,9 @@ func processMemoryReaderSupported() bool {
 // and asserts reachable_bytes >= minBytes.
 //
 // A 422 unsupported_runtime is always a hard failure. A 422 string_missing
-// is a hard failure on platforms with a verified process memory reader (Linux,
-// macOS, FreeBSD, Windows); on other platforms it signals a skip.
+// is a hard failure on platforms with a verified process memory reader
+// (Linux, macOS, Windows, and FreeBSD with procfs mounted or a non-PIE
+// binary); on other platforms it signals a skip.
 func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64) {
 	t.Helper()
 	body := bytes.NewReader([]byte(`{"labels":{"case":"` + label + `"}}`))

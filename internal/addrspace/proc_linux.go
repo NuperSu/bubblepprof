@@ -49,6 +49,10 @@ func (r *ProcessReader) Close() error {
 // Name implements NamedReader.
 func (r *ProcessReader) Name() string { return "process" }
 
+// Source returns a human-readable description of which backing source the
+// reader is using. Used for diagnostics (e.g. by cmd/labeloffsetprobe).
+func (r *ProcessReader) Source() string { return "/proc/self/mem" }
+
 // Mappings returns a copy of the readable mappings the reader is aware
 // of. Useful in diagnostics; the slice is safe to mutate.
 func (r *ProcessReader) Mappings() []Mapping {

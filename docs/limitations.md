@@ -14,9 +14,10 @@ Ordinary pprof label strings created with `pprof.Labels("key", "value")` may hav
 
 `bubblepprof` recovers those bytes using an in-process reader:
 
-- **Linux / FreeBSD**: `/proc/self/mem` (FreeBSD requires procfs to be mounted; falls back to ELF rodata when absent)
-- **macOS**: current executable Mach-O segments with ASLR slide correction
-- **Windows** (including Wine): current executable PE sections with ASLR slide correction
+- **Linux**: `/proc/self/mem`.
+- **FreeBSD**: `/proc/self/mem` when procfs is mounted. When procfs is absent (the FreeBSD default), the reader falls back to the on-disk ELF executable. That fallback reads PT_LOAD segments at their static `Vaddr` values, so it is **only correct for non-PIE binaries** — a PIE binary would have a randomized runtime load bias that the ELF fallback does not correct. In practice this means: FreeBSD support requires *either* procfs mounted at `/proc` *or* a non-PIE build; otherwise literal-string labels return `string_missing`.
+- **macOS**: current executable Mach-O segments with ASLR slide correction.
+- **Windows** (including Wine): current executable PE sections with ASLR slide correction.
 
 When the reader is unavailable or disabled (`DisableProcessMemoryReader=true`), literal-allocated label strings return `string_missing`.
 

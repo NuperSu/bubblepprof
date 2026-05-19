@@ -24,6 +24,15 @@ It captures a heap dump, recovers pprof labels from goroutine runtime state, and
 | Requires standard pprof labels? | no | yes (without labels the endpoint always returns 0 matches) |
 | Cost per query | low | high (stop-the-world) |
 
+## Install
+
+```bash
+go get github.com/NuperSu/bubblepprof@latest
+go mod tidy
+```
+
+The module path is `github.com/NuperSu/bubblepprof`; the public API lives in `github.com/NuperSu/bubblepprof/pkg/bubblepprof`. There is nothing to install beyond `go get` — no codegen, no cgo, no extra runtime dependency.
+
 ## Registering the endpoint
 
 ```go
@@ -228,7 +237,7 @@ Latency is proportional to live heap size. Concurrent callers receive `429 Too M
 See [`docs/limitations.md`](docs/limitations.md) for a complete list. Key points:
 
 - Heap-native label recovery is verified for **go1.24.\*–go1.26.\*** on Linux, macOS, Windows, and FreeBSD (amd64, arm64, arm, 386). Experimental tip (go1.27-devel) support is tested in CI but not required. Other Go versions return `unsupported_runtime`.
-- Ordinary string literal labels are recovered via the in-process reader on Linux, macOS, FreeBSD, and Windows. On other platforms they may return `string_missing`.
+- Ordinary string literal labels are recovered via the in-process reader on Linux, macOS, FreeBSD, and Windows. On FreeBSD specifically, recovery requires *either* procfs mounted at `/proc` (the reader uses `/proc/self/mem`) *or* a non-PIE binary (the reader falls back to the on-disk ELF; PIE would shift the runtime addresses and break that fallback). On other platforms — or on FreeBSD when neither condition holds — literal labels return `string_missing`.
 - Sizes are **shallow** (the object itself, not transitive) and counts are **BFS-reachable** from the matched goroutine roots, not total process heap.
 - Global and system overlap is reported separately; it is not subtracted automatically.
 

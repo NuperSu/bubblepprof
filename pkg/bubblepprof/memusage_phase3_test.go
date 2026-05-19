@@ -27,8 +27,9 @@ import (
 //
 // The only skip is -short mode. A 422 string_missing is always a hard
 // failure: the process memory reader is implemented on Linux, macOS,
-// FreeBSD, and Windows, so literal label recovery must succeed on all of
-// those platforms.
+// Windows, and FreeBSD (the latter requires procfs mounted at /proc OR a
+// non-PIE binary; CI exercises a configuration that satisfies this), so
+// literal label recovery must succeed on all of those platforms.
 //
 // A 422 unsupported_runtime is also a hard failure: the Go version must be
 // in the verified layout table for this test to run.

@@ -84,6 +84,28 @@ func (r *ProcessReader) Close() error {
 // Name implements NamedReader.
 func (r *ProcessReader) Name() string { return "process" }
 
+// Source returns a human-readable description of which backing source the
+// reader is using on this FreeBSD process. It is "/proc/self/mem" when
+// procfs is mounted and the reader is using it, or "elf:<path>" when the
+// on-disk ELF fallback is in use (correct only for non-PIE binaries).
+// Used for diagnostics (e.g. by cmd/labeloffsetprobe) to make the
+// FreeBSD configuration explicit.
+func (r *ProcessReader) Source() string {
+	if r == nil {
+		return "<closed>"
+	}
+	if r.mem != nil {
+		return "/proc/self/mem"
+	}
+	if r.elf != nil {
+		if r.path == "" {
+			return "elf:<unknown>"
+		}
+		return "elf:" + r.path
+	}
+	return "<closed>"
+}
+
 // Mappings returns a copy of the readable mappings the reader is aware of
 // when using procfs, or nil when using the on-disk ELF source. Safe to mutate.
 func (r *ProcessReader) Mappings() []Mapping {

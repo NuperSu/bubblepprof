@@ -152,6 +152,15 @@ func (r *ProcessReader) Close() error {
 // Name implements NamedReader.
 func (r *ProcessReader) Name() string { return "process" }
 
+// Source returns a human-readable description of which backing source the
+// reader is using. Used for diagnostics (e.g. by cmd/labeloffsetprobe).
+func (r *ProcessReader) Source() string {
+	if r == nil || r.path == "" {
+		return "mach-o:<unknown>"
+	}
+	return "mach-o:" + r.path
+}
+
 // Mappings returns nil on Darwin; segment eligibility is enforced
 // during OpenSelfProcessReader, not per-read.
 func (r *ProcessReader) Mappings() []Mapping {
