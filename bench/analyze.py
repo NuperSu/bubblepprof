@@ -116,7 +116,7 @@ def plot_wall_vs_heap(df: pd.DataFrame) -> None:
     for g, grp in sub.groupby("goroutines"):
         ax.errorbar(
             grp["heap_mb"], grp["wall_ms_mean"], yerr=grp["wall_ms_stddev"],
-            marker="o", capsize=3, label=f"{g} goroutines",
+            marker="o", markersize=3, capsize=3, label=f"{g} goroutines",
         )
     ax.set_xlabel("workload heap (MiB)")
     ax.set_ylabel("Compute wall time (ms, mean ± stddev)")
@@ -132,7 +132,7 @@ def plot_wall_vs_goroutines(df: pd.DataFrame) -> None:
     for h, grp in sub.groupby("heap_mb"):
         ax.errorbar(
             grp["goroutines"], grp["wall_ms_mean"], yerr=grp["wall_ms_stddev"],
-            marker="o", capsize=3, label=f"{h} MiB heap",
+            marker="o", markersize=3, capsize=3, label=f"{h} MiB heap",
         )
     ax.set_xlabel("labeled goroutines")
     ax.set_ylabel("Compute wall time (ms, mean ± stddev)")
@@ -145,27 +145,17 @@ def plot_wall_vs_goroutines(df: pd.DataFrame) -> None:
 
 def plot_match_effect(df: pd.DataFrame) -> None:
     sub = df[df["goroutines"] == 1000].sort_values(["heap_mb", "match_fraction"])
-    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.4))
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
     for h, grp in sub.groupby("heap_mb"):
-        axes[0].errorbar(
+        ax.errorbar(
             grp["match_fraction"], grp["wall_ms_mean"], yerr=grp["wall_ms_stddev"],
-            marker="o", capsize=3, label=f"{h} MiB",
+            marker="o", markersize=3, capsize=3, label=f"{h} MiB heap",
         )
-        axes[1].plot(
-            grp["match_fraction"], grp["reachable_mb_mean"],
-            marker="o", label=f"{h} MiB",
-        )
-    axes[0].set_xlabel("match_fraction")
-    axes[0].set_ylabel("wall time (ms, mean ± stddev)")
-    axes[0].set_title("Wall time is independent of match_fraction")
-    axes[0].grid(True, alpha=0.3)
-    axes[0].legend(fontsize=8)
-    axes[1].set_xlabel("match_fraction")
-    axes[1].set_ylabel("reachable bytes (MiB)")
-    axes[1].set_title("Reported reachable bytes are linear in match_fraction")
-    axes[1].grid(True, alpha=0.3)
-    axes[1].legend(fontsize=8)
-    fig.suptitle("Effect of label match_fraction on Compute (g=1000)")
+    ax.set_xlabel("match_fraction")
+    ax.set_ylabel("wall time (ms, mean ± stddev)")
+    ax.set_title("Wall time is independent of match_fraction (g=1000)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=9)
     savefig("match_effect.png")
 
 
@@ -359,13 +349,13 @@ def write_markdown(df: pd.DataFrame, iters: pd.DataFrame, per_g: pd.DataFrame) -
     out.append("Mean wall time (ms) by match_fraction:\n\n")
     out.append("```\n" + pivot.to_string(float_format=lambda v: f"{v:.1f}") + "\n```\n")
     out.append(
-        "Wall time is essentially flat across `match_fraction` ∈ {0.01, 0.5, 1.0}: "
-        "parsing the dump and building the structural graph dominate, and the "
-        "per-query BFS that does depend on matched-goroutine count is cheap by "
-        "comparison. The reported `reachable_bytes`, by contrast, scales "
-        "linearly with `match_fraction` (see `plots/match_effect.png`), which is "
-        "the expected behaviour for the workload (each matched goroutine retains "
-        "an equal share of the heap).\n"
+        "Wall time is essentially flat across `match_fraction` ∈ {0.01, 0.5, 1.0} "
+        "(see `plots/match_effect.png`). Parsing the dump and building the "
+        "structural graph dominate; the per-query BFS that does depend on the "
+        "matched-goroutine count is cheap by comparison. This is the empirical "
+        "justification for the Phase 2.5 split — paying for graph construction "
+        "once and intersecting against label-selected roots is free relative to "
+        "the parse/build cost we already absorb.\n"
     )
 
     out.append("\n## 5. Peak RSS overhead\n")
