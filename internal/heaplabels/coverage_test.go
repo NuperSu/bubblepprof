@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
 )
 
 func TestMemoryNilReceiver(t *testing.T) {

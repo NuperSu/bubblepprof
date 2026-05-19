@@ -3,9 +3,9 @@ package memusage
 import (
 	"fmt"
 
-	"bubblepprof/internal/heaplabels"
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/snapshotgraph"
+	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
 // LabelsMatch reports whether the goroutine's recovered labels (have)

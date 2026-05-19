@@ -11,12 +11,12 @@ import (
 	"runtime/trace"
 	"sync"
 
-	"bubblepprof/internal/addrspace"
-	"bubblepprof/internal/heapdump"
-	"bubblepprof/internal/heaplabels"
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/runtimelayout"
-	"bubblepprof/internal/snapshotgraph"
+	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/heapdump"
+	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
 // HeapDumpCapturer captures the calling process's heap into a file that

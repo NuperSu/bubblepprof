@@ -14,10 +14,10 @@ import (
 	"sync"
 	"testing"
 
-	"bubblepprof/internal/capture"
-	"bubblepprof/internal/heapdump"
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/snapshotgraph"
+	"github.com/NuperSu/bubblepprof/internal/capture"
+	"github.com/NuperSu/bubblepprof/internal/heapdump"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
 // benchHeapMB is the resident heap target used by the fixture-based

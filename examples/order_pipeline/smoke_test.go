@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"bubblepprof/pkg/bubblepprof"
+	"github.com/NuperSu/bubblepprof/pkg/bubblepprof"
 )
 
 // TestOrderPipelineSmoke proves that a labeled goroutine created the same way

@@ -3,7 +3,7 @@ package bubblepprof
 import (
 	"net/http"
 
-	"bubblepprof/internal/memusage"
+	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
 // MemUsagePath is the canonical path under which MemUsageHandler is

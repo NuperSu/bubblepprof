@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"bubblepprof/internal/memusage"
+	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
 func TestMemUsageHandler_RejectsNonPost(t *testing.T) {

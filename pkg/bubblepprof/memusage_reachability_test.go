@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"bubblepprof/internal/memusage"
+	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
 // reachabilityPayload is the retained heap allocation in each test worker.

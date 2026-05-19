@@ -8,10 +8,10 @@ import (
 	"testing"
 	"unsafe"
 
-	"bubblepprof/internal/capture"
-	"bubblepprof/internal/heapdump"
-	"bubblepprof/internal/heaplabels"
-	"bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/capture"
+	"github.com/NuperSu/bubblepprof/internal/heapdump"
+	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
 )
 
 // runtimeIsClaimedSupported reports whether the current runtime's (version,

@@ -65,7 +65,7 @@ import (
 	"syscall"
 	"time"
 
-	"bubblepprof/pkg/bubblepprof"
+	"github.com/NuperSu/bubblepprof/pkg/bubblepprof"
 	"net/http"
 )
 

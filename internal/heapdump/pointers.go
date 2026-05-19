@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // extractPointers decodes pointer values out of a contiguous memory range

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 func TestParseHeaderRejectsUnknown(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // reader is a primitive stream reader for the heap dump binary format.

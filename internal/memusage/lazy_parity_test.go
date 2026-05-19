@@ -6,10 +6,10 @@ import (
 	"sort"
 	"testing"
 
-	"bubblepprof/internal/heapdump"
-	"bubblepprof/internal/heaplabels"
-	"bubblepprof/internal/runtimelayout"
-	"bubblepprof/internal/snapshotgraph"
+	"github.com/NuperSu/bubblepprof/internal/heapdump"
+	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
 // TestLazyContentsParityWithEager is the bit-for-bit gate for the

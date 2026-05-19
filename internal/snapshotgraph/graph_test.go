@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 func makeSnap(objs []heapsnapshot.Object) *heapsnapshot.HeapSnapshot {

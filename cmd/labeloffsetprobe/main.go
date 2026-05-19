@@ -8,11 +8,11 @@ import (
 	"runtime/pprof"
 	"time"
 
-	"bubblepprof/internal/addrspace"
-	"bubblepprof/internal/capture"
-	"bubblepprof/internal/heapdump"
-	"bubblepprof/internal/heaplabels"
-	"bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/capture"
+	"github.com/NuperSu/bubblepprof/internal/heapdump"
+	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
 )
 
 func main() {

@@ -8,10 +8,10 @@ import (
 	"slices"
 	"testing"
 
-	"bubblepprof/internal/capture"
-	"bubblepprof/internal/heapdump"
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/capture"
+	"github.com/NuperSu/bubblepprof/internal/heapdump"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
 )
 
 func TestRuntimeHeapDumpDynamicPprofLabels(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"sort"
 
-	"bubblepprof/internal/addrspace"
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // Memory exposes a heap snapshot's per-object contents as an

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // Helpers used by the synthetic record tests. They mirror the runtime

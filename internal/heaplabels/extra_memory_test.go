@@ -3,8 +3,8 @@ package heaplabels
 import (
 	"testing"
 
-	"bubblepprof/internal/addrspace"
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // extraReader is a minimal addrspace.Reader backed by a single fixed

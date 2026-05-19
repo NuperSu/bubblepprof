@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // Options controls Parse behavior.

@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
 )
 
 func TestDecodeLabelMap(t *testing.T) {

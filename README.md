@@ -27,7 +27,7 @@ It captures a heap dump, recovers pprof labels from goroutine runtime state, and
 ## Registering the endpoint
 
 ```go
-import "bubblepprof/pkg/bubblepprof"
+import "github.com/NuperSu/bubblepprof/pkg/bubblepprof"
 
 mux := http.NewServeMux()
 bubblepprof.RegisterMemUsage(mux) // mounts at /debug/memusage

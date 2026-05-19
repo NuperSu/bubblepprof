@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"bubblepprof/internal/heaplabels"
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/snapshotgraph"
+	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
 func TestLabelsMatch(t *testing.T) {

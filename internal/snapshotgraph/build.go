@@ -5,7 +5,7 @@ import (
 	"math"
 	"sort"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // Build converts a parsed HeapSnapshot into an Analysis. It resolves

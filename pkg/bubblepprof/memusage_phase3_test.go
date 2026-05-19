@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"bubblepprof/internal/memusage"
+	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
 // TestMemUsageHandler_Phase3_LiteralLabelsRecovered exercises the

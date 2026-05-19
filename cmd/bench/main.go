@@ -39,7 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"bubblepprof/internal/memusage"
+	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
 type config struct {

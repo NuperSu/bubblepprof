@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"bubblepprof/internal/addrspace"
-	"bubblepprof/internal/heaplabels"
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // fakeCapturer writes a single byte to a temp file so subsequent

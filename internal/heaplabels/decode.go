@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 
-	"bubblepprof/internal/addrspace"
-	"bubblepprof/internal/heapsnapshot"
-	"bubblepprof/internal/runtimelayout"
+	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
 )
 
 type decodeError struct {

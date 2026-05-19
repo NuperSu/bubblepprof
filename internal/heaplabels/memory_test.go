@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"bubblepprof/internal/heapsnapshot"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 func TestMemoryRead(t *testing.T) {
