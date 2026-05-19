@@ -22,6 +22,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"time"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
@@ -130,20 +131,36 @@ func realMain() int {
 		fmt.Fprintf(os.Stderr, "runtimelayout.Manual: %v\n", err)
 		return 1
 	}
+	verPrefix := tableVersionPrefix(input.GoVersion)
+	defaultsHelper, widthLabel := tableDefaults(input.PtrSize)
+	descVer := verPrefix
+	if strings.HasSuffix(verPrefix, ".") {
+		descVer = verPrefix + "*"
+	}
+	platform := fmt.Sprintf("%s/%s", runtime.GOOS, input.GOARCH)
+	description := fmt.Sprintf("verified %s %s (%s) runtime.g.labels offset 0x%x",
+		descVer, widthLabel, platform, manual.GLabelsOffset)
+
 	fmt.Println()
 	if alreadyKnown {
-		fmt.Println("note: the verified-layout table already covers this runtime;")
-		fmt.Println("      the entry below is informational and should match the existing one.")
+		fmt.Println("// note: the verified-layout table already covers this runtime;")
+		fmt.Println("//       the entry below is informational and should match the existing one.")
 	} else {
-		fmt.Println("paste the following into internal/runtimelayout/table.go:")
+		fmt.Println("// paste the following into internal/runtimelayout/table.go:")
 	}
 	fmt.Println()
-	fmt.Println("suggested runtimelayout.TableEntry:")
-	fmt.Printf("  VersionPrefix: %q\n", input.GoVersion)
-	fmt.Printf("  GOARCH:        %q\n", input.GOARCH)
-	fmt.Printf("  PtrSize:       %d\n", input.PtrSize)
-	fmt.Printf("  BigEndian:     %t\n", input.BigEndian)
-	fmt.Printf("  GLabelsOffset: 0x%x\n", manual.GLabelsOffset)
+	fmt.Printf("// Verified on %s (%s) via labeloffsetprobe.\n", platform, input.GoVersion)
+	fmt.Println("// TODO: test on other platforms and widen the description before committing.")
+	fmt.Println("{")
+	fmt.Printf("\tVersionPrefix: %q,\n", verPrefix)
+	fmt.Printf("\tPtrSize:       %d,\n", input.PtrSize)
+	fmt.Printf("\tBigEndian:     %t,\n", input.BigEndian)
+	fmt.Printf("\tLayout: %s(Layout{\n", defaultsHelper)
+	fmt.Println("\t\tSource:        SourceTable,")
+	fmt.Printf("\t\tGLabelsOffset: 0x%x,\n", manual.GLabelsOffset)
+	fmt.Printf("\t\tDescription:   %q,\n", description)
+	fmt.Println("\t}),")
+	fmt.Println("},")
 
 	res := heaplabels.DecodeAll(snap, manual, opts)
 	fmt.Println()
@@ -168,4 +185,29 @@ func realMain() int {
 // not be readable.
 func dynamicString(s string) string {
 	return string([]byte(s))
+}
+
+// tableVersionPrefix derives the VersionPrefix value for a verifiedTable
+// entry from the full build version string.
+//
+//   - Release builds ("go1.26.3")     → "go1.26."
+//   - Devel builds  ("go1.27-devel_e62d3e6e") → "go1.27-devel"
+//   - Bare devel    ("go1.27-devel")  → "go1.27-devel"
+func tableVersionPrefix(goVersion string) string {
+	if i := strings.Index(goVersion, "_"); i != -1 {
+		return goVersion[:i]
+	}
+	if i := strings.LastIndex(goVersion, "."); i != -1 {
+		return goVersion[:i+1]
+	}
+	return goVersion
+}
+
+// tableDefaults returns the name of the Layout-defaults helper and a
+// short human-readable width label for the given pointer size.
+func tableDefaults(ptrSize int) (helper, widthLabel string) {
+	if ptrSize == 4 {
+		return "with32BitLittleEndianDefaults", "32-bit LE"
+	}
+	return "with64BitLittleEndianDefaults", "64-bit LE"
 }

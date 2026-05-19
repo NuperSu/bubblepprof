@@ -162,11 +162,16 @@ fallback.
 
 No `labels.json`. No `goroutine.pprof`. No wrapper manifest.
 
-## Snapshot CLI (development only)
+## labeloffsetprobe (development only)
 
 `cmd/labeloffsetprobe` is a development binary for verifying the
 `runtime.g.labels` offset on the current Go runtime. It is not part of
 the product interface.
+
+When exactly one candidate offset is found, the tool prints a ready-to-paste
+Go struct literal — a `runtimelayout.TableEntry` with the correct
+`VersionPrefix`, `PtrSize`, `BigEndian`, and `GLabelsOffset` — that can be
+copied directly into `internal/runtimelayout/table.go`.
 
 ```bash
 go run ./cmd/labeloffsetprobe

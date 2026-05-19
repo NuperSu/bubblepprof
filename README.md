@@ -244,7 +244,7 @@ See [`docs/limitations.md`](docs/limitations.md) for a complete list. Key points
 ## Development tools
 
 ```bash
-# Probe the correct runtime.g.labels offset for the current Go runtime
+# Probe runtime.g.labels offset; prints a pasteable runtimelayout.TableEntry
 go run ./cmd/labeloffsetprobe
 
 # Run all tests
