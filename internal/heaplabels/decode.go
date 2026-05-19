@@ -41,7 +41,10 @@ func DecodeAll(snap *heapsnapshot.HeapSnapshot, layout runtimelayout.Layout, opt
 	}
 	res.Stats.GoroutinesTotal = len(snap.Goroutines)
 
-	mem := NewMemory(snap)
+	mem := opts.HeapMemory
+	if mem == nil {
+		mem = NewMemory(snap)
+	}
 	bodyReader := composeStringBodyReader(mem, opts.ExtraStringMemory)
 	for _, g := range snap.Goroutines {
 		gr := DecodeLabelsForGoroutine(mem, bodyReader, layout, opts, g)

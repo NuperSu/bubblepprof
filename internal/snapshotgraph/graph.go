@@ -19,10 +19,6 @@ type Object struct {
 	Addr     uint64
 	Size     uint64
 	Children []ObjectID
-
-	// PointerAddrs is the original list of decoded pointer values from the
-	// parser, kept for debugging. The graph edges live in Children.
-	PointerAddrs []uint64
 }
 
 // ObjectRange is one half-open address range [Start, End) covered by a

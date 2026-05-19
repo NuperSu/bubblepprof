@@ -41,6 +41,39 @@ const (
 // The reader is consumed in stream order; the caller does not need to
 // preload the entire dump.
 func Parse(r io.Reader, opts Options) (*heapsnapshot.HeapSnapshot, error) {
+	snap, _, err := parseInto(r, opts, nil)
+	return snap, err
+}
+
+// ParseLazyContents parses a heap dump from stream and returns a
+// snapshot whose objects do not retain Contents bytes, together with a
+// ContentResolver that can fetch any object's bytes on demand via ra.
+//
+// stream is consumed sequentially during Parse; ra must reference the
+// same byte sequence (typically: pass the same *os.File for both, since
+// *os.File implements both interfaces and ReadAt is independent of the
+// file's current read offset on every supported platform).
+//
+// The returned resolver must not outlive ra. Callers that pass an
+// *os.File must keep it open until the last call into the resolver.
+//
+// opts.KeepObjectContents is forced to false; passing true is silently
+// ignored because the entire point of ParseLazyContents is to avoid
+// retaining content bytes in the Go heap.
+func ParseLazyContents(stream io.Reader, ra io.ReaderAt, opts Options) (*heapsnapshot.HeapSnapshot, *ContentResolver, error) {
+	if ra == nil {
+		return nil, nil, fmt.Errorf("heapdump: ParseLazyContents requires non-nil io.ReaderAt")
+	}
+	opts.KeepObjectContents = false
+	tracker := &ContentResolver{src: ra}
+	snap, resolver, err := parseInto(stream, opts, tracker)
+	if err != nil {
+		return nil, nil, err
+	}
+	return snap, resolver, nil
+}
+
+func parseInto(r io.Reader, opts Options, tracker *ContentResolver) (*heapsnapshot.HeapSnapshot, *ContentResolver, error) {
 	if opts.MaxStringBytes == 0 {
 		opts.MaxStringBytes = defaultMaxStringBytes
 	}
@@ -58,15 +91,19 @@ func Parse(r io.Reader, opts Options) (*heapsnapshot.HeapSnapshot, error) {
 			Itabs:    make(map[uint64]heapsnapshot.Itab),
 			MemStats: make(map[string]uint64),
 		},
+		contentTracker: tracker,
 	}
 
 	if err := p.parseHeader(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := p.parseRecords(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return p.snap, nil
+	if tracker != nil {
+		tracker.finalize()
+	}
+	return p.snap, tracker, nil
 }
 
 type parser struct {
@@ -81,6 +118,11 @@ type parser struct {
 
 	// Current goroutine receiving stack/defer/panic records.
 	curG *heapsnapshot.Goroutine
+
+	// contentTracker, when non-nil, receives (addr, file offset, length)
+	// for every heap object record so callers can read object bytes on
+	// demand instead of retaining them on snap.Objects[i].Contents.
+	contentTracker *ContentResolver
 }
 
 func (p *parser) parseHeader() error {
@@ -299,7 +341,7 @@ func (p *parser) parseObject() error {
 	if err != nil {
 		return fmt.Errorf("object addr: %w", err)
 	}
-	contents, err := p.r.Bytes()
+	contents, contentFileOff, err := p.r.bytesWithFileOffset()
 	if err != nil {
 		return fmt.Errorf("object contents: %w", err)
 	}
@@ -339,6 +381,9 @@ func (p *parser) parseObject() error {
 	}
 	if p.opts.KeepObjectContents {
 		obj.Contents = contents
+	}
+	if p.contentTracker != nil && len(contents) > 0 {
+		p.contentTracker.record(addr, contentFileOff, uint64(len(contents)))
 	}
 
 	p.snap.Objects = append(p.snap.Objects, obj)

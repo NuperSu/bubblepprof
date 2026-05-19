@@ -56,12 +56,10 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		// do not add it to ByAddr or ranges.
 		if src.Addr == 0 {
 			id := ObjectID(len(g.Objects))
-			ptrs := append([]uint64(nil), src.PointerAddrs...)
 			g.Objects = append(g.Objects, Object{
-				ID:           id,
-				Addr:         0,
-				Size:         src.Size,
-				PointerAddrs: ptrs,
+				ID:   id,
+				Addr: 0,
+				Size: src.Size,
 			})
 			if !zeroAddrWarned {
 				a.Warnings = append(a.Warnings, "object with address 0 ignored for direct lookup")
@@ -78,23 +76,19 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 				return nil, fmt.Errorf("duplicate object address 0x%x", src.Addr)
 			}
 			id := ObjectID(len(g.Objects))
-			ptrs := append([]uint64(nil), src.PointerAddrs...)
 			g.Objects = append(g.Objects, Object{
-				ID:           id,
-				Addr:         src.Addr,
-				Size:         src.Size,
-				PointerAddrs: ptrs,
+				ID:   id,
+				Addr: src.Addr,
+				Size: src.Size,
 			})
 			continue
 		}
 
 		id := ObjectID(len(g.Objects))
-		ptrs := append([]uint64(nil), src.PointerAddrs...)
 		g.Objects = append(g.Objects, Object{
-			ID:           id,
-			Addr:         src.Addr,
-			Size:         src.Size,
-			PointerAddrs: ptrs,
+			ID:   id,
+			Addr: src.Addr,
+			Size: src.Size,
 		})
 		g.ByAddr[src.Addr] = id
 
@@ -140,9 +134,13 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		}
 	}
 
+	// Resolve edges directly from the parsed snapshot's PointerAddrs.
+	// g.Objects[i] corresponds 1:1 with snap.Objects[i] (every iteration
+	// of the loop above appends exactly one graph object). Reading from
+	// snap avoids copying every object's pointer slice into the graph.
 	for i := range g.Objects {
-		obj := &g.Objects[i]
-		for _, ptr := range obj.PointerAddrs {
+		fromID := g.Objects[i].ID
+		for _, ptr := range snap.Objects[i].PointerAddrs {
 			a.Stats.RawObjectPointers++
 			if ptr == 0 {
 				a.Stats.ZeroObjectPointers++
@@ -154,7 +152,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 				continue
 			}
 			a.Stats.ResolvedObjectPointers++
-			g.AddEdge(obj.ID, targetID)
+			g.AddEdge(fromID, targetID)
 		}
 	}
 

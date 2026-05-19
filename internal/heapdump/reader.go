@@ -94,24 +94,35 @@ func (r *reader) Bool() (bool, error) {
 // Bytes reads a length-prefixed byte slice (used for strings and memory
 // ranges). The returned slice is always a freshly allocated copy.
 func (r *reader) Bytes() ([]byte, error) {
+	buf, _, err := r.bytesWithFileOffset()
+	return buf, err
+}
+
+// bytesWithFileOffset reads a length-prefixed byte slice and additionally
+// reports the byte offset (within the stream consumed by this reader) at
+// which the payload starts — i.e. immediately after the uvarint length
+// prefix. ParseLazyContents uses this to seed a ContentResolver so the
+// payload bytes can be re-fetched from the underlying file on demand.
+func (r *reader) bytesWithFileOffset() ([]byte, int64, error) {
 	n, err := r.Uvarint()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if r.limits.MaxMemRangeSize != 0 && n > r.limits.MaxMemRangeSize {
-		return nil, fmt.Errorf("memory range length %d exceeds limit %d", n, r.limits.MaxMemRangeSize)
+		return nil, 0, fmt.Errorf("memory range length %d exceeds limit %d", n, r.limits.MaxMemRangeSize)
 	}
+	payloadOff := r.offset
 	if n == 0 {
-		return nil, nil
+		return nil, payloadOff, nil
 	}
 	buf := make([]byte, n)
 	if err := r.readFull(buf); err != nil {
 		if err == io.EOF {
 			err = io.ErrUnexpectedEOF
 		}
-		return nil, err
+		return nil, 0, err
 	}
-	return buf, nil
+	return buf, payloadOff, nil
 }
 
 // String reads a length-prefixed UTF-8 string.
