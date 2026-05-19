@@ -416,14 +416,24 @@ func spawnWorkload(ctx context.Context, cfg config) func() {
 	return func() { wg.Wait() }
 }
 
-// summarize computes per-metric aggregate statistics across all iterations.
+// summarize computes per-metric aggregate statistics, excluding any
+// iteration that ran under runtime/trace. Trace iterations carry
+// profiling overhead that would inflate the means and percentiles;
+// they are preserved in the Iterations list for inspection but must
+// not contaminate the summary used in the thesis.
 func summarize(rs []iterationResult) map[string]summary {
-	if len(rs) == 0 {
+	var measured []iterationResult
+	for _, r := range rs {
+		if !r.UnderTrace {
+			measured = append(measured, r)
+		}
+	}
+	if len(measured) == 0 {
 		return map[string]summary{}
 	}
 	collect := func(f func(iterationResult) float64) summary {
-		vals := make([]float64, len(rs))
-		for i, r := range rs {
+		vals := make([]float64, len(measured))
+		for i, r := range measured {
 			vals[i] = f(r)
 		}
 		return computeSummary(vals)
