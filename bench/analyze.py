@@ -143,22 +143,6 @@ def plot_wall_vs_goroutines(df: pd.DataFrame) -> None:
     savefig("wall_vs_goroutines.png")
 
 
-def plot_match_effect(df: pd.DataFrame) -> None:
-    sub = df[df["goroutines"] == 1000].sort_values(["heap_mb", "match_fraction"])
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
-    for h, grp in sub.groupby("heap_mb"):
-        ax.errorbar(
-            grp["match_fraction"], grp["wall_ms_mean"], yerr=grp["wall_ms_stddev"],
-            marker="o", markersize=3, capsize=3, label=f"{h} MiB heap",
-        )
-    ax.set_xlabel("match_fraction")
-    ax.set_ylabel("wall time (ms, mean ± stddev)")
-    ax.set_title("Wall time is independent of match_fraction (g=1000)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=9)
-    savefig("match_effect.png")
-
-
 def plot_rss_overhead(df: pd.DataFrame) -> None:
     sub = df[df["match_fraction"] == 1.0].copy()
     sub["rss_overhead_mb"] = sub["vm_hwm_mb"] - sub["heap_mb"]
@@ -219,7 +203,8 @@ def plot_cv(df: pd.DataFrame) -> None:
     savefig("cv_histogram.png")
 
 
-def plot_per_goroutine_cost(df: pd.DataFrame) -> pd.DataFrame:
+def fit_per_goroutine_cost(df: pd.DataFrame) -> pd.DataFrame:
+    """Fit wall ≈ a·goroutines + b for each heap_mb (no plot — text-only)."""
     sub = df[df["match_fraction"] == 1.0]
     rows = []
     for h, grp in sub.groupby("heap_mb"):
@@ -227,15 +212,7 @@ def plot_per_goroutine_cost(df: pd.DataFrame) -> pd.DataFrame:
         y = grp["wall_ms_mean"].to_numpy(dtype=float)
         a, b, r2 = linear_fit(x, y)
         rows.append((h, a * 1000.0, b, r2))  # ms/goroutine → µs/goroutine
-    fit = pd.DataFrame(rows, columns=["heap_mb", "us_per_goroutine", "intercept_ms", "R2"])
-    fig, ax = plt.subplots(figsize=(7.2, 4.2))
-    ax.plot(fit["heap_mb"], fit["us_per_goroutine"], marker="o")
-    ax.set_xlabel("workload heap (MiB)")
-    ax.set_ylabel("per-goroutine wall cost (µs)")
-    ax.set_title("Per-labeled-goroutine Compute cost (slope of wall vs g)")
-    ax.grid(True, alpha=0.3)
-    savefig("per_goroutine_cost.png")
-    return fit
+    return pd.DataFrame(rows, columns=["heap_mb", "us_per_goroutine", "intercept_ms", "R2"])
 
 
 # ----------------------------------------------------------------------------- fit tables
@@ -349,13 +326,13 @@ def write_markdown(df: pd.DataFrame, iters: pd.DataFrame, per_g: pd.DataFrame) -
     out.append("Mean wall time (ms) by match_fraction:\n\n")
     out.append("```\n" + pivot.to_string(float_format=lambda v: f"{v:.1f}") + "\n```\n")
     out.append(
-        "Wall time is essentially flat across `match_fraction` ∈ {0.01, 0.5, 1.0} "
-        "(see `plots/match_effect.png`). Parsing the dump and building the "
-        "structural graph dominate; the per-query BFS that does depend on the "
-        "matched-goroutine count is cheap by comparison. This is the empirical "
-        "justification for the Phase 2.5 split — paying for graph construction "
-        "once and intersecting against label-selected roots is free relative to "
-        "the parse/build cost we already absorb.\n"
+        "Wall time is essentially flat across `match_fraction` ∈ {0.01, 0.5, 1.0}. "
+        "Parsing the dump and building the structural graph dominate; the "
+        "per-query BFS that does depend on the matched-goroutine count is cheap "
+        "by comparison. This is the empirical justification for the Phase 2.5 "
+        "split — paying for graph construction once and intersecting against "
+        "label-selected roots is free relative to the parse/build cost we "
+        "already absorb.\n"
     )
 
     out.append("\n## 5. Peak RSS overhead\n")
@@ -414,12 +391,11 @@ def main() -> None:
 
     plot_wall_vs_heap(df)
     plot_wall_vs_goroutines(df)
-    plot_match_effect(df)
     plot_rss_overhead(df)
     plot_alloc_vs_heap(df)
     plot_variance_iter(iters)
     plot_cv(df)
-    per_g = plot_per_goroutine_cost(df)
+    per_g = fit_per_goroutine_cost(df)
 
     md = write_markdown(df, iters, per_g)
     print("wrote", md)
