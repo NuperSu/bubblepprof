@@ -80,11 +80,11 @@ type summary struct {
 }
 
 type goInfo struct {
-	Version  string `json:"version"`
-	GOOS     string `json:"goos"`
-	GOARCH   string `json:"goarch"`
-	NumCPU   int    `json:"num_cpu"`
-	GOMAXPROC int   `json:"gomaxprocs"`
+	Version   string `json:"version"`
+	GOOS      string `json:"goos"`
+	GOARCH    string `json:"goarch"`
+	NumCPU    int    `json:"num_cpu"`
+	GOMAXPROC int    `json:"gomaxprocs"`
 }
 
 type report struct {
@@ -295,9 +295,9 @@ func startHeartbeat(ctx context.Context) *heartbeat {
 	return hb
 }
 
-func (h *heartbeat) reset()           { h.maxNs.Store(0) }
-func (h *heartbeat) read() int64      { return h.maxNs.Load() }
-func (h *heartbeat) stop()            { close(h.stopC); <-h.doneC }
+func (h *heartbeat) reset()      { h.maxNs.Store(0) }
+func (h *heartbeat) read() int64 { return h.maxNs.Load() }
+func (h *heartbeat) stop()       { close(h.stopC); <-h.doneC }
 
 // readProcStatus returns VmRSS and VmHWM in kB from /proc/self/status.
 // Returns 0/0 if the file cannot be read (non-Linux fallback).
@@ -429,13 +429,13 @@ func summarize(rs []iterationResult) map[string]summary {
 		return computeSummary(vals)
 	}
 	return map[string]summary{
-		"wall_ns":                  collect(func(r iterationResult) float64 { return float64(r.WallNanos) }),
-		"max_heartbeat_pause_ns":   collect(func(r iterationResult) float64 { return float64(r.MaxHeartbeatNanos) }),
-		"go_heap_alloc_delta_b":    collect(func(r iterationResult) float64 { return float64(r.GoHeapAllocDelta) }),
-		"go_total_alloc_delta_b":   collect(func(r iterationResult) float64 { return float64(r.GoTotalAllocDelta) }),
-		"vm_rss_after_kb":          collect(func(r iterationResult) float64 { return float64(r.VmRSSAfterKB) }),
-		"vm_hwm_after_kb":          collect(func(r iterationResult) float64 { return float64(r.VmHWMAfterKB) }),
-		"reachable_bytes":          collect(func(r iterationResult) float64 { return float64(r.ReachableBytes) }),
+		"wall_ns":                collect(func(r iterationResult) float64 { return float64(r.WallNanos) }),
+		"max_heartbeat_pause_ns": collect(func(r iterationResult) float64 { return float64(r.MaxHeartbeatNanos) }),
+		"go_heap_alloc_delta_b":  collect(func(r iterationResult) float64 { return float64(r.GoHeapAllocDelta) }),
+		"go_total_alloc_delta_b": collect(func(r iterationResult) float64 { return float64(r.GoTotalAllocDelta) }),
+		"vm_rss_after_kb":        collect(func(r iterationResult) float64 { return float64(r.VmRSSAfterKB) }),
+		"vm_hwm_after_kb":        collect(func(r iterationResult) float64 { return float64(r.VmHWMAfterKB) }),
+		"reachable_bytes":        collect(func(r iterationResult) float64 { return float64(r.ReachableBytes) }),
 	}
 }
 
