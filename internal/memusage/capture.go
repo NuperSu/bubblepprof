@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"runtime/trace"
 	"sync"
 
 	"bubblepprof/internal/addrspace"
@@ -45,14 +46,18 @@ func (RuntimeHeapDumpCapturer) CaptureHeapDump(ctx context.Context, gcBefore boo
 	}
 
 	if gcBefore {
+		region := trace.StartRegion(ctx, "memusage/gc_pre")
 		runtime.GC()
+		region.End()
 	}
 	if err := ctx.Err(); err != nil {
 		cleanup()
 		return "", nil, err
 	}
 
+	region := trace.StartRegion(ctx, "memusage/write_heap_dump")
 	debug.WriteHeapDump(f.Fd())
+	region.End()
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		cleanup()
@@ -172,7 +177,9 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		recoverer = DefaultLabelRecoverer{}
 	}
 
+	captureRegion := trace.StartRegion(ctx, "memusage/capture")
 	path, cleanup, err := capturer.CaptureHeapDump(ctx, c.Opts.GCBeforeHeapDump)
+	captureRegion.End()
 	if err != nil {
 		return nil, &CaptureFailedError{Cause: err}
 	}
@@ -188,7 +195,9 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	}
 	defer f.Close()
 
+	parseRegion := trace.StartRegion(ctx, "memusage/parse")
 	snap, err := heapdump.Parse(f, heapdump.Options{KeepObjectContents: true, Strict: true})
+	parseRegion.End()
 	if err != nil {
 		return nil, &ParseFailedError{Cause: err}
 	}
@@ -205,7 +214,9 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	if procReader != nil {
 		extra = procReader
 	}
+	labelsRegion := trace.StartRegion(ctx, "memusage/labels")
 	result, err := recoverer.Recover(snap, extra)
+	labelsRegion.End()
 	if err != nil {
 		return nil, fmt.Errorf("recover heap-native labels: %w", err)
 	}
@@ -221,12 +232,17 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		return nil, err
 	}
 
+	buildRegion := trace.StartRegion(ctx, "memusage/build")
 	analysis, err := snapshotgraph.Build(snap, snapshotgraph.Options{})
+	buildRegion.End()
 	if err != nil {
 		return nil, fmt.Errorf("build object graph: %w", err)
 	}
 
-	return ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, c.Opts)
+	computeRegion := trace.StartRegion(ctx, "memusage/compute_from_analysis")
+	resp, err := ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, c.Opts)
+	computeRegion.End()
+	return resp, err
 }
 
 // openProcessReader tries to open the in-process address-space reader
