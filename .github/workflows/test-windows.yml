@@ -126,14 +126,16 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go test ./...
+        # -buildmode=pie exercises the address-space reader's PIE/ASLR slide
+        # path on windows (GetModuleHandleW vs PE ImageBase).
+        run: go test -buildmode=pie ./...
 
       - name: Test with gotip
         if: matrix.go == 'tip'
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: gotip test ./...
+        run: gotip test -buildmode=pie ./...
 
   # ── Gate job ─────────────────────────────────────────────────────────────────
   all-required:

@@ -235,7 +235,12 @@ jobs:
           # matrix.cgo is '0' for targets that lack 32-bit libc (linux/386,
           # linux/arm). Native amd64/arm64 targets leave it unset → defaults to '1'.
           CGO_ENABLED: ${{ matrix.cgo || '1' }}
-        run: go test ./...
+        # -buildmode=pie exercises the address-space reader's ASLR slide path.
+        # Applied on linux/amd64 and linux/arm64 only. linux/386 and linux/arm
+        # are best-effort matrix coverage, not primary targets; PIE on 32-bit
+        # Linux needs the external (cgo) linker, and GitHub runners have no
+        # 32-bit libc, so we don't pursue it.
+        run: go test ${{ matrix.cgo == '0' && '' || '-buildmode=pie' }} ./...
 
       - name: Test with gotip
         if: matrix.go == 'tip'
@@ -244,7 +249,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: ${{ matrix.cgo || '1' }}
-        run: gotip test ./...
+        run: gotip test ${{ matrix.cgo == '0' && '' || '-buildmode=pie' }} ./...
 
   # ── Gate job ─────────────────────────────────────────────────────────────────
   # Add "All Linux checks passed" as a required status check in branch
