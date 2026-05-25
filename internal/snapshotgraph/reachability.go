@@ -10,7 +10,7 @@ func ReachableFrom(g *Graph, roots []RootRef) map[ObjectID]struct{} {
 		return reachable
 	}
 
-	stack := make([]ObjectID, 0, len(roots))
+	queue := make([]ObjectID, 0, len(roots))
 	for _, r := range roots {
 		if !g.validID(r.ObjectID) {
 			continue
@@ -19,14 +19,11 @@ func ReachableFrom(g *Graph, roots []RootRef) map[ObjectID]struct{} {
 			continue
 		}
 		reachable[r.ObjectID] = struct{}{}
-		stack = append(stack, r.ObjectID)
+		queue = append(queue, r.ObjectID)
 	}
 
-	for len(stack) > 0 {
-		id := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-
-		obj := &g.Objects[id]
+	for head := 0; head < len(queue); head++ {
+		obj := &g.Objects[queue[head]]
 		for _, child := range obj.Children {
 			if !g.validID(child) {
 				continue
@@ -35,7 +32,7 @@ func ReachableFrom(g *Graph, roots []RootRef) map[ObjectID]struct{} {
 				continue
 			}
 			reachable[child] = struct{}{}
-			stack = append(stack, child)
+			queue = append(queue, child)
 		}
 	}
 	return reachable
