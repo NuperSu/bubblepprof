@@ -1,6 +1,7 @@
 package heaplabels
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 
@@ -105,6 +106,61 @@ func TestMemory_ReadString_Success(t *testing.T) {
 	}
 	if s != "hello" {
 		t.Fatalf("ReadString = %q, want %q", s, "hello")
+	}
+}
+
+// panicOnZeroReader panics if ReadAtAddr is called with size==0, letting
+// tests verify that Memory.Read short-circuits before delegating.
+type panicOnZeroReader struct {
+	delegate func(addr, size uint64) ([]byte, bool)
+}
+
+func (p *panicOnZeroReader) ReadAtAddr(addr, size uint64) ([]byte, bool) {
+	if size == 0 {
+		panic("ReadAtAddr must not be called with size==0")
+	}
+	if p.delegate != nil {
+		return p.delegate(addr, size)
+	}
+	return nil, false
+}
+
+func TestNewMemoryFromReader_ZeroSizeShortCircuits(t *testing.T) {
+	// Fix #3: size==0 must be handled before the lazy reader is called.
+	mem := NewMemoryFromReader(&panicOnZeroReader{})
+	got, ok := mem.Read(0x1000, 0)
+	if !ok || len(got) != 0 {
+		t.Fatalf("Read(addr, 0) = (%v, %v), want ([], true)", got, ok)
+	}
+}
+
+func TestNewMemoryFromReader_DelegatesNonZeroRead(t *testing.T) {
+	want := []byte{0xAB, 0xCD}
+	mem := NewMemoryFromReader(&panicOnZeroReader{
+		delegate: func(addr, size uint64) ([]byte, bool) {
+			if addr == 0x5000 && size == 2 {
+				return want, true
+			}
+			return nil, false
+		},
+	})
+	got, ok := mem.Read(0x5000, 2)
+	if !ok || !bytes.Equal(got, want) {
+		t.Fatalf("Read = (%v, %v), want (%v, true)", got, ok, want)
+	}
+}
+
+func TestNewMemoryFromReader_NilReader(t *testing.T) {
+	mem := NewMemoryFromReader(nil)
+	if _, ok := mem.Read(0x1000, 4); ok {
+		t.Fatal("nil lazy reader must cause Read to return ok=false")
+	}
+}
+
+func TestNewMemoryFromReader_Name(t *testing.T) {
+	mem := NewMemoryFromReader(nil)
+	if got := mem.Name(); got != "heap" {
+		t.Fatalf("Name() = %q, want %q", got, "heap")
 	}
 }
 
