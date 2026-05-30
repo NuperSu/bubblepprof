@@ -219,6 +219,71 @@ curl -s -X POST http://127.0.0.1:6060/debug/memusage \
 The process prints goroutine count, heap stats, and ops/sec every two seconds.
 Use it to stress-test label recovery and reachability performance on realistic heap sizes.
 
+## Multi-tenant example (`log_ingest`)
+
+`log_ingest` models a multi-tenant in-memory log ingester (Loki / Cortex / Mimir flavor),
+the canonical place where "how much heap is tenant X holding right now?" is a real
+operational question. It is the example that best shows what bubblepprof is *for*.
+
+```bash
+# Default: ~736 MiB live (24 ingesters * 24 MiB private + 160 MiB shared dictionary)
+go run ./examples/log_ingest
+
+# Heavier:
+go run ./examples/log_ingest -tenants 8 -shards 4 -dict-mb 256
+```
+
+One long-lived ingester goroutine per `(tenant, stream, shard)` privately owns a ring of
+in-memory log chunks held **only on its own stack** — no chunk is shared between workloads.
+Every ingester also references a single process-wide interned-label dictionary, which is the
+**only** shared memory and the sole source of `global_overlap`. Labels form a six-dimension
+hierarchy you can drill through:
+
+```
+service = log-ingester
+tenant  = atlas-bikes | globex | initech | umbrella-corp | ...
+stream  = app | nginx | kernel | audit | ...
+region  = us-east | eu-west | ap-south
+tier    = enterprise | standard
+shard   = 0..shards-1
+```
+
+The key insight: **private heap = `reachable_bytes − global_overlap_bytes`**. As you add
+labels the match narrows, `reachable_bytes` shrinks with it, and `global_overlap_bytes`
+(the shared dictionary) stays roughly constant:
+
+```bash
+# Everything tenant=atlas-bikes holds, across all its streams and shards:
+curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"tenant":"atlas-bikes"}}' | jq .
+
+# Narrow to one stream, then one shard — reachable falls, global_overlap holds steady:
+curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"tenant":"atlas-bikes","stream":"app"}}' | jq .
+curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"tenant":"atlas-bikes","stream":"app","shard":"0"}}' | jq .
+
+# Cross-cutting views that don't follow the tenant axis at all:
+curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"region":"eu-west"}}'  | jq .
+curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"tier":"enterprise"}}' | jq .
+
+# Everything: global_overlap ~= dictionary size, reachable ~= all chunks + dictionary:
+curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"service":"log-ingester"}}' | jq .
+```
+
+Example progression (small run, `-dict-mb 32 -ring 8 -chunk-kb 256`), reading
+`matched / reachable / global_overlap / private` in MiB:
+
+```
+{tenant:atlas-bikes}              -> 4 / 41 / 33 /  8
+{tenant:atlas-bikes,stream:app}   -> 2 / 37 / 33 /  4
+{...,stream:app,shard:0}          -> 1 / 35 / 33 /  2
+{tier:enterprise}                 -> 8 / 49 / 33 / 16
+{service:log-ingester}            -> all / 57 / 33 / 24
+```
+
+The example deliberately uses only concrete types on the data path (bubblepprof does not
+decode `iface`/`eface` edges) and sets **no** finalizers on chunks (a finalizer would make an
+object a global root and pollute per-tenant attribution) — which is exactly what keeps
+`reachable − global_overlap` equal to the private heap.
+
 ## Security and performance
 
 `/debug/memusage` is equivalent in sensitivity to `/debug/pprof/heap`. Every call:
