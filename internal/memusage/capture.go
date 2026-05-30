@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"runtime/trace"
 	"sync"
+	"sync/atomic"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
 	"github.com/NuperSu/bubblepprof/internal/heapdump"
@@ -132,7 +133,7 @@ type Computer struct {
 	Opts      Options
 
 	procOnce    sync.Once
-	procReader  *addrspace.ProcessReader
+	procReader  atomic.Pointer[addrspace.ProcessReader]
 	procWarning string
 }
 
@@ -148,19 +149,25 @@ func NewComputer(opts Options) *Computer {
 // Close releases the cached process memory reader. Safe to call multiple
 // times. Computer must not be used after Close returns.
 func (c *Computer) Close() error {
-	if c == nil || c.procReader == nil {
+	if c == nil {
 		return nil
 	}
-	return c.procReader.Close()
+	r := c.procReader.Load()
+	if r == nil {
+		return nil
+	}
+	return r.Close()
 }
 
 // processReader returns the cached process reader, opening it lazily on
 // first call. The returned reader must not be closed by the caller.
 func (c *Computer) processReader() (*addrspace.ProcessReader, string) {
 	c.procOnce.Do(func() {
-		c.procReader, c.procWarning = openProcessReader(c.Opts.DisableProcessMemoryReader)
+		r, w := openProcessReader(c.Opts.DisableProcessMemoryReader)
+		c.procWarning = w
+		c.procReader.Store(r)
 	})
-	return c.procReader, c.procWarning
+	return c.procReader.Load(), c.procWarning
 }
 
 // Compute runs the full /debug/memusage pipeline:

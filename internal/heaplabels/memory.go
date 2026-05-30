@@ -84,11 +84,11 @@ func (m *Memory) Read(addr uint64, size uint64) ([]byte, bool) {
 	if m == nil {
 		return nil, false
 	}
-	if m.lazy != nil {
-		return m.lazy.ReadAtAddr(addr, size)
-	}
 	if size == 0 {
 		return []byte{}, true
+	}
+	if m.lazy != nil {
+		return m.lazy.ReadAtAddr(addr, size)
 	}
 	if addr == 0 {
 		return nil, false

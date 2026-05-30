@@ -55,6 +55,9 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		// pointers). Keep the object in the graph for completeness, but
 		// do not add it to ByAddr or ranges.
 		if src.Addr == 0 {
+			if uint64(len(g.Objects)) > math.MaxUint32 {
+				return nil, fmt.Errorf("snapshotgraph: object count %d overflows ObjectID (uint32 max)", len(g.Objects))
+			}
 			id := ObjectID(len(g.Objects))
 			g.Objects = append(g.Objects, Object{
 				ID:   id,
@@ -75,6 +78,9 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 			if opts.Strict {
 				return nil, fmt.Errorf("duplicate object address 0x%x", src.Addr)
 			}
+			if uint64(len(g.Objects)) > math.MaxUint32 {
+				return nil, fmt.Errorf("snapshotgraph: object count %d overflows ObjectID (uint32 max)", len(g.Objects))
+			}
 			id := ObjectID(len(g.Objects))
 			g.Objects = append(g.Objects, Object{
 				ID:   id,
@@ -84,6 +90,9 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 			continue
 		}
 
+		if uint64(len(g.Objects)) > math.MaxUint32 {
+			return nil, fmt.Errorf("snapshotgraph: object count %d overflows ObjectID (uint32 max)", len(g.Objects))
+		}
 		id := ObjectID(len(g.Objects))
 		g.Objects = append(g.Objects, Object{
 			ID:   id,

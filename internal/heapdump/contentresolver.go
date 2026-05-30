@@ -2,6 +2,7 @@ package heapdump
 
 import (
 	"io"
+	"math"
 	"sort"
 )
 
@@ -75,8 +76,15 @@ func (c *ContentResolver) readRef(ref contentRef, offsetWithinObject, size uint6
 	if offsetWithinObject+size > ref.length || offsetWithinObject+size < offsetWithinObject {
 		return nil, false
 	}
+	if offsetWithinObject > math.MaxInt64 {
+		return nil, false
+	}
+	fileOff := ref.fileOff + int64(offsetWithinObject)
+	if fileOff < ref.fileOff {
+		return nil, false
+	}
 	buf := make([]byte, size)
-	n, err := c.src.ReadAt(buf, ref.fileOff+int64(offsetWithinObject))
+	n, err := c.src.ReadAt(buf, fileOff)
 	if err != nil && err != io.EOF {
 		return nil, false
 	}

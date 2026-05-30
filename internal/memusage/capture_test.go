@@ -193,7 +193,8 @@ func TestComputer_Close_WithProcReader(t *testing.T) {
 	if r == nil {
 		t.Skip("process reader not available on this platform")
 	}
-	c := &Computer{procReader: r}
+	c := &Computer{}
+	c.procReader.Store(r)
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
