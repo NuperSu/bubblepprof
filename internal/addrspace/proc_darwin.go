@@ -136,6 +136,9 @@ func computeMachOSlide(f *macho.File) (int64, error) {
 	if sym == nil {
 		return 0, fmt.Errorf("probe %q not found in pclntab", rtFn.Name())
 	}
+	if uint64(rpc) > math.MaxInt64 || sym.Entry > math.MaxInt64 {
+		return 0, fmt.Errorf("probe address 0x%x or pclntab entry 0x%x exceeds int64 range", rpc, sym.Entry)
+	}
 	return int64(rpc) - int64(sym.Entry), nil
 }
 
@@ -188,6 +191,10 @@ func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		return nil, false
 	}
 
+	// Guard against int64 overflow before casting (same policy as proc_linux.go).
+	if addr > math.MaxInt64 || end > math.MaxInt64 {
+		return nil, false
+	}
 	// Convert runtime addresses to on-disk vmaddrs by subtracting slide.
 	ondisk := uint64(int64(addr) - r.slide)
 	ondiskEnd := uint64(int64(end) - r.slide)

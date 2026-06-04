@@ -583,6 +583,7 @@ func (p *parser) parseDataLike(kind string) error {
 		p.snap.Stats.InterfaceFieldsDecoded += iface
 		p.snap.Stats.EfaceFieldsDecoded += eface
 		seg.PointerAddrs = targets
+		seg.PointerSlots = slots
 		for i, target := range targets {
 			var slot uint64
 			if i < len(slots) {

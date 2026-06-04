@@ -65,6 +65,9 @@ func OpenSelfProcessReader() (*ProcessReader, error) {
 	if r == 0 {
 		return nil, fmt.Errorf("addrspace: GetModuleHandleW: %w", callErr)
 	}
+	if uint64(r) > math.MaxInt64 || imageBase > math.MaxInt64 {
+		return nil, fmt.Errorf("addrspace: module base 0x%x or image base 0x%x exceeds int64 range", r, imageBase)
+	}
 	slide := int64(r) - int64(imageBase)
 
 	f, err := os.Open(exe)
@@ -184,6 +187,10 @@ func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		return nil, false
 	}
 
+	// Guard against int64 overflow before casting (same policy as proc_linux.go).
+	if addr > math.MaxInt64 || end > math.MaxInt64 {
+		return nil, false
+	}
 	// Convert runtime addresses to on-disk preferred virtual addresses
 	// by subtracting the ASLR slide.
 	ondisk := uint64(int64(addr) - r.slide)

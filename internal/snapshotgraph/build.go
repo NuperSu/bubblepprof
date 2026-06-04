@@ -359,7 +359,16 @@ func addSegmentGlobalRoots(seg heapsnapshot.DataSegment, defaultKind string, ptr
 	if kind == "" {
 		kind = defaultKind
 	}
-	slots := dataSegmentPointerSlots(seg, ptrSize)
+	// Prefer parser-populated PointerSlots (parallel to PointerAddrs, always
+	// correct even when zero-valued pointer fields precede non-zero ones).
+	// Fall back to field-derived slots for test-constructed segments that do
+	// not carry PointerSlots.
+	var slots []uint64
+	if len(seg.PointerSlots) == len(seg.PointerAddrs) {
+		slots = seg.PointerSlots
+	} else {
+		slots = dataSegmentPointerSlots(seg, ptrSize)
+	}
 	for i, ptr := range seg.PointerAddrs {
 		var slot uint64
 		if i < len(slots) {

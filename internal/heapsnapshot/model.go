@@ -153,12 +153,19 @@ type Root struct {
 }
 
 // DataSegment is one `data` or `bss` record.
+//
+// PointerAddrs and PointerSlots are parallel slices: PointerAddrs[i] is the
+// decoded pointer value and PointerSlots[i] is the virtual address of the
+// slot (Addr + field offset) that holds it. PointerSlots is populated by the
+// parser; consumers must range over PointerAddrs and guard with
+// i < len(PointerSlots) in case a future parser omits it.
 type DataSegment struct {
 	Kind         string
 	Addr         uint64
 	Size         uint64
 	Fields       []Field
 	PointerAddrs []uint64
+	PointerSlots []uint64
 }
 
 // Finalizer is one `finalizer` record.
