@@ -13,7 +13,7 @@
 //
 //   - reachable_bytes        = this tenant's private chunks + the shared dictionary
 //   - global_overlap_bytes   = the shared dictionary (it is reachable from a package
-//                              -level global, so it is a global root)
+//     -level global, so it is a global root)
 //   - reachable - overlap    = this tenant's TRULY-PRIVATE heap
 //
 // global_overlap_bytes stays ~constant across tenants (everyone shares one
