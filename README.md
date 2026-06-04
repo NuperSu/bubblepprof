@@ -126,7 +126,7 @@ Error (`422 Unprocessable Entity`):
 
 ```json
 {
-  "error": "runtime.g.labels layout not in verified table",
+  "error": "heap-native pprof label recovery is unsupported for this Go runtime (go1.25 arm64)",
   "code": "unsupported_runtime",
   "go_version": "go1.25",
   "goarch": "arm64",
@@ -279,10 +279,11 @@ Example progression (small run, `-dict-mb 32 -ring 8 -chunk-kb 256`), reading
 {service:log-ingester}            -> all / 57 / 33 / 24
 ```
 
-The example deliberately uses only concrete types on the data path (bubblepprof does not
-decode `iface`/`eface` edges) and sets **no** finalizers on chunks (a finalizer would make an
-object a global root and pollute per-tenant attribution) — which is exactly what keeps
-`reachable − global_overlap` equal to the private heap.
+The example sets **no** finalizers on chunks (a finalizer would make an object a global root
+and pollute per-tenant attribution) — which is exactly what keeps `reachable − global_overlap`
+equal to the private heap. Interface data-word reachability is fully preserved for current Go
+versions (1.24+): the runtime's GC bitmap already emits interface data words as ordinary
+pointer slots, so no concrete-type restriction is needed on the data path.
 
 ## Security and performance
 

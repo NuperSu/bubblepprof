@@ -24,13 +24,13 @@ Validation is purely structural; no heap activity.
 
 If `GCBeforeHeapDump` is enabled (the default), `runtime.GC()` runs to reduce dead objects in the dump. This does not affect correctness, only the size of the snapshot.
 
-### Step 3 — Capture a heap dump
+### Step 3 — Capture and parse a heap dump
 
 `runtime/debug.WriteHeapDump` stops all goroutines and serializes the entire heap to a temporary file. The stop-the-world pause is proportional to live heap size.
 
-Object contents are retained in memory so the label decoder can read string bytes from heap objects.
+The dump is parsed with `heapdump.ParseLazyContents`: object content bytes are **not** retained in the Go heap. Instead, a `ContentResolver` records each object's byte range within the dump file; the label decoder fetches content bytes on demand via `io.ReaderAt`. This avoids doubling the process RSS during parsing.
 
-After parsing, the temporary file is deleted.
+After all processing, the temporary file is deleted.
 
 ### Step 4 — Open the process string-body reader
 
