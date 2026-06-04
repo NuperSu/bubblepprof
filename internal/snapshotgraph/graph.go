@@ -155,9 +155,11 @@ type Analysis struct {
 //
 //	RawObjectPointers = ZeroObjectPointers + ResolvedObjectPointers + UnresolvedObjectPointers
 //
-// (Iface/eface fields are tracked at the parser level — see
-// ParseStats.InterfaceFieldsSkipped / EfaceFieldsSkipped — and never reach
-// the graph builder, so they do not appear in this equation.)
+// (Iface/eface data-word edges are decoded at the parser level — see
+// ParseStats.InterfaceFieldsDecoded / EfaceFieldsDecoded — and included in
+// PointerAddrs before the graph builder runs, so they contribute to
+// RawObjectPointers. For current Go runtime versions these counts are always
+// zero because the dump writer only emits fieldKindPtr from GC bitmaps.)
 //
 // Root accounting tracks unresolved root pointers separately by source
 // category so it is clear whether missing reachability is due to objects,

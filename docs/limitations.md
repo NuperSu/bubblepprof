@@ -63,9 +63,9 @@ The heuristic may misclassify unusual goroutines. Set `IncludeSystemGoroutines: 
 
 ## Interface field records
 
-The heap dump format marks fields as `iface` (non-empty interface) or `eface` (empty interface). `bubblepprof` records these fields and reports skipped counts in warnings, but does not decode them into graph edges. Decoding an interface data word safely requires resolving the dynamic runtime type, which is not available from the heap dump alone without type metadata — guessing could create false roots.
+The heap dump format defines `iface` (non-empty interface) and `eface` (empty interface) field kinds. `bubblepprof` decodes the data word of each such field as a candidate pointer and lets the graph resolver drop any value that does not map to a known heap object. This is safe because the data word of a live interface in a stopped-world snapshot is always a valid live address when non-nil — static-storage values (e.g., small integers via `convT64`) and stack-allocated boxes will be dropped by the resolver rather than producing false edges.
 
-Objects reachable only through such interface slots may be undercounted in `reachable_objects` and `reachable_bytes`. Practically, the GC-visible pointer fields of concrete types held inside interfaces are still emitted in the heap dump and are followed; the limitation applies to the interface slot itself (the data pointer inside the iface/eface header), not to the transitive graph.
+For current Go runtime versions (1.24+), `fieldKindIface` and `fieldKindEface` are never emitted in practice: the dump writer only emits `fieldKindPtr` from GC bitmaps, and interface data words appear as ordinary pointer slots. Interface data reachability is therefore already complete for supported Go versions; the `InterfaceFieldsDecoded` counters remain zero.
 
 ## Interior pointer resolution
 

@@ -40,11 +40,6 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	for _, w := range snap.Warnings {
 		a.Warnings = append(a.Warnings, "parse: "+w)
 	}
-	if iface, eface := snap.Stats.InterfaceFieldsSkipped, snap.Stats.EfaceFieldsSkipped; iface+eface > 0 {
-		a.Warnings = append(a.Warnings,
-			fmt.Sprintf("parse: %d interface and %d eface fields were preserved but not decoded into graph edges",
-				iface, eface))
-	}
 
 	zeroAddrWarned := false
 	zeroSizedWarned := false
@@ -249,10 +244,10 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		resolveGlobalRoot(r.Kind, r.PointerAddr, r.Addr, r.Description)
 	}
 	for _, seg := range snap.Data {
-		addSegmentGlobalRoots(seg, "data", resolveGlobalRoot)
+		addSegmentGlobalRoots(seg, "data", snap.Params.PtrSize, resolveGlobalRoot)
 	}
 	for _, seg := range snap.BSS {
-		addSegmentGlobalRoots(seg, "bss", resolveGlobalRoot)
+		addSegmentGlobalRoots(seg, "bss", snap.Params.PtrSize, resolveGlobalRoot)
 	}
 	for _, fin := range snap.Finalizers {
 		ptr := fin.ObjectAddr
@@ -359,12 +354,12 @@ func ComputeReachability(a *Analysis) {
 	a.Stats.UnreachableObjects = unreachable
 }
 
-func addSegmentGlobalRoots(seg heapsnapshot.DataSegment, defaultKind string, add func(kind string, ptr, slot uint64, detail string)) {
+func addSegmentGlobalRoots(seg heapsnapshot.DataSegment, defaultKind string, ptrSize int, add func(kind string, ptr, slot uint64, detail string)) {
 	kind := seg.Kind
 	if kind == "" {
 		kind = defaultKind
 	}
-	slots := dataSegmentPointerSlots(seg)
+	slots := dataSegmentPointerSlots(seg, ptrSize)
 	for i, ptr := range seg.PointerAddrs {
 		var slot uint64
 		if i < len(slots) {
@@ -374,16 +369,20 @@ func addSegmentGlobalRoots(seg heapsnapshot.DataSegment, defaultKind string, add
 	}
 }
 
-func dataSegmentPointerSlots(seg heapsnapshot.DataSegment) []uint64 {
+func dataSegmentPointerSlots(seg heapsnapshot.DataSegment, ptrSize int) []uint64 {
 	if len(seg.Fields) == 0 {
 		return nil
 	}
 	slots := make([]uint64, 0, len(seg.PointerAddrs))
 	for _, f := range seg.Fields {
-		if f.Kind != heapsnapshot.FieldKindPtr {
+		switch f.Kind {
+		case heapsnapshot.FieldKindPtr:
+			slots = append(slots, seg.Addr+f.Offset)
+		case heapsnapshot.FieldKindIface, heapsnapshot.FieldKindEface:
+			slots = append(slots, seg.Addr+f.Offset+uint64(ptrSize))
+		default:
 			continue
 		}
-		slots = append(slots, seg.Addr+f.Offset)
 		if len(slots) == len(seg.PointerAddrs) {
 			break
 		}

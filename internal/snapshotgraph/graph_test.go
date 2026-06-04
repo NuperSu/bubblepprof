@@ -502,28 +502,14 @@ func TestStrictModeOverlapError(t *testing.T) {
 func TestParserWarningsPropagate(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Warnings: []string{"truncated object 0x42"},
-		Stats: heapsnapshot.ParseStats{
-			InterfaceFieldsSkipped: 3,
-			EfaceFieldsSkipped:     2,
-		},
 	}
 	a := mustBuild(t, snap)
-	foundParse := false
-	foundIface := false
 	for _, w := range a.Warnings {
 		if strings.HasPrefix(w, "parse: truncated object") {
-			foundParse = true
-		}
-		if strings.Contains(w, "3 interface and 2 eface") {
-			foundIface = true
+			return
 		}
 	}
-	if !foundParse {
-		t.Fatalf("expected parser warning to propagate; got %v", a.Warnings)
-	}
-	if !foundIface {
-		t.Fatalf("expected iface/eface skipped warning; got %v", a.Warnings)
-	}
+	t.Fatalf("expected parser warning to propagate; got %v", a.Warnings)
 }
 
 // Address 0 is never resolvable, even if a zero-addr object exists.

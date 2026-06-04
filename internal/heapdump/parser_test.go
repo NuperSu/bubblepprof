@@ -127,9 +127,11 @@ func TestParseObjectZeroPointerSkipped(t *testing.T) {
 	}
 }
 
-func TestParseObjectInterfaceFieldsPreservedButNotDecoded(t *testing.T) {
+func TestParseObjectInterfaceFieldsDecoded(t *testing.T) {
 	buf := newSyntheticBuffer()
 
+	// Object layout: 16 bytes; eface at offset 0 means type_word=[0:8], data_word=[8:16].
+	// Set the data word to 0x4000 — the parser should emit it as a candidate pointer.
 	contents := make([]byte, 16)
 	binary.LittleEndian.PutUint64(contents[8:16], 0x4000)
 	writeUvarint(buf, tagObject)
@@ -150,8 +152,12 @@ func TestParseObjectInterfaceFieldsPreservedButNotDecoded(t *testing.T) {
 	if len(obj.Fields) != 1 || obj.Fields[0].Kind != heapsnapshot.FieldKindEface {
 		t.Fatalf("fields = %+v", obj.Fields)
 	}
-	if len(obj.PointerAddrs) != 0 {
-		t.Fatalf("expected iface/eface pointer not to be decoded, got %v", obj.PointerAddrs)
+	// Data word 0x4000 must be decoded into PointerAddrs.
+	if len(obj.PointerAddrs) != 1 || obj.PointerAddrs[0] != 0x4000 {
+		t.Fatalf("expected PointerAddrs=[0x4000], got %v", obj.PointerAddrs)
+	}
+	if snap.Stats.EfaceFieldsDecoded != 1 {
+		t.Fatalf("EfaceFieldsDecoded = %d, want 1", snap.Stats.EfaceFieldsDecoded)
 	}
 	if len(snap.Warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", snap.Warnings)

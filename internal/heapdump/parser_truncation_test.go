@@ -202,12 +202,13 @@ func TestParseObject_BeforeParamsStrict(t *testing.T) {
 }
 
 // TestParseObject_IfaceEfaceFields verifies that iface and eface field kinds
-// increment the skip counters.
+// increment the decoded counters. Data words are zero here so PointerAddrs
+// stays empty (nil data word = nil interface).
 func TestParseObject_IfaceEfaceFields(t *testing.T) {
 	buf := newSyntheticBuffer()
 
-	// Object: 16 bytes of contents, fields: iface @ 0, eface @ 0, eol
-	// (no ptr field so extractPointers completes and returns accumulated counts)
+	// Object: 16 bytes of zeros, fields: iface @ 0, eface @ 0, eol.
+	// Data words (at offset 8 for each field) are zero → no pointer emitted.
 	contents := make([]byte, 16)
 	writeUvarint(buf, tagObject)
 	writeUvarint(buf, 0x1000)
@@ -224,11 +225,14 @@ func TestParseObject_IfaceEfaceFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if snap.Stats.InterfaceFieldsSkipped != 1 {
-		t.Fatalf("InterfaceFieldsSkipped = %d, want 1", snap.Stats.InterfaceFieldsSkipped)
+	if snap.Stats.InterfaceFieldsDecoded != 1 {
+		t.Fatalf("InterfaceFieldsDecoded = %d, want 1", snap.Stats.InterfaceFieldsDecoded)
 	}
-	if snap.Stats.EfaceFieldsSkipped != 1 {
-		t.Fatalf("EfaceFieldsSkipped = %d, want 1", snap.Stats.EfaceFieldsSkipped)
+	if snap.Stats.EfaceFieldsDecoded != 1 {
+		t.Fatalf("EfaceFieldsDecoded = %d, want 1", snap.Stats.EfaceFieldsDecoded)
+	}
+	if len(snap.Objects[0].PointerAddrs) != 0 {
+		t.Fatalf("expected no pointers for nil data words, got %v", snap.Objects[0].PointerAddrs)
 	}
 }
 

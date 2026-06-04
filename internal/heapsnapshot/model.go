@@ -212,10 +212,11 @@ type ParseStats struct {
 	AllocSampleCount int
 	UnknownRecords   int
 
-	// Iface/eface fields the parser saw but did not decode into
-	// PointerAddrs because their data word is type-tag dependent. These
-	// counters surface a confidence gap before higher phases build bubble
-	// reports.
-	InterfaceFieldsSkipped int
-	EfaceFieldsSkipped     int
+	// Iface/eface fields decoded by the parser. The data word of each
+	// interface field is emitted as a candidate pointer; the graph resolver
+	// drops any value that does not map to a known heap object.
+	// For current Go runtime versions (1.24+) these counts are always zero
+	// because the dump writer only emits fieldKindPtr from GC bitmaps.
+	InterfaceFieldsDecoded int
+	EfaceFieldsDecoded     int
 }

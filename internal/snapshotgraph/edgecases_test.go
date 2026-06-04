@@ -331,16 +331,17 @@ func TestFindObjectContaining_EmptyRanges(t *testing.T) {
 }
 
 func TestDataSegmentPointerSlots_NonPtrField(t *testing.T) {
-	// A segment with a non-Ptr field should skip it (continue branch).
+	// iface field at offset 0 (ptrSize=8) → data-word slot at 0x1000+8=0x1008.
+	// PointerAddrs has one entry so iteration stops after the first slot.
 	seg := heapsnapshot.DataSegment{
 		Addr:         0x1000,
 		PointerAddrs: []uint64{0x2000},
 		Fields: []heapsnapshot.Field{
-			{Kind: heapsnapshot.FieldKindIface, Offset: 0}, // non-ptr field → continue
-			{Kind: heapsnapshot.FieldKindPtr, Offset: 8},   // ptr field
+			{Kind: heapsnapshot.FieldKindIface, Offset: 0},
+			{Kind: heapsnapshot.FieldKindPtr, Offset: 8},
 		},
 	}
-	slots := dataSegmentPointerSlots(seg)
+	slots := dataSegmentPointerSlots(seg, 8)
 	if len(slots) != 1 {
 		t.Fatalf("expected 1 slot, got %d", len(slots))
 	}
@@ -355,7 +356,7 @@ func TestDataSegmentPointerSlots_NoFields(t *testing.T) {
 		PointerAddrs: []uint64{0x2000},
 		Fields:       nil, // no fields → returns nil
 	}
-	slots := dataSegmentPointerSlots(seg)
+	slots := dataSegmentPointerSlots(seg, 8)
 	if slots != nil {
 		t.Fatalf("expected nil, got %v", slots)
 	}
@@ -368,7 +369,7 @@ func TestAddSegmentGlobalRoots_EmptyKind(t *testing.T) {
 		PointerAddrs: []uint64{0x2000},
 	}
 	var gotKind string
-	addSegmentGlobalRoots(seg, "data", func(kind string, ptr, slot uint64, detail string) {
+	addSegmentGlobalRoots(seg, "data", 8, func(kind string, ptr, slot uint64, detail string) {
 		gotKind = kind
 	})
 	if gotKind != "data" {

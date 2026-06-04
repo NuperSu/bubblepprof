@@ -369,8 +369,8 @@ func (p *parser) parseObject() error {
 		if warnErr != nil {
 			return warnErr
 		}
-		p.snap.Stats.InterfaceFieldsSkipped += iface
-		p.snap.Stats.EfaceFieldsSkipped += eface
+		p.snap.Stats.InterfaceFieldsDecoded += iface
+		p.snap.Stats.EfaceFieldsDecoded += eface
 	}
 
 	obj := heapsnapshot.Object{
@@ -580,8 +580,8 @@ func (p *parser) parseDataLike(kind string) error {
 		if warnErr != nil {
 			return warnErr
 		}
-		p.snap.Stats.InterfaceFieldsSkipped += iface
-		p.snap.Stats.EfaceFieldsSkipped += eface
+		p.snap.Stats.InterfaceFieldsDecoded += iface
+		p.snap.Stats.EfaceFieldsDecoded += eface
 		seg.PointerAddrs = targets
 		for i, target := range targets {
 			var slot uint64
@@ -749,8 +749,8 @@ func (p *parser) parseStackFrame() error {
 		if warnErr != nil {
 			return warnErr
 		}
-		p.snap.Stats.InterfaceFieldsSkipped += iface
-		p.snap.Stats.EfaceFieldsSkipped += eface
+		p.snap.Stats.InterfaceFieldsDecoded += iface
+		p.snap.Stats.EfaceFieldsDecoded += eface
 		frame.PointerAddrs = targets
 		frame.PointerSlots = slots
 		p.snap.Stats.StackPointers += len(targets)

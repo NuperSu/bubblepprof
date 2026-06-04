@@ -15,15 +15,18 @@ import (
 // `targets`, if non-nil, will be appended with the decoded pointer values
 // (zero values are skipped).
 //
+// For FieldKindIface and FieldKindEface, only the data word (second word) is
+// emitted; the type/itab word (first word) is scalar in the GC bitmap and is
+// not a graph edge. The data word is a candidate heap pointer: the graph
+// resolver drops any value that does not map to a known heap object, so
+// static-storage and stack-storage interface values produce no false edges.
+//
 // Out-of-bounds offsets and unsupported field kinds become warnings
 // appended via warn rather than fatal errors so the rest of the dump can
 // still be parsed.
 //
-// Returns the number of iface and eface fields the parser saw and chose
-// not to decode. Those words depend on runtime type metadata that the
-// dump format does not surface directly; speculating here would produce
-// false roots. Callers are expected to fold these counts into
-// ParseStats so the limitation stays visible.
+// Returns the number of iface and eface fields processed. Callers fold
+// these counts into ParseStats for diagnostic output.
 func extractPointers(
 	contents []byte,
 	fields []heapsnapshot.Field,
@@ -34,7 +37,7 @@ func extractPointers(
 	targets *[]uint64,
 	slots *[]uint64,
 	warn func(string),
-) (ifaceSkipped, efaceSkipped int) {
+) (ifaceDecoded, efaceDecoded int) {
 	if ptrSize != 4 && ptrSize != 8 {
 		if warn != nil {
 			warn(fmt.Sprintf("%s: unsupported ptr size %d", context, ptrSize))
@@ -60,17 +63,35 @@ func extractPointers(
 					*targets = append(*targets, ptr)
 				}
 			}
-		case heapsnapshot.FieldKindIface:
-			ifaceSkipped++
-		case heapsnapshot.FieldKindEface:
-			efaceSkipped++
+		case heapsnapshot.FieldKindIface, heapsnapshot.FieldKindEface:
+			if f.Kind == heapsnapshot.FieldKindIface {
+				ifaceDecoded++
+			} else {
+				efaceDecoded++
+			}
+			dataWord, ok := readPointer(contents, f.Offset+uint64(ptrSize), ptrSize, byteOrder)
+			if !ok {
+				if warn != nil {
+					warn(fmt.Sprintf("%s: iface/eface data word at offset %d out of bounds for size %d",
+						context, f.Offset+uint64(ptrSize), len(contents)))
+				}
+				continue
+			}
+			if dataWord != 0 {
+				if slots != nil {
+					*slots = append(*slots, containerAddr+f.Offset+uint64(ptrSize))
+				}
+				if targets != nil {
+					*targets = append(*targets, dataWord)
+				}
+			}
 		default:
 			if warn != nil {
 				warn(fmt.Sprintf("%s: unknown field kind %d at offset %d", context, f.Kind, f.Offset))
 			}
 		}
 	}
-	return ifaceSkipped, efaceSkipped
+	return ifaceDecoded, efaceDecoded
 }
 
 func readPointer(contents []byte, offset uint64, ptrSize int, byteOrder binary.ByteOrder) (uint64, bool) {
