@@ -307,7 +307,7 @@ func newChunk(chunkBytes int, dict *labelDict, rng *rand.Rand) []byte {
 	b := make([]byte, chunkBytes)
 	n := len(dict.Symbols)
 	for j := 0; j < len(b); j += 4096 {
-		sym := dict.Symbols[(int(rng.Uint64()%uint64(n))+j%n)%n]
+		sym := dict.Symbols[(rng.Intn(n)+j%n)%n]
 		b[j] = sym[j%len(sym)] ^ byte(j)
 	}
 	globalSink.Add(uint64(b[0]))
