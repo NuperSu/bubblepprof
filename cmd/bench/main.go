@@ -9,7 +9,8 @@
 //   - wall-clock latency of Compute
 //   - max user-visible scheduling pause during Compute (heartbeat goroutine)
 //   - Go heap allocated by Compute (HeapAlloc delta, TotalAlloc delta)
-//   - process RSS before/after (/proc/self/status VmRSS, VmHWM)
+//   - process RSS before/after and per-call peak RSS delta on Linux
+//     (/proc/self/status VmRSS/VmHWM, optionally reset via clear_refs)
 //   - matched_goroutines, reachable_bytes from the response
 //
 // Aggregates: mean, stddev, min, max, p50, p95, p99 per metric.
@@ -43,15 +44,20 @@ import (
 )
 
 type config struct {
-	HeapMB        int     `json:"heap_mb"`
-	Goroutines    int     `json:"goroutines"`
-	MatchFraction float64 `json:"match_fraction"`
-	GCPre         bool    `json:"gc_pre"`
-	Iterations    int     `json:"iterations"`
-	Warmup        int     `json:"warmup"`
-	TracePath     string  `json:"trace_path,omitempty"`
-	OutPath       string  `json:"out_path,omitempty"`
-	Tag           string  `json:"tag,omitempty"`
+	HeapMB         int     `json:"heap_mb"`
+	Goroutines     int     `json:"goroutines"`
+	MatchFraction  float64 `json:"match_fraction"`
+	GCPre          bool    `json:"gc_pre"`
+	PreMeasureGC   bool    `json:"pre_measure_gc"`
+	ResetVMHWM     bool    `json:"reset_vmhwm"`
+	Workload       string  `json:"workload"`
+	Ring           int     `json:"ring"`
+	RotateInterval int     `json:"rotate_interval_ms"`
+	Iterations     int     `json:"iterations"`
+	Warmup         int     `json:"warmup"`
+	TracePath      string  `json:"trace_path,omitempty"`
+	OutPath        string  `json:"out_path,omitempty"`
+	Tag            string  `json:"tag,omitempty"`
 }
 
 type iterationResult struct {
@@ -62,7 +68,10 @@ type iterationResult struct {
 	GoTotalAllocDelta int64  `json:"go_total_alloc_delta_b"`
 	VmRSSBeforeKB     int64  `json:"vm_rss_before_kb"`
 	VmRSSAfterKB      int64  `json:"vm_rss_after_kb"`
+	VmHWMBeforeKB     int64  `json:"vm_hwm_before_kb"`
 	VmHWMAfterKB      int64  `json:"vm_hwm_after_kb"`
+	VmPeakDeltaKB     int64  `json:"vm_peak_delta_kb"`
+	VmHWMReset        bool   `json:"vm_hwm_reset"`
 	MatchedGoroutines int    `json:"matched_goroutines"`
 	ReachableBytes    uint64 `json:"reachable_bytes"`
 	UnderTrace        bool   `json:"under_trace,omitempty"`
@@ -110,6 +119,11 @@ func parseFlags() config {
 	flag.IntVar(&cfg.Goroutines, "goroutines", 1000, "labeled worker goroutines to spawn")
 	flag.Float64Var(&cfg.MatchFraction, "match-fraction", 1.0, "fraction of workers whose labels match the query (0..1)")
 	flag.BoolVar(&cfg.GCPre, "gc-pre", false, "set memusage.Options.GCBeforeHeapDump")
+	flag.BoolVar(&cfg.PreMeasureGC, "pre-measure-gc", true, "run two runtime.GC passes immediately before each measured Compute")
+	flag.BoolVar(&cfg.ResetVMHWM, "reset-vmhwm", true, "reset Linux VmHWM before each measured Compute via /proc/self/clear_refs when available")
+	flag.StringVar(&cfg.Workload, "workload", "static", "workload model: static or rotating")
+	flag.IntVar(&cfg.Ring, "ring", 8, "chunks retained per goroutine for -workload=rotating")
+	flag.IntVar(&cfg.RotateInterval, "rotate-ms", 100, "base chunk rotation interval in milliseconds for -workload=rotating")
 	flag.IntVar(&cfg.Iterations, "iterations", 20, "measured iterations")
 	flag.IntVar(&cfg.Warmup, "warmup", 3, "warmup iterations (discarded)")
 	flag.StringVar(&cfg.TracePath, "trace", "", "if set, record runtime/trace for one extra iteration to this path")
@@ -121,6 +135,16 @@ func parseFlags() config {
 	}
 	if cfg.MatchFraction > 1 {
 		cfg.MatchFraction = 1
+	}
+	if cfg.Workload != "static" && cfg.Workload != "rotating" {
+		fmt.Fprintf(os.Stderr, "bench: unknown -workload %q; using static\n", cfg.Workload)
+		cfg.Workload = "static"
+	}
+	if cfg.Ring < 1 {
+		cfg.Ring = 1
+	}
+	if cfg.RotateInterval < 1 {
+		cfg.RotateInterval = 1
 	}
 	return cfg
 }
@@ -154,7 +178,7 @@ func run(cfg config) error {
 	results := make([]iterationResult, 0, cfg.Iterations)
 	startedAt := time.Now()
 	for i := 0; i < cfg.Iterations; i++ {
-		ir, err := runOne(ctx, comp, req, hb, i)
+		ir, err := runOne(ctx, cfg, comp, req, hb, i)
 		if err != nil {
 			return fmt.Errorf("iteration %d: %w", i, err)
 		}
@@ -162,7 +186,7 @@ func run(cfg config) error {
 	}
 
 	if cfg.TracePath != "" {
-		ir, err := runUnderTrace(ctx, comp, req, hb, cfg.TracePath, len(results))
+		ir, err := runUnderTrace(ctx, cfg, comp, req, hb, cfg.TracePath, len(results))
 		if err != nil {
 			return fmt.Errorf("trace iteration: %w", err)
 		}
@@ -183,20 +207,28 @@ func run(cfg config) error {
 
 // runOne executes one measured Compute call and returns the captured metrics.
 //
-// A forced GC runs immediately before the measurement so prior iterations'
-// parsed snapshot, graph, and label maps cannot accumulate and inflate the
-// next Compute's wall time and HeapAlloc deltas. Without this, iterations
-// drift upward and the thesis numbers become meaningless.
+// When -pre-measure-gc is enabled, a forced GC runs immediately before the
+// measurement so prior iterations' parsed snapshot, graph, and label maps
+// cannot accumulate and inflate the next Compute's wall time and HeapAlloc
+// deltas. Live rotating-workload runs normally disable that cleanup so the
+// process can behave like an allocation-active service.
 func runOne(
 	ctx context.Context,
+	cfg config,
 	comp *memusage.Computer,
 	req memusage.Request,
 	hb *heartbeat,
 	idx int,
 ) (iterationResult, error) {
-	runtime.GC()
-	runtime.GC() // second pass: run finalizers queued by the first.
-	vmRSSBefore, _ := readProcStatus()
+	if cfg.PreMeasureGC {
+		runtime.GC()
+		runtime.GC() // second pass: run finalizers queued by the first.
+	}
+	hwmReset := false
+	if cfg.ResetVMHWM {
+		hwmReset = resetProcPeakRSS() == nil
+	}
+	vmRSSBefore, vmHWMBefore := readProcStatus()
 	var msBefore runtime.MemStats
 	runtime.ReadMemStats(&msBefore)
 
@@ -213,6 +245,10 @@ func runOne(
 	var msAfter runtime.MemStats
 	runtime.ReadMemStats(&msAfter)
 	vmRSSAfter, vmHWMAfter := readProcStatus()
+	vmPeakDelta := vmHWMAfter - vmHWMBefore
+	if vmPeakDelta < 0 {
+		vmPeakDelta = 0
+	}
 
 	return iterationResult{
 		Index:             idx,
@@ -222,7 +258,10 @@ func runOne(
 		GoTotalAllocDelta: int64(msAfter.TotalAlloc) - int64(msBefore.TotalAlloc),
 		VmRSSBeforeKB:     vmRSSBefore,
 		VmRSSAfterKB:      vmRSSAfter,
+		VmHWMBeforeKB:     vmHWMBefore,
 		VmHWMAfterKB:      vmHWMAfter,
+		VmPeakDeltaKB:     vmPeakDelta,
+		VmHWMReset:        hwmReset,
 		MatchedGoroutines: resp.MatchedGoroutines,
 		ReachableBytes:    resp.ReachableBytes,
 	}, nil
@@ -230,6 +269,7 @@ func runOne(
 
 func runUnderTrace(
 	ctx context.Context,
+	cfg config,
 	comp *memusage.Computer,
 	req memusage.Request,
 	hb *heartbeat,
@@ -248,7 +288,7 @@ func runUnderTrace(
 
 	tctx, task := trace.NewTask(ctx, "memusage_iter")
 	defer task.End()
-	ir, err := runOne(tctx, comp, req, hb, idx)
+	ir, err := runOne(tctx, cfg, comp, req, hb, idx)
 	if err != nil {
 		return ir, err
 	}
@@ -320,6 +360,10 @@ func readProcStatus() (vmRSSKB, vmHWMKB int64) {
 	return vmRSSKB, vmHWMKB
 }
 
+func resetProcPeakRSS() error {
+	return os.WriteFile("/proc/self/clear_refs", []byte("5\n"), 0)
+}
+
 func parseKBLine(line string) int64 {
 	fields := strings.Fields(line)
 	if len(fields) < 2 {
@@ -352,6 +396,13 @@ func collectGoInfo() goInfo {
 // The returned function blocks until all workers have exited (after the
 // caller cancels the context).
 func spawnWorkload(ctx context.Context, cfg config) func() {
+	if cfg.Workload == "rotating" {
+		return spawnRotatingWorkload(ctx, cfg)
+	}
+	return spawnStaticWorkload(ctx, cfg)
+}
+
+func spawnStaticWorkload(ctx context.Context, cfg config) func() {
 	if cfg.Goroutines <= 0 {
 		return func() {}
 	}
@@ -416,6 +467,89 @@ func spawnWorkload(ctx context.Context, cfg config) func() {
 	return func() { wg.Wait() }
 }
 
+func spawnRotatingWorkload(ctx context.Context, cfg config) func() {
+	if cfg.Goroutines <= 0 {
+		return func() {}
+	}
+
+	totalBytes := int64(cfg.HeapMB) * (1 << 20)
+	chunkBytes := totalBytes / int64(cfg.Goroutines*cfg.Ring)
+	if chunkBytes < 1024 {
+		chunkBytes = 1024
+	}
+
+	matchCount := int(math.Round(float64(cfg.Goroutines) * cfg.MatchFraction))
+	if matchCount > cfg.Goroutines {
+		matchCount = cfg.Goroutines
+	}
+	if matchCount < 0 {
+		matchCount = 0
+	}
+
+	started := make(chan struct{}, cfg.Goroutines)
+	var wg sync.WaitGroup
+	wg.Add(cfg.Goroutines)
+
+	alphaKey := strings.Clone("job")
+	alphaVal := strings.Clone("alpha")
+	betaVal := strings.Clone("beta")
+
+	rng := rand.New(rand.NewSource(1))
+	base := time.Duration(cfg.RotateInterval) * time.Millisecond
+
+	for i := 0; i < cfg.Goroutines; i++ {
+		val := betaVal
+		if i < matchCount {
+			val = alphaVal
+		}
+		shardKey := strings.Clone("shard")
+		shardVal := strings.Clone(strconv.Itoa(i % 32))
+		seed := rng.Int63()
+		pprof.Do(ctx, pprof.Labels(alphaKey, val, shardKey, shardVal), func(ctx context.Context) {
+			go func() {
+				defer wg.Done()
+				pprof.SetGoroutineLabels(ctx)
+
+				local := rand.New(rand.NewSource(seed))
+				ring := make([][]byte, cfg.Ring)
+				for j := range ring {
+					ring[j] = newTouchedChunk(chunkBytes, local)
+				}
+				started <- struct{}{}
+
+				jitter := time.Duration(seed%50) * time.Millisecond
+				ticker := time.NewTicker(base + jitter)
+				defer ticker.Stop()
+				turn := 0
+				for {
+					select {
+					case <-ctx.Done():
+						runtime.KeepAlive(ring)
+						return
+					case <-ticker.C:
+						ring[turn%len(ring)] = newTouchedChunk(chunkBytes, local)
+						turn++
+					}
+				}
+			}()
+		})
+	}
+
+	for i := 0; i < cfg.Goroutines; i++ {
+		<-started
+	}
+
+	return func() { wg.Wait() }
+}
+
+func newTouchedChunk(size int64, rng *rand.Rand) []byte {
+	data := make([]byte, size)
+	for off := int64(0); off < size; off += 4096 {
+		data[off] = byte(rng.Int63() >> uint(off%56))
+	}
+	return data
+}
+
 // summarize computes per-metric aggregate statistics, excluding any
 // iteration that ran under runtime/trace. Trace iterations carry
 // profiling overhead that would inflate the means and percentiles;
@@ -444,7 +578,9 @@ func summarize(rs []iterationResult) map[string]summary {
 		"go_heap_alloc_delta_b":  collect(func(r iterationResult) float64 { return float64(r.GoHeapAllocDelta) }),
 		"go_total_alloc_delta_b": collect(func(r iterationResult) float64 { return float64(r.GoTotalAllocDelta) }),
 		"vm_rss_after_kb":        collect(func(r iterationResult) float64 { return float64(r.VmRSSAfterKB) }),
+		"vm_hwm_before_kb":       collect(func(r iterationResult) float64 { return float64(r.VmHWMBeforeKB) }),
 		"vm_hwm_after_kb":        collect(func(r iterationResult) float64 { return float64(r.VmHWMAfterKB) }),
+		"vm_peak_delta_kb":       collect(func(r iterationResult) float64 { return float64(r.VmPeakDeltaKB) }),
 		"reachable_bytes":        collect(func(r iterationResult) float64 { return float64(r.ReachableBytes) }),
 	}
 }

@@ -5,14 +5,10 @@ Reads the per-config JSONs and summary.csv produced by run.sh + aggregate.py,
 emits plots into bench/results/plots/ and a short analysis.md summary.
 
 Scope: this script characterises the `memusage.Compute` / `/debug/memusage`
-endpoint, not the bench harness. It therefore restricts the analysis to
-`gc_pre=true` (i.e. `memusage.Options.GCBeforeHeapDump = true`), which is
-the operating point the endpoint is expected to be deployed with: a forced
-GC immediately before `runtime/debug.WriteHeapDump` keeps the dump small,
-keeps RSS overhead close to 1× the live heap, and eliminates cross-call
-parser garbage from inflating the next call. Bench-only artefacts (the
-runtime/trace iteration, the heartbeat goroutine, `/usr/bin/time -v`
-process-wide counters) are not reported here.
+endpoint, not the bench harness. It restricts the analysis to `gc_pre=true`
+and one workload model at a time. Static mode isolates algorithmic cost;
+rotating mode preserves live allocation pressure. Select the workload with
+BENCH_ANALYZE_WORKLOAD (default: static).
 
 Drops:
     * the 2 stray heap_mb=800 rows (partial earlier run);
@@ -25,6 +21,7 @@ Usage: python3 bench/analyze.py
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -35,14 +32,57 @@ ROOT = Path(__file__).resolve().parent
 RESULTS = ROOT / "results"
 PLOTS = RESULTS / "plots"
 PLOTS.mkdir(exist_ok=True)
+WORKLOAD = os.environ.get("BENCH_ANALYZE_WORKLOAD", "static")
+GC_PRE_REQUEST = os.environ.get("BENCH_ANALYZE_GC_PRE", "auto").lower()
+SELECTED_GC_PRE: bool | None = None
 
 
 # ----------------------------------------------------------------------------- IO
 
+def parse_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    return str(v).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def choose_gc_pre(df: pd.DataFrame) -> bool | None:
+    if GC_PRE_REQUEST in {"1", "true", "yes", "y"}:
+        return True
+    if GC_PRE_REQUEST in {"0", "false", "no", "n"}:
+        return False
+    if GC_PRE_REQUEST != "auto":
+        raise SystemExit(f"invalid BENCH_ANALYZE_GC_PRE={GC_PRE_REQUEST!r}; use auto, true, or false")
+    vals = set(df["gc_pre_bool"].tolist())
+    if True in vals:
+        return True
+    if False in vals:
+        return False
+    return None
+
 def load_summary() -> pd.DataFrame:
+    global SELECTED_GC_PRE
+
     df = pd.read_csv(RESULTS / "summary.csv")
     df = df[df["heap_mb"] != 800].copy()
-    df = df[df["gc_pre"] == True].copy()
+    df["gc_pre_bool"] = df["gc_pre"].map(parse_bool)
+    if "workload" not in df.columns:
+        df["workload"] = "static"
+    df["workload"] = df["workload"].fillna("static")
+    df = df[df["workload"] == WORKLOAD].copy()
+    if df.empty:
+        raise SystemExit(f"no configs found for workload={WORKLOAD!r} in {RESULTS / 'summary.csv'}")
+
+    SELECTED_GC_PRE = choose_gc_pre(df)
+    if SELECTED_GC_PRE is not None:
+        df = df[df["gc_pre_bool"] == SELECTED_GC_PRE].copy()
+    if df.empty:
+        raise SystemExit(
+            f"no configs found for workload={WORKLOAD!r} and gc_pre={SELECTED_GC_PRE}; "
+            "rerun bench/run.sh with that configuration or set BENCH_ANALYZE_GC_PRE"
+        )
+
     df["wall_ms_mean"] = df["wall_ns_mean"] / 1e6
     df["wall_ms_stddev"] = df["wall_ns_stddev"] / 1e6
     df["wall_ms_p50"] = df["wall_ns_p50"] / 1e6
@@ -52,18 +92,28 @@ def load_summary() -> pd.DataFrame:
     df["reachable_mb_mean"] = df["reachable_bytes_mean"] / (1 << 20)
     df["vm_hwm_mb"] = df["vm_hwm_after_kb_mean"] / 1024
     df["vm_rss_mb"] = df["vm_rss_after_kb_mean"] / 1024
+    if "vm_peak_delta_kb_mean" in df.columns:
+        df["vm_peak_delta_mb"] = df["vm_peak_delta_kb_mean"].fillna(0) / 1024
+        missing_peak = df["vm_peak_delta_mb"] <= 0
+        df.loc[missing_peak, "vm_peak_delta_mb"] = df.loc[missing_peak, "vm_hwm_mb"] - df.loc[missing_peak, "heap_mb"]
+    else:
+        df["vm_peak_delta_mb"] = df["vm_hwm_mb"] - df["heap_mb"]
     df["alloc_per_call_mb"] = df["go_heap_alloc_delta_b_mean"] / (1 << 20)
     df["total_alloc_per_call_gb"] = df["go_total_alloc_delta_b_mean"] / (1 << 30)
     return df
 
 
 def load_iterations() -> pd.DataFrame:
-    """One row per (config, iteration); excludes trace iterations and gc_pre=false."""
+    """One row per (config, iteration); excludes trace iterations and unselected gc_pre rows."""
     rows = []
     for jp in sorted(RESULTS.glob("*.json")):
         d = json.loads(jp.read_text())
         cfg = d["config"]
-        if cfg["heap_mb"] == 800 or not cfg["gc_pre"]:
+        if cfg["heap_mb"] == 800:
+            continue
+        if cfg.get("workload", "static") != WORKLOAD:
+            continue
+        if SELECTED_GC_PRE is not None and parse_bool(cfg.get("gc_pre", False)) != SELECTED_GC_PRE:
             continue
         for it in d["iterations"]:
             if it.get("under_trace"):
@@ -73,6 +123,7 @@ def load_iterations() -> pd.DataFrame:
                 "heap_mb": cfg["heap_mb"],
                 "goroutines": cfg["goroutines"],
                 "match_fraction": cfg["match_fraction"],
+                "workload": cfg.get("workload", "static"),
                 "index": it["index"],
                 "wall_ns": it["wall_ns"],
                 "go_heap_alloc_delta_b": it["go_heap_alloc_delta_b"],
@@ -83,6 +134,8 @@ def load_iterations() -> pd.DataFrame:
                 "matched_goroutines": it["matched_goroutines"],
             })
     iters = pd.DataFrame(rows)
+    if iters.empty:
+        return pd.DataFrame(columns=["wall_ns", "wall_ms", "match_fraction", "heap_mb", "goroutines"])
     iters["wall_ms"] = iters["wall_ns"] / 1e6
     return iters
 
@@ -145,14 +198,13 @@ def plot_wall_vs_goroutines(df: pd.DataFrame) -> None:
 
 def plot_rss_overhead(df: pd.DataFrame) -> None:
     sub = df[df["match_fraction"] == 1.0].copy()
-    sub["rss_overhead_mb"] = sub["vm_hwm_mb"] - sub["heap_mb"]
     fig, ax = plt.subplots(figsize=(7.2, 4.6))
     for g, grp in sub.sort_values(["goroutines", "heap_mb"]).groupby("goroutines"):
-        ax.plot(grp["heap_mb"], grp["rss_overhead_mb"], marker="o",
+        ax.plot(grp["heap_mb"], grp["vm_peak_delta_mb"], marker="o",
                 label=f"{g} goroutines")
     ax.set_xlabel("workload heap (MiB)")
-    ax.set_ylabel("VmHWM − workload heap (MiB)")
-    ax.set_title("Peak RSS overhead of /debug/memusage")
+    ax.set_ylabel("Peak RSS growth during Compute (MiB)")
+    ax.set_title("Per-call peak RSS overhead of /debug/memusage")
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=9)
     savefig("rss_overhead.png")
@@ -236,12 +288,11 @@ def fit_wall_vs_heap(df: pd.DataFrame) -> pd.DataFrame:
 
 def fit_rss_overhead(df: pd.DataFrame) -> pd.DataFrame:
     sub = df[df["match_fraction"] == 1.0].copy()
-    sub["rss_overhead_mb"] = sub["vm_hwm_mb"] - sub["heap_mb"]
     rows = []
     for g, grp in sub.groupby("goroutines"):
         a, b, r2 = linear_fit(
             grp["heap_mb"].to_numpy(dtype=float),
-            grp["rss_overhead_mb"].to_numpy(dtype=float),
+            grp["vm_peak_delta_mb"].to_numpy(dtype=float),
         )
         rows.append({
             "goroutines": g,
@@ -259,11 +310,13 @@ def write_markdown(df: pd.DataFrame, iters: pd.DataFrame, per_g: pd.DataFrame) -
     out.append("# /debug/memusage benchmark analysis\n\n")
     out.append(
         f"All numbers below characterise `memusage.Compute` "
-        f"with `Options.GCBeforeHeapDump = true` "
+        f"with `Options.GCBeforeHeapDump = {str(SELECTED_GC_PRE).lower()}` "
+        f"and workload `{WORKLOAD}` "
         f"(`go {df['go_version'].iloc[0]}` on `{df['goarch'].iloc[0]}`). "
-        f"{len(df)} configurations = 5 workload heap sizes × 4 goroutine counts "
-        f"× 3 match fractions; **20 iterations per configuration**, "
-        f"plus 3 discarded warm-ups.\n"
+        f"{len(df)} configurations = {df['heap_mb'].nunique()} workload heap sizes × "
+        f"{df['goroutines'].nunique()} goroutine counts × "
+        f"{df['match_fraction'].nunique()} match fractions; "
+        f"iterations per configuration are recorded in `summary.csv`.\n"
     )
 
     out.append("\n## 1. Variance and stability\n")
@@ -291,8 +344,8 @@ def write_markdown(df: pd.DataFrame, iters: pd.DataFrame, per_g: pd.DataFrame) -
     fit_h = fit_wall_vs_heap(df)
     out.append("```\n" + fit_h.to_string(index=False, float_format=lambda v: f"{v:.3f}") + "\n```\n")
     out.append(
-        f"`wall ≈ a · heap_MiB + b`. All four goroutine buckets give the same "
-        f"slope ≈ **{fit_h['wall_ms_per_MiB_heap'].mean():.3f} ms/MiB** "
+        f"`wall ≈ a · heap_MiB + b`. The fitted goroutine buckets give mean "
+        f"slope **{fit_h['wall_ms_per_MiB_heap'].mean():.3f} ms/MiB** "
         f"(R² ≥ {fit_h['R2'].min():.3f}). The intercept grows from "
         f"{fit_h['intercept_ms'].iloc[0]:.0f} ms at 100 goroutines to "
         f"{fit_h['intercept_ms'].iloc[-1]:.0f} ms at 10 000 — this is the cost "
@@ -339,14 +392,12 @@ def write_markdown(df: pd.DataFrame, iters: pd.DataFrame, per_g: pd.DataFrame) -
     fit_r = fit_rss_overhead(df)
     out.append("```\n" + fit_r.to_string(index=False, float_format=lambda v: f"{v:.3f}") + "\n```\n")
     out.append(
-        f"`VmHWM − workload_heap` grows linearly with workload heap at "
+        f"Per-call peak RSS growth (`vm_peak_delta_kb`) grows with workload heap at "
         f"slope ≈ **{fit_r['rss_overhead_MiB_per_MiB_heap'].mean():.2f}× workload heap** "
-        f"(R² ≥ {fit_r['R2'].min():.3f}), with a small per-goroutine intercept "
-        f"({fit_r['intercept_MiB'].min():.0f}–{fit_r['intercept_MiB'].max():.0f} MiB). "
-        "The slope ≈ 1× reflects that the dump file is roughly the size of the "
-        "live heap and its page-cache pages count toward VmHWM at peak. Steady-"
-        "state RSS (`VmRSS` after the call returns) is much smaller: the page "
-        "cache is reclaimable.\n"
+        f"(R² ≥ {fit_r['R2'].min():.3f}), with intercept "
+        f"{fit_r['intercept_MiB'].min():.0f}–{fit_r['intercept_MiB'].max():.0f} MiB. "
+        "This is the marginal resident growth during the Compute call after "
+        "resetting `VmHWM`, not the process lifetime high-water mark.\n"
     )
 
     out.append("\n## 6. Allocator pressure per call\n")
@@ -382,7 +433,11 @@ def main() -> None:
     df = load_summary()
     iters = load_iterations()
 
-    print(f"loaded {len(df)} configs (gc_pre=true only), {len(iters)} per-iteration samples")
+    print(
+        f"loaded {len(df)} configs "
+        f"(workload={WORKLOAD}, gc_pre={str(SELECTED_GC_PRE).lower()}), "
+        f"{len(iters)} per-iteration samples"
+    )
     print("plots →", PLOTS)
 
     # Wipe stale plots so the directory always reflects the current script.

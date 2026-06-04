@@ -14,6 +14,7 @@ Per-iteration metrics captured by `cmd/bench`:
 | `go_heap_alloc_delta_b` | `HeapAlloc` delta around `Compute` (Go-managed live heap) | `runtime.ReadMemStats` |
 | `go_total_alloc_delta_b` | `TotalAlloc` delta (cumulative bytes allocated) | `runtime.ReadMemStats` |
 | `vm_rss_after_kb` / `vm_hwm_after_kb` | Process resident set after the call; high-water mark | `/proc/self/status` |
+| `vm_peak_delta_kb` | Per-call peak RSS growth when Linux `clear_refs` can reset `VmHWM`; otherwise zero or a lower-fidelity cumulative delta | `/proc/self/clear_refs`, `/proc/self/status` |
 | `matched_goroutines`, `reachable_bytes` | Sanity-check fields from the JSON response | endpoint output |
 
 For per-stage timing (`capture` / `parse` / `labels` / `build` /
@@ -38,13 +39,27 @@ capture, which records STW spans explicitly.
 
 ## Inter-iteration cleanup
 
-`cmd/bench` runs two passes of `runtime.GC()` immediately before each
-measurement so the Go heap from the previous iteration (parsed snapshot,
+By default, `cmd/bench` runs two passes of `runtime.GC()` immediately before
+each measurement so the Go heap from the previous iteration (parsed snapshot,
 graph, label map) cannot accumulate and inflate the next call's WriteHeapDump
-size and wall time. Without this, iterations drift upward by ≈100 MiB each
-because Go does not eagerly reclaim large structures between calls.
+size and wall time. Without this, iterations drift upward because Go does not
+eagerly reclaim large structures between calls.
 
 The cost of the inter-iteration GC is excluded from the measurement window.
+Live rotating-workload runs use `-pre-measure-gc=false` so the process keeps
+normal allocation pressure and GC pacing.
+
+## Workload models
+
+`cmd/bench` has two workload models:
+
+| Model | Flag | What it means |
+| --- | --- | --- |
+| Static | `-workload static` | Each labeled goroutine retains one slice and then goes idle. This isolates the endpoint pipeline against a stable heap. |
+| Rotating | `-workload rotating` | Each labeled goroutine retains a fixed-size ring and periodically replaces chunks. Resident heap stays roughly flat while allocation churn drives normal GC behavior, closer to `examples/log_ingest`. |
+
+Use static results for algorithmic cost and allocator pressure. Use rotating
+results for service-like RSS behavior.
 
 ## Configuration sweep
 
@@ -65,11 +80,15 @@ the cost of the per-query BFS from the cost of the structural graph build.
 Requires Linux + `/usr/bin/time` (GNU time) + `python3`.
 
 ```bash
-# quick: 4 configs (2 heap × 2 goroutines), validates end-to-end
+# quick: 4 static configs (2 heap × 2 goroutines), validates end-to-end
 bash bench/run.sh --quick
 
-# full: thesis sweep (120 configs × 20 iterations, several hours)
+# full: static thesis sweep (120 configs × 20 iterations, several hours)
 bash bench/run.sh --full
+
+# live variants: rotating workload, no pre-measurement GC
+bash bench/run.sh --quick-live
+bash bench/run.sh --full-live
 
 # inspect a single configuration:
 go run ./cmd/bench -heap-mb 500 -goroutines 1000 \
@@ -118,11 +137,15 @@ measure slightly higher peak allocation than the production pipeline.
 
 - **Linux only** — `/proc/self/status` and `/usr/bin/time -v` are required.
   `cmd/bench` will still run elsewhere but RSS columns will be zero.
-- **Inter-iteration GC removes drift but adds cost outside the window.** The
-  drift it removes is artifactual (stale objects from previous Computes).
-  Production callers paying for `/debug/memusage` infrequently see numbers
-  closer to the first measured iteration; back-to-back rapid-fire callers
-  pay the accumulation.
+- **Inter-iteration GC removes drift but adds cost outside the window.** In
+  static mode, the drift it removes is artifactual (stale objects from previous
+  Computes). Rotating live mode disables this cleanup to preserve normal GC
+  pacing.
+- **`VmHWM` must be reset for per-call peak RSS.** `cmd/bench` defaults to
+  `-reset-vmhwm=true`, which uses Linux `echo 5 > /proc/self/clear_refs`.
+  If the kernel does not support this, `vm_hwm_after_kb` remains a process
+  lifetime high-water mark and `vm_peak_delta_kb` is not a reliable per-call
+  peak.
 - **`match-fraction=0.01`** still walks the graph from at least one matched
   goroutine's roots; it does not measure zero-match because `0.01 × N` rounds
   to at least one worker for every goroutine count in the sweep. Use

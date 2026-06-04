@@ -5,16 +5,18 @@
 # aggregates per-config JSONs into bench/results/summary.csv.
 #
 # Modes:
-#   --quick  small sweep (4 configs × 5 iterations) for end-to-end validation.
-#   --full   full sweep (120 configs × 20 iterations) for the thesis run.
+#   --quick       small static sweep (4 configs × 5 iterations).
+#   --full        full static sweep (120 configs × 20 iterations).
+#   --quick-live  small rotating-workload sweep.
+#   --full-live   full rotating-workload sweep.
 #
 # Requirements: Linux + /usr/bin/time (GNU time) + python3.
 
 set -euo pipefail
 
 mode="${1:-}"
-if [[ "$mode" != "--quick" && "$mode" != "--full" ]]; then
-    echo "usage: $0 --quick | --full" >&2
+if [[ "$mode" != "--quick" && "$mode" != "--full" && "$mode" != "--quick-live" && "$mode" != "--full-live" ]]; then
+    echo "usage: $0 --quick | --full | --quick-live | --full-live" >&2
     exit 2
 fi
 
@@ -41,12 +43,22 @@ bin="$results_dir/bench"
 echo "build: $bin"
 ( cd "$repo_root" && go build -o "$bin" ./cmd/bench )
 
+workload="static"
+pre_measure_gc="true"
+if [[ "$mode" == "--quick-live" || "$mode" == "--full-live" ]]; then
+    workload="rotating"
+    pre_measure_gc="false"
+fi
+
 # Configuration sweep.
-if [[ "$mode" == "--quick" ]]; then
+if [[ "$mode" == "--quick" || "$mode" == "--quick-live" ]]; then
     heap_mbs=(50 200)
     goroutines_list=(100 1000)
     match_fractions=(1.0)
     gc_pres=(false)
+    if [[ "$mode" == "--quick-live" ]]; then
+        gc_pres=(false true)
+    fi
     iterations=5
     warmup=2
 else
@@ -66,6 +78,9 @@ run_one() {
     local match="$3"
     local gcpre="$4"
     local tag="heap=${heap_mb}_g=${goroutines}_match=${match}_gc=${gcpre}"
+    if [[ "$workload" != "static" ]]; then
+        tag="${workload}_${tag}"
+    fi
     local json="$results_dir/${tag}.json"
     local timef="$results_dir/${tag}.time.txt"
     local trace=""
@@ -80,6 +95,9 @@ run_one() {
         -match-fraction "$match"
         -iterations "$iterations"
         -warmup "$warmup"
+        -workload "$workload"
+        -pre-measure-gc="$pre_measure_gc"
+        -reset-vmhwm=true
         -tag "$tag"
         -out "$json"
     )
