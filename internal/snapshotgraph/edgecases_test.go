@@ -239,7 +239,6 @@ func TestSummaryIncludesNewCounters(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"zero object pointers: 1",
-		"resolved object edges: 0",
 		"goroutines: 1 (system: 1)",
 		"goroutine roots: 0",
 		"selected-root reachability: computed by internal/memusage",

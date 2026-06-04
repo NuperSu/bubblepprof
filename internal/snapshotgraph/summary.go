@@ -17,7 +17,6 @@ func (a *Analysis) PrintSummary(w io.Writer) {
 	fmt.Fprintf(w, "objects: %d\n", s.Objects)
 	fmt.Fprintf(w, "object bytes: %d\n", s.ObjectBytes)
 	fmt.Fprintf(w, "object edges: %d\n", s.Edges)
-	fmt.Fprintf(w, "resolved object edges: %d\n", s.Edges)
 	fmt.Fprintf(w, "raw object pointers: %d\n", s.RawObjectPointers)
 	fmt.Fprintf(w, "  zero object pointers: %d\n", s.ZeroObjectPointers)
 	fmt.Fprintf(w, "  resolved object pointers: %d\n", s.ResolvedObjectPointers)
