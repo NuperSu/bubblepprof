@@ -6,7 +6,7 @@
 /collect.py
 /coverage.out
 /order_pipeline
-/logingest
+/log_ingest
 /tracked-files.zip
 /labeloffsetprobe
 /bench/results*
