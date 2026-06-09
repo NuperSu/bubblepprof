@@ -72,6 +72,29 @@ func TestProcessReader_RejectsHeapBackedString(t *testing.T) {
 	}
 }
 
+// probeMutable lives in the writable __DATA segment. Its on-disk bytes are
+// init-time state, not runtime state, so serving them would silently return
+// stale data — the reader must reject writable-segment addresses entirely,
+// matching the Linux read-only-mapping and ELF non-writable-segment policy.
+// (The equivalent omission on Windows was caught by mutation testing under
+// wine: with the write filter removed, ReadAtAddr served the on-disk init
+// bytes of a global that had been modified at runtime.)
+var probeMutable = [32]byte{'a', 'd', 'd', 'r', 's', 'p', 'a', 'c', 'e', '-', 'm', 'u', 't', 'a', 'b', 'l', 'e'}
+
+func TestProcessReader_RejectsWritableSegmentAddress(t *testing.T) {
+	r, err := OpenSelfProcessReader()
+	if err != nil {
+		t.Fatalf("OpenSelfProcessReader: %v", err)
+	}
+	defer r.Close()
+
+	probeMutable[17] = 'X' // ensure runtime bytes differ from on-disk bytes
+	addr := uint64(uintptr(unsafe.Pointer(&probeMutable[0])))
+	if got, ok := r.ReadAtAddr(addr, uint64(len(probeMutable))); ok {
+		t.Fatalf("ProcessReader must reject writable-segment address 0x%x, served %q", addr, got)
+	}
+}
+
 func TestProcessReader_RejectsAddressOverflow(t *testing.T) {
 	r, err := OpenSelfProcessReader()
 	if err != nil {
