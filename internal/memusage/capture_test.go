@@ -7,12 +7,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/heapdump"
 	"github.com/NuperSu/bubblepprof/internal/heaplabels"
 	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
@@ -623,5 +625,38 @@ func TestComputer_Compute_SequentialRequestsReopenProcReader(t *testing.T) {
 		if resp == nil {
 			t.Fatalf("Compute call %d: nil response", i+1)
 		}
+	}
+}
+
+// TestRealDump_NoIfaceEfaceFields pins the runtime invariant the pointer
+// extractor relies on: the Go heap dump writer emits only fieldKindPtr
+// from GC bitmaps (runtime/heapdump.go: dumpbv), so a real dump must never
+// contain iface/eface field kinds. A non-zero counter means a new runtime
+// started emitting them and interface data words may be decoded twice
+// (once as the ptr bitmap slot, once as the iface/eface data word).
+func TestRealDump_NoIfaceEfaceFields(t *testing.T) {
+	// Keep a live interface value around so the dump contains eface-shaped
+	// data the writer could plausibly tag.
+	carrier := &struct{ V any }{V: &struct{ X int }{X: 1}}
+
+	path, cleanup, err := RuntimeHeapDumpCapturer{}.CaptureHeapDump(context.Background(), true)
+	if err != nil {
+		t.Fatalf("CaptureHeapDump: %v", err)
+	}
+	defer cleanup()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	snap, _, err := heapdump.ParseLazyContents(f, f, heapdump.Options{})
+	if err != nil {
+		t.Fatalf("ParseLazyContents: %v", err)
+	}
+	runtime.KeepAlive(carrier)
+
+	if snap.Stats.InterfaceFieldsDecoded != 0 || snap.Stats.EfaceFieldsDecoded != 0 {
+		t.Fatalf("real dump decoded iface/eface fields (iface=%d eface=%d); the dump writer should only emit fieldKindPtr — runtime drift?",
+			snap.Stats.InterfaceFieldsDecoded, snap.Stats.EfaceFieldsDecoded)
 	}
 }

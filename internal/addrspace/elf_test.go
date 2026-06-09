@@ -1,6 +1,7 @@
 package addrspace
 
 import (
+	"debug/elf"
 	"math"
 	"os"
 	"testing"
@@ -50,6 +51,13 @@ func TestOpenELFReader_SelfExe(t *testing.T) {
 	segments := r.Segments()
 	if len(segments) == 0 {
 		t.Fatal("expected at least one PT_LOAD segment in test binary")
+	}
+	// Writable segments hold init-time bytes on disk, not runtime state;
+	// indexing them could silently serve stale string bodies.
+	for _, s := range segments {
+		if s.Flags&elf.PF_W != 0 {
+			t.Fatalf("writable PT_LOAD segment indexed: %+v", s)
+		}
 	}
 	if _, ok := r.ReadAtAddr(0, 8); ok {
 		t.Fatal("read at addr=0 must fail")

@@ -754,7 +754,6 @@ func (p *parser) parseStackFrame() error {
 		p.snap.Stats.EfaceFieldsDecoded += eface
 		frame.PointerAddrs = targets
 		frame.PointerSlots = slots
-		p.snap.Stats.StackPointers += len(targets)
 	}
 
 	if p.curG == nil {
@@ -765,6 +764,7 @@ func (p *parser) parseStackFrame() error {
 	}
 	p.curG.Frames = append(p.curG.Frames, frame)
 	p.snap.Stats.StackFrameCount++
+	p.snap.Stats.StackPointers += len(frame.PointerAddrs)
 	return nil
 }
 

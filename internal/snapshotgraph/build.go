@@ -142,8 +142,20 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	// g.Objects[i] corresponds 1:1 with snap.Objects[i] (every iteration
 	// of the loop above appends exactly one graph object). Reading from
 	// snap avoids copying every object's pointer slice into the graph.
+	//
+	// Duplicate edges are dropped with an epoch-stamped seen array instead
+	// of AddEdge's linear Children scan: the scan is O(children) per insert,
+	// which is quadratic for an object with many distinct outgoing pointers
+	// (a large []*T backing array). seen[target] holds the 1-based index of
+	// the last source object that recorded an edge to target — O(1) per
+	// edge, one uint32 per object, freed when Build returns. (Degenerate
+	// case: at exactly 2^32 objects the final object's epoch wraps to the
+	// zero "unseen" stamp and its duplicate edges are kept; reachability is
+	// unaffected since BFS dedups by ObjectID.)
+	seen := make([]uint32, len(g.Objects))
 	for i := range g.Objects {
 		fromID := g.Objects[i].ID
+		epoch := uint32(i) + 1
 		for _, ptr := range snap.Objects[i].PointerAddrs {
 			a.Stats.RawObjectPointers++
 			if ptr == 0 {
@@ -156,7 +168,11 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 				continue
 			}
 			a.Stats.ResolvedObjectPointers++
-			g.AddEdge(fromID, targetID)
+			if seen[targetID] == epoch {
+				continue
+			}
+			seen[targetID] = epoch
+			g.Objects[fromID].Children = append(g.Objects[fromID].Children, targetID)
 		}
 	}
 

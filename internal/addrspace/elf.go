@@ -61,6 +61,13 @@ func OpenELFReader(path string) (*ELFReader, error) {
 		if p.Flags&elf.PF_R == 0 {
 			continue
 		}
+		// Writable segments (.data, .bss prefix) hold the program's
+		// init-time bytes on disk, not its runtime state; serving them
+		// could silently return stale bytes. Mirrors the read-only
+		// eligibility rule ProcessReader applies to live mappings.
+		if p.Flags&elf.PF_W != 0 {
+			continue
+		}
 		if p.Filesz == 0 {
 			continue
 		}

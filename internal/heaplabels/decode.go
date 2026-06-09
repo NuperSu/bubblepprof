@@ -185,15 +185,27 @@ func DecodeLabelMap(structuralReader addrspace.Reader, bodyReader addrspace.Read
 		return nil, decodeError{StatusMalformed, "label.Set list address overflows"}
 	}
 
-	dataPtr, ok := addrspace.ReadUintptr(structuralReader, listHeaderAddr+layout.SliceDataOffset, layout.PtrSize, order)
+	sliceDataAddr, ok := addUint64(listHeaderAddr, layout.SliceDataOffset)
+	if !ok {
+		return nil, decodeError{StatusMalformed, "label.Set list data address overflows"}
+	}
+	sliceLenAddr, ok := addUint64(listHeaderAddr, layout.SliceLenOffset)
+	if !ok {
+		return nil, decodeError{StatusMalformed, "label.Set list length address overflows"}
+	}
+	sliceCapAddr, ok := addUint64(listHeaderAddr, layout.SliceCapOffset)
+	if !ok {
+		return nil, decodeError{StatusMalformed, "label.Set list capacity address overflows"}
+	}
+	dataPtr, ok := addrspace.ReadUintptr(structuralReader, sliceDataAddr, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "labelMap object bytes are unavailable"}
 	}
-	length, ok := addrspace.ReadUintptr(structuralReader, listHeaderAddr+layout.SliceLenOffset, layout.PtrSize, order)
+	length, ok := addrspace.ReadUintptr(structuralReader, sliceLenAddr, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "label.Set list length is unavailable"}
 	}
-	capacity, ok := addrspace.ReadUintptr(structuralReader, listHeaderAddr+layout.SliceCapOffset, layout.PtrSize, order)
+	capacity, ok := addrspace.ReadUintptr(structuralReader, sliceCapAddr, layout.PtrSize, order)
 	if !ok {
 		return nil, decodeError{StatusLabelsObjectMissing, "label.Set list capacity is unavailable"}
 	}
@@ -223,11 +235,19 @@ func DecodeLabelMap(structuralReader addrspace.Reader, bodyReader addrspace.Read
 		if !ok {
 			return nil, decodeError{StatusMalformed, "label address overflows"}
 		}
-		key, err := DecodeString(structuralReader, bodyReader, layout, opts, labelAddr+layout.LabelKeyOffset)
+		keyAddr, ok := addUint64(labelAddr, layout.LabelKeyOffset)
+		if !ok {
+			return nil, decodeError{StatusMalformed, "label key address overflows"}
+		}
+		valueAddr, ok := addUint64(labelAddr, layout.LabelValueOffset)
+		if !ok {
+			return nil, decodeError{StatusMalformed, "label value address overflows"}
+		}
+		key, err := DecodeString(structuralReader, bodyReader, layout, opts, keyAddr)
 		if err != nil {
 			return nil, err
 		}
-		value, err := DecodeString(structuralReader, bodyReader, layout, opts, labelAddr+layout.LabelValueOffset)
+		value, err := DecodeString(structuralReader, bodyReader, layout, opts, valueAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -247,11 +267,19 @@ func DecodeLabelMap(structuralReader addrspace.Reader, bodyReader addrspace.Read
 func DecodeString(structuralReader addrspace.Reader, bodyReader addrspace.Reader, layout runtimelayout.Layout, opts Options, headerAddr uint64) (string, error) {
 	opts = normalizeOptions(opts)
 	order := layout.ByteOrder()
-	dataPtr, ok := addrspace.ReadUintptr(structuralReader, headerAddr+layout.StringDataOffset, layout.PtrSize, order)
+	strDataAddr, ok := addUint64(headerAddr, layout.StringDataOffset)
+	if !ok {
+		return "", decodeError{StatusMalformed, "string header data address overflows"}
+	}
+	strLenAddr, ok := addUint64(headerAddr, layout.StringLenOffset)
+	if !ok {
+		return "", decodeError{StatusMalformed, "string header length address overflows"}
+	}
+	dataPtr, ok := addrspace.ReadUintptr(structuralReader, strDataAddr, layout.PtrSize, order)
 	if !ok {
 		return "", decodeError{StatusStringMissing, "string header data pointer is unavailable"}
 	}
-	length, ok := addrspace.ReadUintptr(structuralReader, headerAddr+layout.StringLenOffset, layout.PtrSize, order)
+	length, ok := addrspace.ReadUintptr(structuralReader, strLenAddr, layout.PtrSize, order)
 	if !ok {
 		return "", decodeError{StatusStringMissing, "string header length is unavailable"}
 	}

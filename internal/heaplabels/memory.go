@@ -97,18 +97,24 @@ func (m *Memory) Read(addr uint64, size uint64) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	for _, r := range m.ranges {
-		if addr < r.Start {
-			return nil, false
-		}
-		if addr >= r.Start && end <= r.End {
-			off := addr - r.Start
-			out := make([]byte, size)
-			copy(out, r.Data[off:off+size])
-			return out, true
-		}
+	// ranges is sorted by (Start, End): binary-search to the last range
+	// with Start <= addr — the only candidate, since heap objects do not
+	// overlap, and among equal-Start duplicates the ascending End order
+	// makes it the longest. Mirrors heapdump.ContentResolver.Read.
+	idx := sort.Search(len(m.ranges), func(i int) bool {
+		return m.ranges[i].Start > addr
+	})
+	if idx == 0 {
+		return nil, false
 	}
-	return nil, false
+	r := m.ranges[idx-1]
+	if end > r.End {
+		return nil, false
+	}
+	off := addr - r.Start
+	out := make([]byte, size)
+	copy(out, r.Data[off:off+size])
+	return out, true
 }
 
 // ReadAtAddr implements addrspace.Reader.
