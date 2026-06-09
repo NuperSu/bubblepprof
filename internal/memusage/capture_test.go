@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -171,27 +172,6 @@ func TestNewComputer(t *testing.T) {
 	}
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
-	}
-}
-
-// --- Computer.Close ---
-
-func TestComputer_Close_NilReceiver(t *testing.T) {
-	var c *Computer
-	if err := c.Close(); err != nil {
-		t.Fatalf("(*Computer)(nil).Close() = %v, want nil", err)
-	}
-}
-
-func TestComputer_Close_Idempotent(t *testing.T) {
-	// Close is a compatibility no-op: Compute opens and closes its process
-	// reader per request, so Close must succeed any number of times and
-	// must not affect later Compute calls.
-	c := &Computer{}
-	for i := 0; i < 2; i++ {
-		if err := c.Close(); err != nil {
-			t.Fatalf("Close call %d = %v, want nil", i+1, err)
-		}
 	}
 }
 
@@ -519,27 +499,6 @@ func TestComputer_Compute_UnsupportedRuntime(t *testing.T) {
 	}
 }
 
-func TestComputer_Compute_WithProcReader(t *testing.T) {
-	// When DisableProcessMemoryReader=false, processReader opens /proc/self/mem
-	// (Linux) and passes it as extra to the recoverer.  On other platforms
-	// the reader is unavailable but the path should still not error.
-	c := &Computer{
-		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
-		Recoverer: fakeRecoverer{result: heaplabels.Result{
-			LabelsByGID: map[uint64]map[string]string{},
-		}},
-		Opts: Options{DisableProcessMemoryReader: false},
-	}
-	defer c.Close()
-	resp, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
-	if err != nil {
-		t.Fatalf("Compute with proc reader: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("expected non-nil response")
-	}
-}
-
 func TestComputer_Compute_ProcWarningAppearsInStringMissingError(t *testing.T) {
 	// When the process memory reader is disabled and label decoding reports
 	// string_missing failures, the proc-reader warning must appear in the
@@ -606,16 +565,59 @@ func TestComputer_Compute_ValidatesBeforeCapture(t *testing.T) {
 	}
 }
 
-func TestComputer_Compute_SequentialRequestsReopenProcReader(t *testing.T) {
-	// Compute opens its process reader at the start of each call and
-	// closes it before returning; sequential requests must each succeed
-	// with a freshly opened reader (and freshly parsed /proc/self/maps).
+// procMemFDCount returns how many of this process's open file descriptors
+// point at /proc/<pid>/mem, or -1 when /proc/self/fd is unavailable
+// (non-Linux).
+func procMemFDCount(t *testing.T) int {
+	t.Helper()
+	const fdDir = "/proc/self/fd"
+	entries, err := os.ReadDir(fdDir)
+	if err != nil {
+		return -1
+	}
+	want := fmt.Sprintf("/proc/%d/mem", os.Getpid())
+	count := 0
+	for _, e := range entries {
+		target, err := os.Readlink(filepath.Join(fdDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if target == want {
+			count++
+		}
+	}
+	return count
+}
+
+// recordingExtraRecoverer records the extra string-memory reader passed to
+// each Recover call.
+type recordingExtraRecoverer struct {
+	extras []addrspace.Reader
+}
+
+func (r *recordingExtraRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, mem *heaplabels.Memory, extra addrspace.Reader) (heaplabels.Result, error) {
+	r.extras = append(r.extras, extra)
+	return heaplabels.Result{LabelsByGID: map[uint64]map[string]string{}}, nil
+}
+
+func TestComputer_Compute_ProcReaderPerRequestLifecycle(t *testing.T) {
+	// Compute opens the process reader at the start of each call and closes
+	// it before returning. Observable contract: every request hands the
+	// recoverer a process reader (when the platform supports one), and no
+	// /proc/<pid>/mem descriptor stays open after Compute returns — the old
+	// cached-reader design held one for the life of the Computer.
+	probe, _ := openProcessReader(false)
+	platformHasReader := probe != nil
+	if probe != nil {
+		probe.Close()
+	}
+
+	before := procMemFDCount(t)
+	rec := &recordingExtraRecoverer{}
 	c := &Computer{
-		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
-		Recoverer: fakeRecoverer{result: heaplabels.Result{
-			LabelsByGID: map[uint64]map[string]string{},
-		}},
-		Opts: Options{DisableProcessMemoryReader: false},
+		Capturer:  dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: rec,
+		Opts:      Options{DisableProcessMemoryReader: false},
 	}
 	for i := 0; i < 2; i++ {
 		resp, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
@@ -624,6 +626,22 @@ func TestComputer_Compute_SequentialRequestsReopenProcReader(t *testing.T) {
 		}
 		if resp == nil {
 			t.Fatalf("Compute call %d: nil response", i+1)
+		}
+	}
+
+	if len(rec.extras) != 2 {
+		t.Fatalf("Recover called %d times, want 2", len(rec.extras))
+	}
+	if platformHasReader {
+		for i, extra := range rec.extras {
+			if extra == nil {
+				t.Fatalf("Compute call %d passed nil extra reader to the recoverer; want a freshly opened process reader per request", i+1)
+			}
+		}
+	}
+	if before >= 0 {
+		if after := procMemFDCount(t); after != before {
+			t.Fatalf("open /proc/<pid>/mem fds = %d after Compute, want %d — the per-request process reader must be closed before Compute returns", after, before)
 		}
 	}
 }

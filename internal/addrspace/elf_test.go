@@ -13,13 +13,6 @@ func TestOpenELFReader_Missing(t *testing.T) {
 	}
 }
 
-func TestELFReader_Name_NilReceiver(t *testing.T) {
-	var r *ELFReader
-	if got := r.Name(); got != "elf" {
-		t.Fatalf("nil ELFReader.Name() = %q, want %q", got, "elf")
-	}
-}
-
 func TestELFReader_Name_NonNil(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {

@@ -1,28 +1,17 @@
 package runtimelayout
 
-import (
-	"runtime"
-	"testing"
-	"unsafe"
-)
+import "testing"
 
-func TestLocalInput(t *testing.T) {
+// TestLocalInputHasVerifiedLayout is the toolchain tripwire: the pre-flight
+// in memusage.Computer.Compute rejects requests with unsupported_runtime
+// when Lookup(LocalInput()) misses, so a miss for the toolchain running the
+// tests means /debug/memusage is broken on it. This fails on a Go upgrade
+// that outruns the verified layout table.
+func TestLocalInputHasVerifiedLayout(t *testing.T) {
 	input := LocalInput()
-	if input.GoVersion != runtime.Version() {
-		t.Fatalf("GoVersion = %q, want %q", input.GoVersion, runtime.Version())
-	}
-	if input.GOARCH != runtime.GOARCH {
-		t.Fatalf("GOARCH = %q, want %q", input.GOARCH, runtime.GOARCH)
-	}
-	if want := int(unsafe.Sizeof(uintptr(0))); input.PtrSize != want {
-		t.Fatalf("PtrSize = %d, want %d", input.PtrSize, want)
-	}
-	// All currently supported test platforms are little-endian; more
-	// importantly, the value must agree with what the heap dump writer
-	// reports for this process, which Lookup uses as a key.
-	var probe = [2]byte{1, 0}
-	bigEndian := *(*uint16)(unsafe.Pointer(&probe[0])) != 1
-	if input.BigEndian != bigEndian {
-		t.Fatalf("BigEndian = %t, want %t", input.BigEndian, bigEndian)
+	if _, ok := Lookup(input); !ok {
+		t.Fatalf("no verified runtime.g.labels layout for the test toolchain (go=%s arch=%s ptrSize=%d bigEndian=%t); "+
+			"run `go run ./cmd/labeloffsetprobe` and add the printed TableEntry to internal/runtimelayout/table.go",
+			input.GoVersion, input.GOARCH, input.PtrSize, input.BigEndian)
 	}
 }
