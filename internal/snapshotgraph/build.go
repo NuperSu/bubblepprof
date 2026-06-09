@@ -144,7 +144,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	// snap avoids copying every object's pointer slice into the graph.
 	//
 	// Duplicate edges are dropped with an epoch-stamped seen array instead
-	// of AddEdge's linear Children scan: the scan is O(children) per insert,
+	// of a linear Children scan: such a scan is O(children) per insert,
 	// which is quadratic for an object with many distinct outgoing pointers
 	// (a large []*T backing array). seen[target] holds the 1-based index of
 	// the last source object that recorded an edge to target — O(1) per

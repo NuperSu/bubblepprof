@@ -1,7 +1,6 @@
 package snapshotgraph
 
 import (
-	"bytes"
 	"math"
 	"strings"
 	"testing"
@@ -213,56 +212,6 @@ func TestReachableFrom_DuplicateRoots(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("reachable = %v, want exactly 1 object", got)
-	}
-}
-
-func TestPrintSummaryNilAnalysis(t *testing.T) {
-	var a *Analysis
-	var out bytes.Buffer
-	a.PrintSummary(&out)
-	if got := out.String(); !strings.Contains(got, "snapshot analysis: <nil>") {
-		t.Fatalf("unexpected nil summary:\n%s", got)
-	}
-}
-
-func TestSummaryIncludesNewCounters(t *testing.T) {
-	a := mustBuild(t, &heapsnapshot.HeapSnapshot{
-		Objects: []heapsnapshot.Object{{Addr: 0x1000, Size: 8, PointerAddrs: []uint64{0}}},
-		Goroutines: []heapsnapshot.Goroutine{{
-			ID:       1,
-			IsSystem: true,
-		}},
-	})
-
-	var out bytes.Buffer
-	a.PrintSummary(&out)
-	got := out.String()
-	for _, want := range []string{
-		"zero object pointers: 1",
-		"goroutines: 1 (system: 1)",
-		"goroutine roots: 0",
-		"selected-root reachability: computed by internal/memusage",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("summary missing %q:\n%s", want, got)
-		}
-	}
-}
-
-func TestPrintSummary_WithWarnings(t *testing.T) {
-	a, err := Build(&heapsnapshot.HeapSnapshot{}, Options{})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	a.Warnings = []string{"first warning", "second warning"}
-	var out bytes.Buffer
-	a.PrintSummary(&out)
-	got := out.String()
-	if !strings.Contains(got, "  warning: first warning") {
-		t.Fatalf("summary missing first warning:\n%s", got)
-	}
-	if !strings.Contains(got, "  warning: second warning") {
-		t.Fatalf("summary missing second warning:\n%s", got)
 	}
 }
 

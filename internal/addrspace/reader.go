@@ -7,8 +7,6 @@
 // A Reader abstracts "give me size bytes starting at this virtual
 // address". Concrete implementations:
 //
-//	*RangeReader     — backed by an in-memory slice of byte ranges,
-//	                   used to expose heap dump object contents.
 //	*ProcessReader   — reads the running process address space:
 //	                     Linux: /proc/self/mem (read-only mappings only).
 //	                     FreeBSD: /proc/self/mem when procfs is mounted;

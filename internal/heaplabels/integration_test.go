@@ -124,7 +124,7 @@ func captureRuntimePprofLabels(t *testing.T, specs ...runtimeWorkerSpec) (map[ui
 		t.Fatalf("parse heap dump: %v", err)
 	}
 
-	layout, haveLayout := LookupLayout(snap)
+	layout, haveLayout := runtimelayout.Lookup(LookupInputFromSnapshot(snap))
 	if !haveLayout {
 		for _, spec := range specs {
 			if len(spec.Want) == 0 {
@@ -218,7 +218,7 @@ func dynamicKV(kv ...string) []string {
 	return out
 }
 
-func TestLookupLayoutVerifiedGo126AMD64(t *testing.T) {
+func TestSnapshotLayoutVerifiedGo126AMD64(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{
 			PtrSize:      8,
@@ -226,9 +226,9 @@ func TestLookupLayoutVerifiedGo126AMD64(t *testing.T) {
 			BuildVersion: "go1.26.3-X:nodwarf5",
 		},
 	}
-	layout, ok := LookupLayout(snap)
+	layout, ok := runtimelayout.Lookup(LookupInputFromSnapshot(snap))
 	if !ok || layout.GLabelsOffset != 0x160 {
-		t.Fatalf("LookupLayout offset = %#x, ok=%t", layout.GLabelsOffset, ok)
+		t.Fatalf("Lookup offset = %#x, ok=%t", layout.GLabelsOffset, ok)
 	}
 	if layout.Source != runtimelayout.SourceTable {
 		t.Fatalf("Source = %q", layout.Source)

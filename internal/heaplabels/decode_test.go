@@ -75,28 +75,20 @@ func TestDecodeLabelsForGoroutine(t *testing.T) {
 	}
 }
 
-func TestDecodeAllAutoUnsupportedRuntime(t *testing.T) {
-	snap := syntheticLabelSnapshot(0x18, []kv{{"bubble", "alpha"}})
-	// Default snapshot has no BuildVersion → no table match → unsupported.
-	got := DecodeAllAuto(snap, Options{})
-	if got.Stats.GoroutinesUnsupported != 1 {
-		t.Fatalf("unsupported = %d, stats=%+v", got.Stats.GoroutinesUnsupported, got.Stats)
-	}
-	if got.Goroutines[0].Status != StatusUnsupportedRuntime {
-		t.Fatalf("status = %s", got.Goroutines[0].Status)
-	}
-	if len(got.Warnings) == 0 {
-		t.Fatal("expected unsupported warning")
-	}
-}
-
-func TestDecodeAllAutoMatchesVerifiedTable(t *testing.T) {
+// TestDecodeAllMatchesVerifiedTable runs the production lookup-then-decode
+// path (the same two steps /debug/memusage performs) against a synthetic
+// snapshot whose g.labels offset matches the verified go1.26 amd64 entry.
+func TestDecodeAllMatchesVerifiedTable(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x160, []kv{{"bubble", "alpha"}})
 	snap.Params.BuildVersion = "go1.26.3-X:nodwarf5"
 
-	got := DecodeAllAuto(snap, Options{})
+	layout, ok := runtimelayout.Lookup(LookupInputFromSnapshot(snap))
+	if !ok {
+		t.Fatal("verified table should match go1.26.* amd64")
+	}
+	got := DecodeAll(snap, layout, Options{})
 	if got.Stats.GoroutinesDecoded != 1 {
-		t.Fatalf("decoded = %d (auto lookup should match go1.26.* amd64)", got.Stats.GoroutinesDecoded)
+		t.Fatalf("decoded = %d, stats=%+v", got.Stats.GoroutinesDecoded, got.Stats)
 	}
 	if got.LabelsByGID[123]["bubble"] != "alpha" {
 		t.Fatalf("labelsByGID = %#v", got.LabelsByGID)
@@ -113,19 +105,19 @@ func TestDecodeLabelsNoLabels(t *testing.T) {
 	}
 }
 
-func TestFindCandidateGLabelsOffsets(t *testing.T) {
+func TestFindOffsetCandidates(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x20, []kv{{"bubble", "alpha"}, {"job", "42"}})
-	candidates := FindCandidateGLabelsOffsets(snap, NewMemory(snap), map[string]string{"bubble": "alpha"}, Options{})
-	if len(candidates) != 1 || candidates[0] != 0x20 {
+	candidates := FindOffsetCandidates(snap, NewMemory(snap), map[string]string{"bubble": "alpha"}, Options{})
+	if len(candidates) != 1 || candidates[0].Offset != 0x20 {
 		t.Fatalf("candidates = %#v", candidates)
 	}
 }
 
-func TestFindCandidateGLabelsOffsetsAmbiguous(t *testing.T) {
+func TestFindOffsetCandidatesAmbiguous(t *testing.T) {
 	snap := syntheticLabelSnapshot(0x20, []kv{{"bubble", "alpha"}})
 	writePtr(snap.Objects[0].Contents, 0x28, 0x1000)
-	candidates := FindCandidateGLabelsOffsets(snap, NewMemory(snap), map[string]string{"bubble": "alpha"}, Options{})
-	if len(candidates) != 2 || candidates[0] != 0x20 || candidates[1] != 0x28 {
+	candidates := FindOffsetCandidates(snap, NewMemory(snap), map[string]string{"bubble": "alpha"}, Options{})
+	if len(candidates) != 2 || candidates[0].Offset != 0x20 || candidates[1].Offset != 0x28 {
 		t.Fatalf("candidates = %#v", candidates)
 	}
 }
@@ -431,8 +423,8 @@ func TestFindOffsetCandidates_NonMatchingPtr(t *testing.T) {
 	// Write a non-zero, non-label-map ptr at offset 0x10 to trigger decoding
 	// failure (0x9000 is not in any heap object).
 	writePtr(snap.Objects[0].Contents, 0x10, 0x9000)
-	result := FindCandidateGLabelsOffsets(snap, NewMemory(snap), map[string]string{"bubble": "alpha"}, Options{})
-	if len(result) != 1 || result[0] != 0x20 {
+	result := FindOffsetCandidates(snap, NewMemory(snap), map[string]string{"bubble": "alpha"}, Options{})
+	if len(result) != 1 || result[0].Offset != 0x20 {
 		t.Fatalf("candidates = %v, want [0x20]", result)
 	}
 }

@@ -72,23 +72,6 @@ func (g *Graph) FindObjectContaining(ptr uint64) (ObjectID, bool) {
 	return 0, false
 }
 
-// AddEdge records a child edge from -> to. Duplicate edges are dropped.
-// Self-edges are allowed. Returns true when a new edge was actually
-// appended. Returns false on invalid IDs (no panic) or duplicates.
-func (g *Graph) AddEdge(from, to ObjectID) bool {
-	if !g.validID(from) || !g.validID(to) {
-		return false
-	}
-	children := g.Objects[from].Children
-	for _, existing := range children {
-		if existing == to {
-			return false
-		}
-	}
-	g.Objects[from].Children = append(children, to)
-	return true
-}
-
 // RootRef is one resolved pointer from a stack frame, global root, or
 // finalizer record into a heap object.
 type RootRef struct {

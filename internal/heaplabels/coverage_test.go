@@ -77,7 +77,7 @@ func TestRangeContainingNilAndZeroAddr(t *testing.T) {
 	}
 }
 
-func TestLookupLayoutMisses(t *testing.T) {
+func TestSnapshotLayoutLookupMisses(t *testing.T) {
 	cases := []*heapsnapshot.HeapSnapshot{
 		nil,
 		{Params: heapsnapshot.DumpParams{GOARCH: "amd64", PtrSize: 8, BigEndian: true, BuildVersion: "go1.26.0"}},
@@ -85,7 +85,7 @@ func TestLookupLayoutMisses(t *testing.T) {
 		{Params: heapsnapshot.DumpParams{GOARCH: "amd64", PtrSize: 8, BuildVersion: "go9.99-future"}},
 	}
 	for i, snap := range cases {
-		if _, ok := LookupLayout(snap); ok {
+		if _, ok := runtimelayout.Lookup(LookupInputFromSnapshot(snap)); ok {
 			t.Errorf("case %d: expected no match", i)
 		}
 	}
@@ -104,16 +104,38 @@ type otherErr struct{}
 
 func (otherErr) Error() string { return "x" }
 
-func TestDecodeAllAutoUnsupportedReportsEveryGoroutine(t *testing.T) {
+// TestUnsupportedResultReportsEveryGoroutine pins the Result that
+// /debug/memusage returns on a runtime-layout table miss: every goroutine
+// is reported unsupported and the diagnostic message is propagated.
+func TestUnsupportedResultReportsEveryGoroutine(t *testing.T) {
 	snap := &heapsnapshot.HeapSnapshot{
 		Params: heapsnapshot.DumpParams{PtrSize: 2, GOARCH: "amd64"},
 		Goroutines: []heapsnapshot.Goroutine{
 			{ID: 1, Addr: 0x100},
+			{ID: 2, Addr: 0x200},
 		},
 	}
-	res := DecodeAllAuto(snap, Options{})
-	if res.Stats.GoroutinesUnsupported != 1 {
-		t.Fatalf("expected 1 unsupported, got stats %+v", res.Stats)
+	res := UnsupportedResult(snap, "no layout")
+	if res.Stats.GoroutinesUnsupported != 2 || res.Stats.GoroutinesTotal != 2 {
+		t.Fatalf("expected 2 unsupported, got stats %+v", res.Stats)
+	}
+	for _, g := range res.Goroutines {
+		if g.Status != StatusUnsupportedRuntime || g.Error != "no layout" {
+			t.Fatalf("goroutine = %+v", g)
+		}
+	}
+	if !strings.Contains(strings.Join(res.Warnings, "|"), "no layout") {
+		t.Fatalf("warnings = %v", res.Warnings)
+	}
+}
+
+func TestUnsupportedResultNilSnapshot(t *testing.T) {
+	res := UnsupportedResult(nil, "no layout")
+	if res.LabelsByGID == nil || len(res.Goroutines) != 0 {
+		t.Fatalf("res = %+v", res)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, "|"), "no layout") {
+		t.Fatalf("warnings = %v", res.Warnings)
 	}
 }
 
@@ -135,28 +157,6 @@ func TestDecodeAllUnsupportedPtrSizeFromManualImpossible(t *testing.T) {
 	}
 }
 
-func TestDecodeAllAutoNoBuildVersionReturnsUnsupported(t *testing.T) {
-	snap := &heapsnapshot.HeapSnapshot{
-		Params: heapsnapshot.DumpParams{PtrSize: 8, GOARCH: "amd64"},
-		Goroutines: []heapsnapshot.Goroutine{
-			{ID: 7, Addr: 0x500},
-		},
-	}
-	res := DecodeAllAuto(snap, Options{})
-	if res.Stats.GoroutinesUnsupported != 1 {
-		t.Fatalf("expected 1 unsupported, got %+v", res.Stats)
-	}
-	if len(res.Goroutines) != 1 || res.Goroutines[0].Status != StatusUnsupportedRuntime {
-		t.Fatalf("status = %+v", res.Goroutines)
-	}
-}
-
-func TestDecodeAllAutoNilSnapshot(t *testing.T) {
-	res := DecodeAllAuto(nil, Options{})
-	if !strings.Contains(strings.Join(res.Warnings, "|"), "nil") {
-		t.Fatalf("expected nil warning, got %v", res.Warnings)
-	}
-}
 
 func TestDecodeAllNilSnapshot(t *testing.T) {
 	layout := mustManualLayout(t, 0x10)

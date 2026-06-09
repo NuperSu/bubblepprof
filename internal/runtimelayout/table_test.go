@@ -2,68 +2,6 @@ package runtimelayout
 
 import "testing"
 
-func TestLookupBestEffort_Found(t *testing.T) {
-	// "go1.99.0" is not in the table, but amd64/8/little-endian is.
-	input := LookupInput{
-		GoVersion: "go1.99.0",
-		GOARCH:    "amd64",
-		PtrSize:   8,
-		BigEndian: false,
-	}
-	layout, ok := LookupBestEffort(input)
-	if !ok {
-		t.Fatal("LookupBestEffort returned false for known arch/ptrSize")
-	}
-	if layout.GOARCH != "amd64" {
-		t.Fatalf("GOARCH = %q, want amd64", layout.GOARCH)
-	}
-	if layout.GoVersion != "go1.99.0" {
-		t.Fatalf("GoVersion = %q, want go1.99.0", layout.GoVersion)
-	}
-}
-
-func TestLookupBestEffort_NotFound(t *testing.T) {
-	// s390x is not in the table at all.
-	input := LookupInput{
-		GoVersion: "go1.99.0",
-		GOARCH:    "s390x",
-		PtrSize:   8,
-		BigEndian: true,
-	}
-	_, ok := LookupBestEffort(input)
-	if ok {
-		t.Fatal("LookupBestEffort returned true for unknown arch")
-	}
-}
-
-func TestLookupBestEffort_PtrSizeMismatch(t *testing.T) {
-	// PtrSize=2 has no table entry on any platform.
-	input := LookupInput{
-		GoVersion: "go1.99.0",
-		GOARCH:    "amd64",
-		PtrSize:   2,
-		BigEndian: false,
-	}
-	_, ok := LookupBestEffort(input)
-	if ok {
-		t.Fatal("LookupBestEffort returned true for PtrSize=2 (not in table)")
-	}
-}
-
-func TestLookupBestEffort_BigEndianMismatch(t *testing.T) {
-	// All table entries are little-endian; requesting BigEndian=true hits the BigEndian continue.
-	input := LookupInput{
-		GoVersion: "go1.99.0",
-		GOARCH:    "amd64",
-		PtrSize:   8,
-		BigEndian: true, // no big-endian entries in table
-	}
-	_, ok := LookupBestEffort(input)
-	if ok {
-		t.Fatal("LookupBestEffort returned true for big-endian (not in table)")
-	}
-}
-
 // TestVerifiedTableShape locks the verified table to known entries so an
 // accidental layout change (e.g. wrong offset, wrong source tag) shows up
 // as a test failure here instead of as silently-wrong production output.

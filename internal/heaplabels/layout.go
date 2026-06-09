@@ -55,14 +55,6 @@ func LookupInputFromSnapshot(snap *heapsnapshot.HeapSnapshot) runtimelayout.Look
 	}
 }
 
-// LookupLayout resolves a heap snapshot's runtime layout from the
-// verified-runtime table. Returns (zero, false) when the runtime is
-// unsupported; callers must surface unsupported_runtime rather than
-// fabricate a layout.
-func LookupLayout(snap *heapsnapshot.HeapSnapshot) (runtimelayout.Layout, bool) {
-	return runtimelayout.Lookup(LookupInputFromSnapshot(snap))
-}
-
 func normalizeOptions(opts Options) Options {
 	if opts.MaxLabels == 0 {
 		opts.MaxLabels = DefaultMaxLabels

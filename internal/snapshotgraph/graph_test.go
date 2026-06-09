@@ -568,27 +568,6 @@ func TestUnresolvedBreakdown(t *testing.T) {
 	}
 }
 
-// AddEdge tolerates invalid IDs and returns whether it actually appended.
-func TestAddEdgeReturnAndValidate(t *testing.T) {
-	a := mustBuild(t, makeSnap([]heapsnapshot.Object{
-		{Addr: 0x1000, Size: 8},
-		{Addr: 0x2000, Size: 8},
-	}))
-	g := a.Graph
-	if !g.AddEdge(0, 1) {
-		t.Fatalf("first AddEdge should return true")
-	}
-	if g.AddEdge(0, 1) {
-		t.Fatalf("duplicate AddEdge should return false")
-	}
-	if g.AddEdge(99, 1) {
-		t.Fatalf("invalid from-ID should return false (and not panic)")
-	}
-	if g.AddEdge(0, 99) {
-		t.Fatalf("invalid to-ID should return false (and not panic)")
-	}
-}
-
 // System goroutines (g0, GC workers, finalizer goroutine, …) must be
 // surfaced through GoroutineReachability.IsSystem so later phases can
 // filter them out of bubble attribution. The runtime emits IsSystem in

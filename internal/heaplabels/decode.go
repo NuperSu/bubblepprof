@@ -70,25 +70,6 @@ func DecodeAll(snap *heapsnapshot.HeapSnapshot, layout runtimelayout.Layout, opt
 	return res
 }
 
-// DecodeAllAuto is the convenience wrapper that resolves the layout from
-// the verified-runtime table and then calls DecodeAll. When the snapshot
-// describes an unsupported runtime, every goroutine is reported with
-// StatusUnsupportedRuntime and the matching diagnostic warning.
-func DecodeAllAuto(snap *heapsnapshot.HeapSnapshot, opts Options) Result {
-	if snap == nil {
-		return Result{
-			LabelsByGID: make(map[uint64]map[string]string),
-			Warnings:    []string{"heaplabels: nil heap snapshot"},
-		}
-	}
-	input := LookupInputFromSnapshot(snap)
-	layout, ok := runtimelayout.Lookup(input)
-	if !ok {
-		return UnsupportedResult(snap, runtimelayout.UnsupportedMessage(input))
-	}
-	return DecodeAll(snap, layout, opts)
-}
-
 // UnsupportedResult builds a Result that reports every goroutine as
 // unsupported_runtime with the supplied diagnostic. /debug/memusage uses
 // this so the unsupported message is consistent across callers.
@@ -380,17 +361,6 @@ func FindOffsetCandidates(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map
 		out = append(out, *c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Offset < out[j].Offset })
-	return out
-}
-
-// FindCandidateGLabelsOffsets returns just the offset values from
-// FindOffsetCandidates.
-func FindCandidateGLabelsOffsets(snap *heapsnapshot.HeapSnapshot, mem *Memory, want map[string]string, opts Options) []uint64 {
-	candidates := FindOffsetCandidates(snap, mem, want, opts)
-	out := make([]uint64, 0, len(candidates))
-	for _, c := range candidates {
-		out = append(out, c.Offset)
-	}
 	return out
 }
 

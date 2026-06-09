@@ -168,27 +168,6 @@ func Lookup(input LookupInput) (Layout, bool) {
 	return Layout{}, false
 }
 
-// LookupBestEffort returns the first table entry that matches PtrSize and
-// BigEndian, ignoring GoVersion. Intended for development tools such as
-// cmd/labeloffsetprobe and tests; never call this from the HTTP path because
-// the layout may be wrong and will produce silent incorrect results.
-// Returns (zero, false) when no width/endian match exists.
-func LookupBestEffort(input LookupInput) (Layout, bool) {
-	for _, e := range verifiedTable {
-		if e.PtrSize != input.PtrSize {
-			continue
-		}
-		if e.BigEndian != input.BigEndian {
-			continue
-		}
-		layout := e.Layout
-		layout.GoVersion = input.GoVersion
-		layout.GOARCH = input.GOARCH
-		return layout, true
-	}
-	return Layout{}, false
-}
-
 // UnsupportedMessage formats a stable diagnostic for callers that need to
 // explain why Lookup returned false. The wording is shared by the HTTP
 // endpoint and the offline CLI so logs/tests can match on it.
