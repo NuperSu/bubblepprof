@@ -140,6 +140,14 @@ func TestMemUsageHandler_ReachabilityThroughRuntimeDataStructures(t *testing.T) 
 		runtime.KeepAlive(ch)
 	})
 
+	// Heap-allocated defer record: a defer inside a loop body cannot use
+	// deferprocStack, so the runtime heap-allocates the _defer record and
+	// links it from gp._defer. Once the loop-scoped payload local is dead,
+	// the deferred closure (and the payload it captures) is reachable only
+	// through the goroutine record's defer pointer — the graph builder must
+	// root gp._defer per goroutine for this memory to count.
+	startReachabilityWorker(t, "heap-defer", stop, deferHoldPayload)
+
 	// Interface value: payload held as any inside a heap-resident struct.
 	// The eface data pointer is in the heap object's GC bitmap (FieldKindPtr),
 	// so it is decoded into a graph edge by the parser.
@@ -161,6 +169,7 @@ func TestMemUsageHandler_ReachabilityThroughRuntimeDataStructures(t *testing.T) 
 		{"map-values", reachabilityMinBytes},
 		{"map-overflow", 4 << 20}, // ~10 MiB total across overflow buckets; conservative floor
 		{"channel-buffer", reachabilityMinBytes},
+		{"heap-defer", reachabilityMinBytes},
 		{"interface-value", reachabilityMinBytes},
 	}
 	for _, c := range cases {
@@ -169,6 +178,38 @@ func TestMemUsageHandler_ReachabilityThroughRuntimeDataStructures(t *testing.T) 
 			assertReachableAtLeast(t, srv.URL, c.label, c.minBytes)
 		})
 	}
+}
+
+// deferLoopTrips is read through a package variable so the compiler cannot
+// prove deferHoldPayload's loop is single-trip. A provably single-trip loop
+// would let the defer be open-coded or stack-allocated, defeating the test.
+var deferLoopTrips = 1
+
+// deferHoldPayload parks with a pending heap-allocated _defer whose closure
+// captures a ≥2 MiB payload. The defer sits in a loop so the compiler must
+// use deferproc with a heap _defer record (deferprocStack and open-coded
+// defers are unavailable for loop defers). At the park point both payload
+// and the closure are loop-scoped and dead in the stack liveness bitmap, so
+// gp._defer is the only path keeping the payload reachable.
+//
+// The park MUST be time.Sleep, not <-stop: a channel receive leaves a sudog
+// pointer in the runtime.chanrecv frame, and sudog.g reaches the g object,
+// whose own pointer fields include _defer — that accidental stack→sudog→g
+// path makes the payload frame-reachable and the test would pass even
+// without per-goroutine defer roots. Sleeping parks without a sudog on the
+// stack, so only the goroutine record's defer pointer can attribute the
+// payload. The goroutine intentionally outlives the test (sleeps ~1h, no
+// stop hookup); it holds 2 MiB until the test binary exits, which is
+// harmless and keeps the park state deterministic.
+//
+//go:noinline
+func deferHoldPayload(ready chan<- struct{}, _ <-chan struct{}) {
+	for i := 0; i < deferLoopTrips; i++ {
+		payload := &reachabilityPayload{Pad: make([]byte, reachabilityPayloadSize)}
+		defer func() { runtime.KeepAlive(payload) }()
+	}
+	close(ready)
+	time.Sleep(time.Hour)
 }
 
 // startReachabilityWorker launches a goroutine labeled with case=label.

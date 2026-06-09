@@ -192,6 +192,35 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 				})
 			}
 		}
+		// Scheduler-held roots from the goroutine record. The GC scans
+		// gp.sched.ctxt and the gp._defer/_panic chains as goroutine-owned
+		// roots (runtime.scanstack), so heap closures of created-but-not-yet-
+		// scheduled goroutines and heap-allocated defer records belong to
+		// this goroutine's reach, not only to the allgs-based global reach.
+		// Unresolved values are the normal case (_panic records and
+		// deferprocStack defers live on the stack, ctxt is usually nil), so
+		// they are skipped without counting toward UnresolvedGoroutineRoots.
+		for _, sched := range [...]struct {
+			ptr  uint64
+			kind string
+		}{
+			{gr.Context, "sched.ctxt"},
+			{gr.Defer, "defer"},
+			{gr.Panic, "panic"},
+		} {
+			if sched.ptr == 0 {
+				continue
+			}
+			targetID, ok := g.FindObjectContaining(sched.ptr)
+			if !ok {
+				continue
+			}
+			roots = append(roots, RootRef{
+				ObjectID: targetID,
+				Ptr:      sched.ptr,
+				Kind:     sched.kind,
+			})
+		}
 		a.Goroutines = append(a.Goroutines, GoroutineReachability{
 			GoroutineID:  gr.ID,
 			IsSystem:     gr.IsSystem,

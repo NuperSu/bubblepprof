@@ -1068,3 +1068,81 @@ func TestReachableFromInvalidIDsSafe(t *testing.T) {
 		t.Fatalf("reachable size = %d", len(got))
 	}
 }
+
+// Scheduler-held roots: gp.sched.ctxt, gp._defer, and gp._panic from the
+// goroutine record must root this goroutine's reach (the GC scans them as
+// goroutine-owned roots in runtime.scanstack). The defer record's own
+// pointer fields then pull in its closure through ordinary graph edges.
+func TestSchedulerRoots(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{
+			{Addr: 0x1000, Size: 16},                                 // sched.ctxt closure
+			{Addr: 0x2000, Size: 32, PointerAddrs: []uint64{0x3000}}, // heap _defer record
+			{Addr: 0x3000, Size: 16},                                 // deferred fn closure
+			{Addr: 0x4000, Size: 16},                                 // heap _panic record
+		},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID:      9,
+			Context: 0x1000,
+			Defer:   0x2000,
+			Panic:   0x4000,
+		}},
+	}
+	a := mustBuild(t, snap)
+	gr := a.Goroutines[0]
+
+	wantKinds := map[string]uint64{
+		"sched.ctxt": 0x1000,
+		"defer":      0x2000,
+		"panic":      0x4000,
+	}
+	if len(gr.Roots) != len(wantKinds) {
+		t.Fatalf("roots = %+v, want %d scheduler roots", gr.Roots, len(wantKinds))
+	}
+	for _, r := range gr.Roots {
+		want, ok := wantKinds[r.Kind]
+		if !ok {
+			t.Fatalf("unexpected root kind %q (root %+v)", r.Kind, r)
+		}
+		if r.Ptr != want {
+			t.Fatalf("root kind %q ptr = 0x%x, want 0x%x", r.Kind, r.Ptr, want)
+		}
+		delete(wantKinds, r.Kind)
+	}
+
+	for _, addr := range []uint64{0x1000, 0x2000, 0x3000, 0x4000} {
+		id := idFor(t, a.Graph, addr)
+		if _, ok := gr.Reachable[id]; !ok {
+			t.Fatalf("object 0x%x missing from goroutine reach", addr)
+		}
+	}
+	if a.Stats.UnresolvedGoroutineRoots != 0 {
+		t.Fatalf("UnresolvedGoroutineRoots = %d, want 0", a.Stats.UnresolvedGoroutineRoots)
+	}
+}
+
+// Unresolved scheduler pointers are the normal case (_panic records and
+// deferprocStack defers live on the stack, not the heap): they must be
+// skipped silently, producing neither roots nor unresolved-root counts.
+func TestSchedulerRootsUnresolvedSkippedSilently(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{
+		Objects: []heapsnapshot.Object{{Addr: 0x1000, Size: 16}},
+		Goroutines: []heapsnapshot.Goroutine{{
+			ID:      3,
+			Context: 0xdead0000, // stack address: not a heap object
+			Defer:   0xbeef0000,
+			Panic:   0xc0de0000,
+		}},
+	}
+	a := mustBuild(t, snap)
+	gr := a.Goroutines[0]
+	if len(gr.Roots) != 0 {
+		t.Fatalf("roots = %+v, want none", gr.Roots)
+	}
+	if a.Stats.UnresolvedGoroutineRoots != 0 {
+		t.Fatalf("UnresolvedGoroutineRoots = %d, want 0 (sched pointers skip silently)", a.Stats.UnresolvedGoroutineRoots)
+	}
+	if len(a.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", a.Warnings)
+	}
+}
