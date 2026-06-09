@@ -9,8 +9,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"runtime/trace"
-	"sync"
-	"sync/atomic"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
 	"github.com/NuperSu/bubblepprof/internal/heapdump"
@@ -113,8 +111,10 @@ func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, mem *hea
 // /debug/memusage request. It is a value with default-zero fields wired
 // to production implementations.
 //
-// The process memory reader is opened lazily on the first Compute call
-// and reused across subsequent requests. Sources by platform:
+// The process memory reader is opened at the start of each Compute call
+// and closed before it returns; on Linux this re-reads /proc/self/maps
+// per request, so mappings added after startup (dlopen, plugin.Open) are
+// visible. Sources by platform:
 //
 //   - Linux: /proc/self/mem.
 //   - FreeBSD: /proc/self/mem when procfs is mounted; otherwise the on-disk
@@ -123,18 +123,10 @@ func (r DefaultLabelRecoverer) Recover(snap *heapsnapshot.HeapSnapshot, mem *hea
 //     correction.
 //   - Windows: PE sections of the running executable with ASLR slide
 //     correction.
-//
-// Call Close when the Computer is no longer needed to release the
-// underlying file descriptor. Close must not be called concurrently with
-// Compute.
 type Computer struct {
 	Capturer  HeapDumpCapturer
 	Recoverer LabelRecoverer
 	Opts      Options
-
-	procOnce    sync.Once
-	procReader  atomic.Pointer[addrspace.ProcessReader]
-	procWarning string
 }
 
 // NewComputer returns a Computer wired to the runtime implementations.
@@ -146,28 +138,11 @@ func NewComputer(opts Options) *Computer {
 	}
 }
 
-// Close releases the cached process memory reader. Safe to call multiple
-// times. Computer must not be used after Close returns.
+// Close is a no-op retained for backward compatibility: Compute opens
+// and closes its process memory reader per request and the Computer
+// holds no other resources. Safe to call multiple times.
 func (c *Computer) Close() error {
-	if c == nil {
-		return nil
-	}
-	r := c.procReader.Load()
-	if r == nil {
-		return nil
-	}
-	return r.Close()
-}
-
-// processReader returns the cached process reader, opening it lazily on
-// first call. The returned reader must not be closed by the caller.
-func (c *Computer) processReader() (*addrspace.ProcessReader, string) {
-	c.procOnce.Do(func() {
-		r, w := openProcessReader(c.Opts.DisableProcessMemoryReader)
-		c.procWarning = w
-		c.procReader.Store(r)
-	})
-	return c.procReader.Load(), c.procWarning
+	return nil
 }
 
 // Compute runs the full /debug/memusage pipeline:
@@ -196,6 +171,17 @@ func (c *Computer) processReader() (*addrspace.ProcessReader, string) {
 func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) {
 	if c == nil {
 		return nil, fmt.Errorf("memusage: nil Computer")
+	}
+	// Validate and pre-flight before the stop-the-world dump: an invalid
+	// request or an unsupported local runtime must not pay for capture and
+	// parse. The dump's own params remain the authoritative lookup key —
+	// ComputeFromAnalysis re-checks diag.UnsupportedRuntime after decode.
+	if verr := ValidateRequest(&req, c.Opts); verr != nil {
+		return nil, verr
+	}
+	localInput := runtimelayout.LocalInput()
+	if _, ok := runtimelayout.Lookup(localInput); !ok {
+		return nil, &UnsupportedRuntimeError{GoVersion: localInput.GoVersion, GOARCH: localInput.GOARCH}
 	}
 	capturer := c.Capturer
 	if capturer == nil {
@@ -235,7 +221,10 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 		return nil, err
 	}
 
-	procReader, procWarning := c.processReader()
+	procReader, procWarning := openProcessReader(c.Opts.DisableProcessMemoryReader)
+	if procReader != nil {
+		defer procReader.Close()
+	}
 
 	// Decode labels first so an unsupported runtime can short-circuit
 	// before the (expensive) graph build.

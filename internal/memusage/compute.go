@@ -107,7 +107,63 @@ type Diagnostics struct {
 	// StatusUnsupportedRuntime).
 	FailedGoroutines int
 
+	// StringMissingGIDs and FailedGIDs identify which goroutines failed
+	// label decoding (FailedGIDs is a superset that includes the
+	// string-missing goroutines). ComputeFromAnalysis uses them to ignore
+	// failures on goroutines that are excluded from matching anyway
+	// (system/background goroutines under the default options): an
+	// excluded goroutine cannot change the match set, so its decode
+	// failure must not fail the request. When both GID sets are nil but
+	// the counts are non-zero (hand-constructed Diagnostics), every
+	// counted failure is conservatively treated as match-eligible.
+	StringMissingGIDs map[uint64]struct{}
+	FailedGIDs        map[uint64]struct{}
+
 	Warnings []string
+}
+
+// eligibleFailures reports how many label-decode failures affect
+// match-eligible goroutines. known is the set of goroutine IDs present in
+// the analysis; eligible is the subset allowed to participate in label
+// matching. Failed GIDs that are known but not eligible are ignored;
+// failed GIDs absent from known are treated as eligible (fail-explicit:
+// a GID mismatch between label diagnostics and the graph means the match
+// set cannot be trusted).
+func (d Diagnostics) eligibleFailures(known, eligible map[uint64]struct{}) (stringMissing, failed int) {
+	if d.FailedGIDs == nil && d.StringMissingGIDs == nil {
+		// No per-GID detail: conservatively treat every counted failure
+		// as match-eligible (preserves the strict pre-GID behavior).
+		return d.StringMissingCount, d.FailedGoroutines
+	}
+	countsAsEligible := func(gid uint64) bool {
+		if _, ok := eligible[gid]; ok {
+			return true
+		}
+		_, isKnown := known[gid]
+		return !isKnown
+	}
+	for gid := range d.FailedGIDs {
+		if !countsAsEligible(gid) {
+			continue
+		}
+		failed++
+		if _, ok := d.StringMissingGIDs[gid]; ok {
+			stringMissing++
+		}
+	}
+	// Defensive: count string-missing GIDs that were not folded into
+	// FailedGIDs (DiagnosticsFromHeapLabels always folds them in).
+	for gid := range d.StringMissingGIDs {
+		if _, ok := d.FailedGIDs[gid]; ok {
+			continue
+		}
+		if !countsAsEligible(gid) {
+			continue
+		}
+		failed++
+		stringMissing++
+	}
+	return stringMissing, failed
 }
 
 // UnsupportedRuntimeError is returned by ComputeFromAnalysis when label
@@ -176,12 +232,16 @@ func (e *ParseFailedError) Unwrap() error { return e.Cause }
 // goroutine: for a selector matching S of N goroutines we now pay
 // O(reach(S)) instead of O(reach(N)).
 //
-// Any label-decode failure makes the match set non-authoritative: an
-// undecodable goroutine might also carry the requested labels, so a partial
-// or zero match count is not returned as 200. Two distinct 422 codes:
+// A label-decode failure makes the match set non-authoritative only when
+// the failed goroutine could have participated in matching: an undecodable
+// eligible goroutine might also carry the requested labels, so a partial
+// or zero match count is not returned as 200. Failures on goroutines that
+// are excluded from matching (system/background under the default options)
+// cannot change the match set and are ignored. Two distinct 422 codes:
 //
-//   - StringMissingCount > 0 → StringMissingError (string bytes unavailable)
-//   - FailedGoroutines > 0 (and no StringMissingCount) → LabelRecoveryFailedError
+//   - eligible string-missing failures → StringMissingError (string bytes
+//     unavailable)
+//   - other eligible failures → LabelRecoveryFailedError
 //
 // Validation runs first so direct callers (e.g. unit tests, future CLI
 // adapters) cannot bypass the same checks the HTTP handler applies.
@@ -217,8 +277,11 @@ func ComputeFromAnalysis(
 
 	matched := make([]*snapshotgraph.GoroutineReachability, 0)
 	var systemGoroutines []*snapshotgraph.GoroutineReachability
+	knownGIDs := make(map[uint64]struct{}, len(analysis.Goroutines))
+	eligibleGIDs := make(map[uint64]struct{}, len(analysis.Goroutines))
 	for i := range analysis.Goroutines {
 		gr := &analysis.Goroutines[i]
+		knownGIDs[gr.GoroutineID] = struct{}{}
 		isSystem := gr.IsSystem || gr.IsBackground
 		if isSystem {
 			systemGoroutines = append(systemGoroutines, gr)
@@ -226,6 +289,7 @@ func ComputeFromAnalysis(
 				continue
 			}
 		}
+		eligibleGIDs[gr.GoroutineID] = struct{}{}
 		have := labelsByGID[gr.GoroutineID]
 		if !LabelsMatch(have, req.Labels) {
 			continue
@@ -233,22 +297,26 @@ func ComputeFromAnalysis(
 		matched = append(matched, gr)
 	}
 
-	// Any label-decode failure makes the match set non-authoritative: an
-	// undecodable goroutine might also carry the requested labels.
-	// string_missing (unavailable string bytes) takes priority over other
-	// decode failures because it is the more actionable diagnosis.
-	if diag.StringMissingCount > 0 {
+	// A label-decode failure on a match-eligible goroutine makes the match
+	// set non-authoritative: that goroutine might also carry the requested
+	// labels. Failures on excluded system/background goroutines are ignored
+	// — they cannot change the match set, and one permanently undecodable
+	// runtime goroutine must not brick the endpoint. string_missing
+	// (unavailable string bytes) takes priority over other decode failures
+	// because it is the more actionable diagnosis.
+	stringMissing, failed := diag.eligibleFailures(knownGIDs, eligibleGIDs)
+	if stringMissing > 0 {
 		return nil, &StringMissingError{
 			GoVersion: diag.GoVersion,
 			GOARCH:    diag.GOARCH,
 			Warnings:  append([]string{}, diag.Warnings...),
 		}
 	}
-	if diag.FailedGoroutines > 0 {
+	if failed > 0 {
 		return nil, &LabelRecoveryFailedError{
 			GoVersion:        diag.GoVersion,
 			GOARCH:           diag.GOARCH,
-			FailedGoroutines: diag.FailedGoroutines,
+			FailedGoroutines: failed,
 			Warnings:         append([]string{}, diag.Warnings...),
 		}
 	}
@@ -293,6 +361,22 @@ func DiagnosticsFromHeapLabels(snap *heapsnapshot.HeapSnapshot, res heaplabels.R
 	}
 	d.StringMissingCount = res.Stats.StringsMissing
 	d.FailedGoroutines = res.Stats.GoroutinesFailed
+	for _, gr := range res.Goroutines {
+		switch gr.Status {
+		case heaplabels.StatusDecoded, heaplabels.StatusNoLabels, heaplabels.StatusUnsupportedRuntime:
+			continue
+		}
+		if d.FailedGIDs == nil {
+			d.FailedGIDs = make(map[uint64]struct{})
+		}
+		d.FailedGIDs[gr.GID] = struct{}{}
+		if gr.Status == heaplabels.StatusStringMissing {
+			if d.StringMissingGIDs == nil {
+				d.StringMissingGIDs = make(map[uint64]struct{})
+			}
+			d.StringMissingGIDs[gr.GID] = struct{}{}
+		}
+	}
 	if res.Stats.GoroutinesTotal > 0 && res.Stats.GoroutinesUnsupported == res.Stats.GoroutinesTotal {
 		d.UnsupportedRuntime = true
 	}

@@ -623,3 +623,135 @@ func TestObjectSetBytes_HugeObjectID(t *testing.T) {
 		t.Fatalf("ObjectSetBytes = %d, want 7 (huge ID must be ignored)", got)
 	}
 }
+
+// A decode failure on a system goroutine that is excluded from matching
+// cannot change the match set, so the request must succeed; making the
+// goroutine eligible again (IncludeSystemGoroutines) restores the 422.
+func TestComputeFromAnalysis_ExcludedSystemFailureIgnored(t *testing.T) {
+	g := newTestGraph(t, []testObject{
+		{addr: 0x1000, size: 10},
+		{addr: 0x2000, size: 20},
+	})
+	user := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
+	sys := snapshotgraph.GoroutineReachability{GoroutineID: 2, IsSystem: true, Roots: rootsForIDs(1)}
+	analysis := &snapshotgraph.Analysis{
+		Graph:      g,
+		Goroutines: []snapshotgraph.GoroutineReachability{user, sys},
+	}
+	labelsByGID := map[uint64]map[string]string{1: {"job": "42"}}
+	diag := Diagnostics{
+		StringMissingCount: 1,
+		FailedGoroutines:   1,
+		StringMissingGIDs:  map[uint64]struct{}{2: {}},
+		FailedGIDs:         map[uint64]struct{}{2: {}},
+		GoVersion:          "go1.26.3",
+		GOARCH:             "amd64",
+	}
+
+	resp, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"job": "42"}},
+		analysis, labelsByGID, diag, Options{},
+	)
+	if err != nil {
+		t.Fatalf("ComputeFromAnalysis = %v, want success: excluded system failure must not fail the request", err)
+	}
+	if resp.MatchedGoroutines != 1 || resp.ReachableBytes != 10 {
+		t.Fatalf("resp = %+v, want matched=1 bytes=10", resp)
+	}
+
+	_, err = ComputeFromAnalysis(
+		Request{Labels: map[string]string{"job": "42"}},
+		analysis, labelsByGID, diag, Options{IncludeSystemGoroutines: true},
+	)
+	var sme *StringMissingError
+	if !errors.As(err, &sme) {
+		t.Fatalf("error = %v, want StringMissingError once system goroutines are match-eligible", err)
+	}
+}
+
+// Per-GID detail on a user goroutine keeps the strict behavior: the match
+// set is non-authoritative and the request fails.
+func TestComputeFromAnalysis_EligibleFailureStillFailsWithGIDs(t *testing.T) {
+	g := newTestGraph(t, []testObject{
+		{addr: 0x1000, size: 10},
+		{addr: 0x2000, size: 20},
+	})
+	user1 := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
+	user2 := snapshotgraph.GoroutineReachability{GoroutineID: 2, Roots: rootsForIDs(1)}
+	analysis := &snapshotgraph.Analysis{
+		Graph:      g,
+		Goroutines: []snapshotgraph.GoroutineReachability{user1, user2},
+	}
+	labelsByGID := map[uint64]map[string]string{1: {"job": "42"}}
+	diag := Diagnostics{
+		FailedGoroutines: 1,
+		FailedGIDs:       map[uint64]struct{}{2: {}},
+		GoVersion:        "go1.26.3",
+		GOARCH:           "amd64",
+	}
+	_, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"job": "42"}},
+		analysis, labelsByGID, diag, Options{},
+	)
+	var lrf *LabelRecoveryFailedError
+	if !errors.As(err, &lrf) {
+		t.Fatalf("error = %v, want LabelRecoveryFailedError", err)
+	}
+	if lrf.FailedGoroutines != 1 {
+		t.Fatalf("FailedGoroutines = %d, want 1", lrf.FailedGoroutines)
+	}
+}
+
+// A failed GID that does not exist in the analysis means the label
+// diagnostics and the graph disagree about the snapshot: fail explicit.
+func TestComputeFromAnalysis_UnknownFailedGIDIsEligible(t *testing.T) {
+	g := newTestGraph(t, []testObject{{addr: 0x1000, size: 10}})
+	user := snapshotgraph.GoroutineReachability{GoroutineID: 1, Roots: rootsForIDs(0)}
+	analysis := &snapshotgraph.Analysis{
+		Graph:      g,
+		Goroutines: []snapshotgraph.GoroutineReachability{user},
+	}
+	labelsByGID := map[uint64]map[string]string{1: {"job": "42"}}
+	diag := Diagnostics{
+		FailedGoroutines: 1,
+		FailedGIDs:       map[uint64]struct{}{99: {}},
+	}
+	_, err := ComputeFromAnalysis(
+		Request{Labels: map[string]string{"job": "42"}},
+		analysis, labelsByGID, diag, Options{},
+	)
+	var lrf *LabelRecoveryFailedError
+	if !errors.As(err, &lrf) {
+		t.Fatalf("error = %v, want LabelRecoveryFailedError for unknown failed GID", err)
+	}
+}
+
+func TestDiagnosticsFromHeapLabels_PopulatesGIDSets(t *testing.T) {
+	snap := &heapsnapshot.HeapSnapshot{}
+	res := heaplabels.Result{
+		Goroutines: []heaplabels.GoroutineResult{
+			{GID: 1, Status: heaplabels.StatusDecoded},
+			{GID: 2, Status: heaplabels.StatusNoLabels},
+			{GID: 3, Status: heaplabels.StatusStringMissing},
+			{GID: 4, Status: heaplabels.StatusGObjectMissing},
+			{GID: 5, Status: heaplabels.StatusMalformed},
+			{GID: 6, Status: heaplabels.StatusUnsupportedRuntime},
+		},
+	}
+	diag := DiagnosticsFromHeapLabels(snap, res)
+	wantFailed := map[uint64]struct{}{3: {}, 4: {}, 5: {}}
+	if len(diag.FailedGIDs) != len(wantFailed) {
+		t.Fatalf("FailedGIDs = %v, want %v", diag.FailedGIDs, wantFailed)
+	}
+	for gid := range wantFailed {
+		if _, ok := diag.FailedGIDs[gid]; !ok {
+			t.Fatalf("FailedGIDs missing gid %d: %v", gid, diag.FailedGIDs)
+		}
+	}
+	if len(diag.StringMissingGIDs) != 1 {
+		t.Fatalf("StringMissingGIDs = %v, want only gid 3", diag.StringMissingGIDs)
+	}
+	if _, ok := diag.StringMissingGIDs[3]; !ok {
+		t.Fatalf("StringMissingGIDs missing gid 3: %v", diag.StringMissingGIDs)
+	}
+}

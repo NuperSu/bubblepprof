@@ -181,22 +181,15 @@ func TestComputer_Close_NilReceiver(t *testing.T) {
 	}
 }
 
-func TestComputer_Close_NilProcReader(t *testing.T) {
+func TestComputer_Close_Idempotent(t *testing.T) {
+	// Close is a compatibility no-op: Compute opens and closes its process
+	// reader per request, so Close must succeed any number of times and
+	// must not affect later Compute calls.
 	c := &Computer{}
-	if err := c.Close(); err != nil {
-		t.Fatalf("Close with nil procReader = %v, want nil", err)
-	}
-}
-
-func TestComputer_Close_WithProcReader(t *testing.T) {
-	r, _ := openProcessReader(false)
-	if r == nil {
-		t.Skip("process reader not available on this platform")
-	}
-	c := &Computer{}
-	c.procReader.Store(r)
-	if err := c.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	for i := 0; i < 2; i++ {
+		if err := c.Close(); err != nil {
+			t.Fatalf("Close call %d = %v, want nil", i+1, err)
+		}
 	}
 }
 
@@ -578,5 +571,57 @@ func TestComputer_Compute_ProcWarningAppearsInStringMissingError(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected proc-reader warning in StringMissingError.Warnings, got %v", sme.Warnings)
+	}
+}
+
+// recordingCapturer notes whether CaptureHeapDump was invoked before
+// delegating. Used to assert that validation and the runtime pre-flight
+// run before the (stop-the-world) capture.
+type recordingCapturer struct {
+	called   bool
+	delegate HeapDumpCapturer
+}
+
+func (r *recordingCapturer) CaptureHeapDump(ctx context.Context, gcBefore bool) (string, func(), error) {
+	r.called = true
+	return r.delegate.CaptureHeapDump(ctx, gcBefore)
+}
+
+func TestComputer_Compute_ValidatesBeforeCapture(t *testing.T) {
+	rec := &recordingCapturer{delegate: dumpCapturer{arch: "amd64", version: "go1.26.0"}}
+	c := &Computer{
+		Capturer:  rec,
+		Recoverer: fakeRecoverer{},
+		Opts:      Options{DisableProcessMemoryReader: true},
+	}
+	_, err := c.Compute(context.Background(), Request{}) // empty labels: invalid
+	var verr *ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("error = %v, want ValidationError", err)
+	}
+	if rec.called {
+		t.Fatal("CaptureHeapDump was invoked for an invalid request; validation must run before the stop-the-world dump")
+	}
+}
+
+func TestComputer_Compute_SequentialRequestsReopenProcReader(t *testing.T) {
+	// Compute opens its process reader at the start of each call and
+	// closes it before returning; sequential requests must each succeed
+	// with a freshly opened reader (and freshly parsed /proc/self/maps).
+	c := &Computer{
+		Capturer: dumpCapturer{arch: "amd64", version: "go1.26.0"},
+		Recoverer: fakeRecoverer{result: heaplabels.Result{
+			LabelsByGID: map[uint64]map[string]string{},
+		}},
+		Opts: Options{DisableProcessMemoryReader: false},
+	}
+	for i := 0; i < 2; i++ {
+		resp, err := c.Compute(context.Background(), Request{Labels: map[string]string{"a": "b"}})
+		if err != nil {
+			t.Fatalf("Compute call %d: %v", i+1, err)
+		}
+		if resp == nil {
+			t.Fatalf("Compute call %d: nil response", i+1)
+		}
 	}
 }
