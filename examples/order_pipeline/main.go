@@ -129,7 +129,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	bubblepprof.RegisterMemUsage(mux)
+	bubblepprof.Register(mux)
 	mux.HandleFunc("/stats", app.statsHandler)
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)
 

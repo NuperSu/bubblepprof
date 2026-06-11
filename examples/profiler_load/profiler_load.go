@@ -98,7 +98,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	mux := http.NewServeMux()
-	bubblepprof.RegisterMemUsage(mux)
+	bubblepprof.Register(mux)
 	go func() {
 		if err := http.ListenAndServe(*addr, mux); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "http: %v\n", err)
