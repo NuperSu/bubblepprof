@@ -26,6 +26,10 @@ func (r *ProcessReader) Source() string { return "unsupported" }
 // Mappings always returns nil on platforms without an implementation.
 func (r *ProcessReader) Mappings() []Mapping { return nil }
 
+// EligibleStringRanges always returns nil on platforms without an
+// implementation.
+func (r *ProcessReader) EligibleStringRanges() []Mapping { return nil }
+
 // ReadAtAddr always returns ok=false (with the size==0 exception) on
 // platforms without an implementation.
 func (r *ProcessReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {

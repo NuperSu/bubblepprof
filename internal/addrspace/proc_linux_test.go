@@ -237,6 +237,62 @@ func TestProcessReader_ReadAtAddr_AddrBeyondMaxInt64(t *testing.T) {
 	}
 }
 
+func TestProcessReader_EligibleStringRanges_Filters(t *testing.T) {
+	r := &ProcessReader{maps: []Mapping{
+		{Start: 0x1000, End: 0x2000, Read: true, Path: "/usr/bin/test"},              // eligible: r--
+		{Start: 0x2000, End: 0x3000, Read: true, Exec: true, Path: "/usr/bin/test"},  // eligible: r-x
+		{Start: 0x3000, End: 0x4000, Read: true, Write: true, Path: "/usr/bin/test"}, // writable: excluded
+		{Start: 0x4000, End: 0x5000, Path: "[stack]"},                                // no read: excluded
+	}}
+	got := r.EligibleStringRanges()
+	want := []Mapping{
+		{Start: 0x1000, End: 0x2000, Read: true, Path: "/usr/bin/test"},
+		{Start: 0x2000, End: 0x3000, Read: true, Exec: true, Path: "/usr/bin/test"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("EligibleStringRanges mismatch.\n got: %#v\nwant: %#v", got, want)
+	}
+
+	var nilReader *ProcessReader
+	if ranges := nilReader.EligibleStringRanges(); ranges != nil {
+		t.Fatalf("nil receiver: got %#v, want nil", ranges)
+	}
+}
+
+func TestProcessReader_EligibleStringRanges_CoversLiteral(t *testing.T) {
+	r, err := OpenSelfProcessReader()
+	if err != nil {
+		t.Skipf("OpenSelfProcessReader: %v", err)
+	}
+	defer r.Close()
+
+	ranges := r.EligibleStringRanges()
+	if len(ranges) == 0 {
+		t.Fatal("EligibleStringRanges returned no ranges on a live process")
+	}
+
+	// A Go string literal's bytes live in a read-only segment, so some
+	// returned range must cover it, and a read through ReadAtAddr from
+	// inside that range must return the literal bytes.
+	literal := "bubblepprof-eligible-ranges-probe"
+	sh := (*stringHeader)(unsafe.Pointer(&literal))
+	addr, size := uint64(sh.Data), uint64(sh.Len)
+	covered := false
+	for _, m := range ranges {
+		if addr >= m.Start && addr+size <= m.End {
+			covered = true
+			break
+		}
+	}
+	if !covered {
+		t.Fatalf("no eligible range covers string literal at 0x%x", addr)
+	}
+	got, ok := r.ReadAtAddr(addr, size)
+	if !ok || string(got) != literal {
+		t.Fatalf("ReadAtAddr(literal) = %q ok=%t", got, ok)
+	}
+}
+
 // stringHeader mirrors reflect.StringHeader without depending on its
 // (deprecated) public type.
 type stringHeader struct {
