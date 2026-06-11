@@ -169,6 +169,9 @@ bubblepprof memusage http://127.0.0.1:6060 -labels tenant=acme
 # Or two steps: save the bundle, analyse it later (or elsewhere)
 bubblepprof fetch http://127.0.0.1:6060 -o app.tar
 bubblepprof memusage app.tar -labels tenant=acme,tier=enterprise
+
+# Use -label repeatedly when a label value contains a comma
+bubblepprof memusage app.tar -label tenant=acme -label note=a,b
 ```
 
 The output is the same JSON (and the same error codes) as `POST /debug/memusage`.

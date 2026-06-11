@@ -21,7 +21,7 @@ func TestMainDispatch(t *testing.T) {
 		{"no args", nil, exitUsage, "", "Usage:"},
 		{"unknown command", []string{"frobnicate"}, exitUsage, "", `unknown command "frobnicate"`},
 		{"help", []string{"help"}, exitOK, "Usage:", ""},
-		{"memusage without labels", []string{"memusage", "x.tar"}, exitUsage, "", "-labels is required"},
+		{"memusage without labels", []string{"memusage", "x.tar"}, exitUsage, "", "-labels or -label is required"},
 		{"memusage without arg", []string{"memusage", "-labels", "a=b"}, exitUsage, "", "exactly one bundle file"},
 		{"fetch without arg", []string{"fetch"}, exitUsage, "", "exactly one target URL"},
 		// The OS error text differs per platform ("no such file" vs "The
@@ -70,6 +70,17 @@ func TestLabelsFlag(t *testing.T) {
 	if err := f.Set("novalue"); err == nil {
 		t.Fatal("missing = must error")
 	}
+
+	exact := exactLabelFlag{labels: labelsFlag{}}
+	if err := exact.Set("note=a,b"); err != nil {
+		t.Fatalf("exact Set comma value: %v", err)
+	}
+	if exact.labels["note"] != "a,b" {
+		t.Fatalf("note = %q, want comma-containing value", exact.labels["note"])
+	}
+	if err := exact.Set("novalue"); err == nil {
+		t.Fatal("exact label missing = must error")
+	}
 }
 
 func TestBundleURL(t *testing.T) {
@@ -81,6 +92,7 @@ func TestBundleURL(t *testing.T) {
 		{"http://host:6060", true, "http://host:6060/debug/memusage/bundle?gc=1"},
 		{"http://host:6060/", false, "http://host:6060/debug/memusage/bundle?gc=0"},
 		{"https://host/debug/memusage/bundle", true, "https://host/debug/memusage/bundle?gc=1"},
+		{"https://host/debug/memusage/bundle/", true, "https://host/debug/memusage/bundle?gc=1"},
 		{"http://host/app", true, "http://host/app/debug/memusage/bundle?gc=1"},
 	}
 	for _, tc := range cases {

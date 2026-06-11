@@ -100,8 +100,11 @@ func bundleURL(target string, gc bool) (*url.URL, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("target URL %q must use http or https", target)
 	}
-	if !strings.HasSuffix(strings.TrimRight(u.Path, "/"), bundlePath) {
-		u.Path = strings.TrimRight(u.Path, "/") + bundlePath
+	path := strings.TrimRight(u.Path, "/")
+	if strings.HasSuffix(path, bundlePath) {
+		u.Path = path
+	} else {
+		u.Path = path + bundlePath
 	}
 	q := u.Query()
 	if gc {

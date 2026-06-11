@@ -50,8 +50,9 @@ The main profiler path does **not** require any of the following:
 - correlation against a separately captured `goroutine.pprof`
 - a modified Go toolchain
 
-`pkg/bubblepprof` exposes only the `/debug/memusage` endpoint. It does
-not provide or require a custom labeling API.
+`pkg/bubblepprof` exposes `/debug/memusage` and the optional
+`/debug/memusage/bundle` capture endpoint. It does not provide or
+require a custom labeling API.
 
 ## Label source
 

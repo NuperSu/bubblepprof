@@ -15,8 +15,7 @@ import (
 	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
-// labelsFlag accumulates -labels k=v[,k=v...] values; the flag is
-// repeatable so values containing commas can be passed one per flag.
+// labelsFlag accumulates -labels k=v[,k=v...] values.
 type labelsFlag map[string]string
 
 func (f labelsFlag) String() string {
@@ -29,13 +28,33 @@ func (f labelsFlag) String() string {
 
 func (f labelsFlag) Set(value string) error {
 	for _, item := range strings.Split(value, ",") {
-		k, v, ok := strings.Cut(item, "=")
-		if !ok || k == "" {
-			return fmt.Errorf("label %q is not of the form key=value", item)
+		if err := f.setOne(item); err != nil {
+			return err
 		}
-		f[k] = v
 	}
 	return nil
+}
+
+func (f labelsFlag) setOne(value string) error {
+	k, v, ok := strings.Cut(value, "=")
+	if !ok || k == "" {
+		return fmt.Errorf("label %q is not of the form key=value", value)
+	}
+	f[k] = v
+	return nil
+}
+
+// exactLabelFlag accumulates one exact -label k=v value. It exists for
+// label values containing commas, which cannot be represented
+// unambiguously in the comma-separated -labels form.
+type exactLabelFlag struct {
+	labels labelsFlag
+}
+
+func (f exactLabelFlag) String() string { return f.labels.String() }
+
+func (f exactLabelFlag) Set(value string) error {
+	return f.labels.setOne(value)
 }
 
 // runMemUsage implements
@@ -44,7 +63,8 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("memusage", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	labels := labelsFlag{}
-	fs.Var(labels, "labels", "label selector key=value[,key=value...] (repeatable)")
+	fs.Var(labels, "labels", "comma-separated label selector key=value[,key=value...] (repeatable)")
+	fs.Var(exactLabelFlag{labels: labels}, "label", "single label selector key=value (repeat for values containing commas)")
 	includeSystem := fs.Bool("include-system", false, "let system/background goroutines participate in label matching")
 	gc := fs.Bool("gc", true, "when fetching from a URL, run a garbage collection in the target before the heap dump")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total fetch timeout when the argument is a URL")
@@ -55,7 +75,7 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if len(labels) == 0 {
-		fmt.Fprintln(stderr, "bubblepprof memusage: -labels is required")
+		fmt.Fprintln(stderr, "bubblepprof memusage: -labels or -label is required")
 		fs.Usage()
 		return exitUsage
 	}
@@ -65,11 +85,16 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "bubblepprof memusage: %v\n", err)
 		return exitFailure
 	}
-	defer src.Close()
 
 	b, err := bundle.Open(src)
+	closeErr := src.Close()
 	if err != nil {
 		fmt.Fprintf(stderr, "bubblepprof memusage: %v\n", err)
+		return exitFailure
+	}
+	if closeErr != nil {
+		fmt.Fprintf(stderr, "bubblepprof memusage: close bundle source: %v\n", closeErr)
+		_ = b.Close()
 		return exitFailure
 	}
 	defer b.Close()

@@ -2,6 +2,7 @@
 //
 //	bubblepprof fetch <url> [-o file]
 //	bubblepprof memusage <bundle-or-url> -labels k=v[,k=v...]
+//	bubblepprof memusage <bundle-or-url> -label k=v [-label k=v ...]
 //
 // The analysis path is the same memusage.AnalyzeDump pipeline used by
 // the in-process /debug/memusage endpoint, fed by a capture bundle
@@ -31,9 +32,11 @@ Usage:
         GET /debug/memusage/bundle.
 
   bubblepprof memusage <bundle-file-or-url> -labels k=v[,k=v...] [flags]
+  bubblepprof memusage <bundle-file-or-url> -label k=v [-label k=v ...] [flags]
         Report the heap memory reachable from goroutines whose pprof
         labels contain every requested key/value pair. Accepts a saved
-        bundle file or a target base URL (fetched on the fly).
+        bundle file or a target base URL (fetched on the fly). Use
+        -label for values containing commas.
 
 Run "bubblepprof <command> -h" for command flags.
 `
