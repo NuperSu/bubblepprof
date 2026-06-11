@@ -157,7 +157,6 @@ func TestDecodeAllUnsupportedPtrSizeFromManualImpossible(t *testing.T) {
 	}
 }
 
-
 func TestDecodeAllNilSnapshot(t *testing.T) {
 	layout := mustManualLayout(t, 0x10)
 	res := DecodeAll(nil, layout, Options{})
