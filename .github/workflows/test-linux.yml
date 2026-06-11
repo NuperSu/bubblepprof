@@ -5,23 +5,15 @@ on:
     branches: ['**']
   pull_request:
 
-# Opt into Node.js 24 for all action runners. actions/checkout@v4,
-# actions/setup-go@v5, and docker/setup-qemu-action@v3 still ship with
-# Node.js 20 as their runtime; this flag forces the runner to execute them
-# under Node.js 24 instead. Remove once the actions themselves declare
-# node24 as their runtime in their action.yml files.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   gofmt:
     name: Check gofmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.3'
           cache: false
@@ -183,13 +175,13 @@ jobs:
           - {go: tip,       runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: false}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Only installed for linux/arm 32-bit entries (qemu:true). linux/arm64 uses
       # a native runner, so QEMU is unnecessary there.
       - name: Set up QEMU
         if: matrix.qemu == true
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm
 
@@ -214,14 +206,14 @@ jobs:
 
       - name: Set up Go ${{ matrix.go }}
         if: matrix.go != 'tip'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
           cache: true
 
       - name: Set up bootstrap Go (for gotip only)
         if: matrix.go == 'tip'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: false

@@ -5,9 +5,6 @@ on:
     branches: ['**']
   pull_request:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   # ── Real FreeBSD VM tests — system Go from ports ──────────────────────────
   test-vm:
@@ -37,7 +34,7 @@ jobs:
           - {release: '14.4', arch: aarch64, goarch: arm64,  use_gotip: true, label: freebsd-vm-gotip-arm64, required: false}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Test inside FreeBSD ${{ matrix.release }} / ${{ matrix.goarch }}
         uses: vmactions/freebsd-vm@v1
