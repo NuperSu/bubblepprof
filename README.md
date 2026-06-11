@@ -1,6 +1,11 @@
 # bubblepprof
 
-`bubblepprof` is an in-process Go heap profiler that reports memory usage per **pprof bubble** — a group of goroutines that share the same [`runtime/pprof`](https://pkg.go.dev/runtime/pprof) labels.
+`bubblepprof` is a Go heap profiler that reports memory usage per **pprof bubble** — a group of goroutines that share the same [`runtime/pprof`](https://pkg.go.dev/runtime/pprof) labels.
+
+It works in two modes:
+
+- **In-process**: `POST /debug/memusage` captures and analyses a heap dump inside the profiled process and returns JSON.
+- **External analyser** (gops/pprof style): `GET /debug/memusage/bundle` streams a cheap capture bundle from the target; the `bubblepprof` CLI runs the same analysis out of process, so the target pays only for the stop-the-world dump, not for parsing or graph traversal.
 
 ## What it does
 
@@ -33,14 +38,22 @@ go mod tidy
 
 The module path is `github.com/NuperSu/bubblepprof`; the public API lives in `github.com/NuperSu/bubblepprof/pkg/bubblepprof`. There is nothing to install beyond `go get` — no codegen, no cgo, no extra runtime dependency.
 
-## Registering the endpoint
+For the external analyser CLI:
+
+```bash
+go install github.com/NuperSu/bubblepprof/cmd/bubblepprof@latest
+```
+
+## Registering the endpoints
 
 ```go
 import "github.com/NuperSu/bubblepprof/pkg/bubblepprof"
 
 mux := http.NewServeMux()
-bubblepprof.RegisterMemUsage(mux) // mounts at /debug/memusage
+bubblepprof.Register(mux) // mounts /debug/memusage and /debug/memusage/bundle
 ```
+
+`Register` makes the two endpoints share one single-flight gate (each triggers a stop-the-world heap dump, so only one runs at a time). To mount just one of them, use `RegisterMemUsage(mux)` or `RegisterBundle(mux)`.
 
 For custom options:
 
@@ -144,6 +157,31 @@ The `code` field distinguishes failure modes:
 | `capture_failed` | Could not write the heap dump |
 | `parse_failed` | Heap dump could not be parsed |
 | `busy` | Another request is already running |
+
+## External analyser mode
+
+In-process analysis allocates roughly the workload's live heap again (transiently) inside the profiled process. When that is unacceptable — large heaps, tight memory limits — move the analysis out of process: the target serves a **bundle** and the CLI does the rest.
+
+```bash
+# One step: fetch a bundle from the target and analyse it
+bubblepprof memusage http://127.0.0.1:6060 -labels tenant=acme
+
+# Or two steps: save the bundle, analyse it later (or elsewhere)
+bubblepprof fetch http://127.0.0.1:6060 -o app.tar
+bubblepprof memusage app.tar -labels tenant=acme,tier=enterprise
+```
+
+The output is the same JSON (and the same error codes) as `POST /debug/memusage`.
+
+A bundle is a plain tar stream containing:
+
+- `heap.dump` — `runtime/debug.WriteHeapDump` output (reachability + label structures);
+- `rodata/*` — a snapshot of the target's read-only memory segments, so ordinary string-literal labels like `pprof.Labels("job", "42")` can be recovered out of process (their bytes live in `.rodata`, not the heap);
+- `meta.json` — format version, capture time, producer, runtime info.
+
+When the rodata snapshot is unavailable on the target platform, the bundle remains analysable and literal labels surface as `string_missing` — exactly like the in-process endpoint with `DisableProcessMemoryReader`.
+
+On the target, only `debug.WriteHeapDump` (stop-the-world) plus file streaming runs; no parsing, no graph build. The endpoint accepts `?gc=0|1` to override the pre-dump GC per request.
 
 ## Running the demo
 
@@ -256,6 +294,9 @@ labels the match narrows, `reachable_bytes` shrinks with it, and `global_overlap
 # Everything tenant=atlas-bikes holds, across all its streams and shards:
 curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"tenant":"atlas-bikes"}}' | jq .
 
+# Same question answered out of process via the external analyser:
+bubblepprof memusage http://127.0.0.1:6060 -labels tenant=atlas-bikes
+
 # Narrow to one stream, then one shard — reachable falls, global_overlap holds steady:
 curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"tenant":"atlas-bikes","stream":"app"}}' | jq .
 curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"tenant":"atlas-bikes","stream":"app","shard":"0"}}' | jq .
@@ -296,7 +337,9 @@ pointer slots, so no concrete-type restriction is needed on the data path.
 
 Latency is proportional to live heap size. Concurrent callers receive `429 Too Many Requests`.
 
-**Protect the endpoint with the same controls you apply to `/debug/pprof`.** Do not expose it to untrusted callers.
+`/debug/memusage/bundle` hands out the full heap dump and read-only program memory of the process — the same data exposure as `/debug/pprof` heap and goroutine dumps combined.
+
+**Protect both endpoints with the same controls you apply to `/debug/pprof`.** Do not expose them to untrusted callers.
 
 ## Current limitations
 

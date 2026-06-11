@@ -7,7 +7,10 @@ goroutines that share the same `runtime/pprof` labels. To do that it
 needs to know, for every goroutine in a heap snapshot, which pprof
 labels were attached to it.
 
-The target product is an in-process HTTP endpoint:
+The product has two query surfaces: an in-process HTTP endpoint and an
+external analyser (the `bubblepprof` CLI working from a capture bundle
+served by `GET /debug/memusage/bundle`). Both run the same label
+recovery described here. The in-process endpoint is:
 
 ```http
 POST /debug/memusage
@@ -68,9 +71,8 @@ Labels and heap reachability come from the same stopped-world snapshot
 (`runtime/debug.WriteHeapDump`), so the answer to "which goroutines were
 labeled `job=42` when the heap was sampled?" is internally consistent.
 
-The main endpoint does not combine label sources. Separately captured
-goroutine profiles and wrapper manifests were prototype scaffolding and
-are not part of the final product path.
+Heap-native recovery is the only label source: no separately captured
+goroutine profiles, no wrapper manifests, no label sidecar files.
 
 If heap-native recovery fails or is incomplete, the endpoint returns an
 explicit error — it never silently falls back to an alternative source or
@@ -140,11 +142,12 @@ recovery reads string bytes through a composite address-space reader
 (`internal/addrspace`) that tries the following sources in order:
 
 1. retained heap dump object contents (where the bytes are heap-owned),
-2. the current process's memory mappings (for the in-process endpoint:
-   `addrspace.ProcessReader` reads via `/proc/self/mem` on Linux; on
-   FreeBSD it tries `/proc/self/mem` first and falls back to the on-disk ELF
-   (non-PIE only) when procfs is absent; ASLR-corrected Mach-O segments on
-   macOS; ASLR-corrected PE sections on Windows/Wine),
+2. read-only program memory — in-process via `addrspace.ProcessReader`
+   (`/proc/self/mem` on Linux; on FreeBSD `/proc/self/mem` first with an
+   on-disk ELF fallback (non-PIE only) when procfs is absent;
+   ASLR-corrected Mach-O segments on macOS; ASLR-corrected PE sections on
+   Windows/Wine), or, in the external analyser, the bundle's saved
+   read-only segment snapshot served by `bundle.SegmentsReader`,
 3. the executable's load segments (`addrspace.ELFReader` — an internal
    library reader; `/debug/memusage` does not expose this as a
    user-facing option).
@@ -160,6 +163,10 @@ fallback.
 `/debug/memusage` requires only:
 
 - `heap.dump` — runtime heap dump captured in-process.
+
+The external analyser requires only a capture bundle — the same heap
+dump plus the target's read-only segment snapshot and metadata, in one
+tar stream.
 
 No `labels.json`. No `goroutine.pprof`. No wrapper manifest.
 

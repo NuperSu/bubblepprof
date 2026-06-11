@@ -21,6 +21,8 @@ Ordinary pprof label strings created with `pprof.Labels("key", "value")` may hav
 
 When the reader is unavailable or disabled (`DisableProcessMemoryReader=true`), literal-allocated label strings return `string_missing`.
 
+The external analyser recovers the same bytes from the bundle's read-only segment snapshot, which the target captures with the same per-platform reader — so the platform constraints above apply at capture time on the target, not on the analysing machine. A bundle without a rodata snapshot yields `string_missing` for literal labels.
+
 Heap-allocated label strings (e.g., from `strings.Clone("value")`) do not require the process reader and work on all platforms.
 
 ## Shallow sizes only
@@ -37,9 +39,9 @@ Callers that want exclusive attribution must subtract overlap manually or implem
 
 ## Stop-the-world cost
 
-`runtime/debug.WriteHeapDump` stops all goroutines for the duration of the heap dump. On large heaps this pause can be seconds. The endpoint is not suitable for frequent polling in production. Use it for on-demand diagnostics, not continuous monitoring.
+`runtime/debug.WriteHeapDump` stops all goroutines for the duration of the heap dump. On large heaps this pause can be seconds. Both `/debug/memusage` and `/debug/memusage/bundle` trigger it, so neither endpoint is suitable for frequent polling in production. Use them for on-demand diagnostics, not continuous monitoring. The external analyser moves the parsing and graph-build cost off the target; the stop-the-world pause remains.
 
-A single `/debug/memusage` call holds an exclusive lock; concurrent callers receive `429 Too Many Requests`.
+Each endpoint holds an exclusive lock while a request runs; concurrent callers receive `429 Too Many Requests`. When both endpoints are mounted via `Register`, they share one lock.
 
 ## Disk I/O
 
@@ -47,7 +49,7 @@ The heap dump is written to a temporary file in the OS default temp directory. A
 
 ## Sensitive data exposure
 
-The endpoint captures a full heap dump, which may contain any data currently in memory: secrets, keys, tokens, tenant data. Protect `/debug/memusage` with the same network-level and authentication controls you apply to `/debug/pprof`.
+A heap dump may contain any data currently in memory: secrets, keys, tokens, tenant data. `/debug/memusage` exposes aggregate numbers derived from it; `/debug/memusage/bundle` hands out the dump itself plus read-only program memory. Protect both endpoints with the same network-level and authentication controls you apply to `/debug/pprof`.
 
 ## ELF reader and offline use
 
