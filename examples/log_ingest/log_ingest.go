@@ -155,7 +155,7 @@ func main() {
 	schemaRegistry = buildDictionary(*dictMB)
 
 	mux := http.NewServeMux()
-	bubblepprof.RegisterMemUsage(mux)
+	bubblepprof.Register(mux)
 	// Delegate the pprof subtree to DefaultServeMux, where the net/http/pprof
 	// import registered its handlers.
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)

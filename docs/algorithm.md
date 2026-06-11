@@ -8,6 +8,8 @@ The endpoint answers: *how much heap is reachable from non-system goroutines who
 
 It answers from a single consistent snapshot: labels and heap graph come from the same stopped-world heap dump.
 
+The pipeline runs in two settings with identical semantics: in-process for `POST /debug/memusage`, and out of process when the `bubblepprof` CLI analyses a capture bundle served by `GET /debug/memusage/bundle`. The only difference is the string-body source in step 4: the live process reader in-process, the bundle's read-only segment snapshot externally.
+
 ## Pipeline
 
 ### Step 1 — Validate the request
@@ -40,7 +42,9 @@ An in-process reader is opened to recover string literal bytes that live in the 
 - **macOS**: the current executable's Mach-O segments are parsed and read with ASLR slide correction.
 - **Windows** (including Wine): the current executable's PE sections are parsed and read with ASLR slide correction.
 
-If the reader cannot be opened (unsupported platform, access denied, or `DisableProcessMemoryReader` set), the endpoint continues with heap-object contents only and adds a warning. Literal-allocated labels may later fail with `string_missing`.
+In the external analyser, this step reads the bundle's saved read-only segments instead: the target snapshots the same per-platform ranges at capture time, and the analyser serves them through an equivalent reader keyed by the original virtual addresses.
+
+If no string-body reader is available (unsupported platform, access denied, `DisableProcessMemoryReader` set, or a bundle without a rodata snapshot), the analysis continues with heap-object contents only and adds a warning. Literal-allocated labels may later fail with `string_missing`.
 
 ### Step 5 — Decode pprof labels and look up the runtime layout
 

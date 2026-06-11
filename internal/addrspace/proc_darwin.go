@@ -173,6 +173,36 @@ func (r *ProcessReader) Mappings() []Mapping {
 	return nil
 }
 
+// EligibleStringRanges returns the runtime (ASLR-corrected)
+// virtual-address ranges this reader would serve ReadAtAddr from.
+// Used to snapshot those ranges into an external-analyser bundle.
+func (r *ProcessReader) EligibleStringRanges() []Mapping {
+	if r == nil {
+		return nil
+	}
+	var out []Mapping
+	for _, s := range r.segments {
+		if s.addr > math.MaxInt64 {
+			continue
+		}
+		start := int64(s.addr) + r.slide
+		if start < 0 {
+			continue
+		}
+		end, ok := AddUint64(uint64(start), s.filesz)
+		if !ok {
+			continue
+		}
+		out = append(out, Mapping{
+			Start: uint64(start),
+			End:   end,
+			Read:  true,
+			Path:  r.path,
+		})
+	}
+	return out
+}
+
 // ReadAtAddr implements Reader. It corrects addr for the ASLR slide,
 // looks up the result in the read-only segment table, and reads the
 // bytes from the executable file.

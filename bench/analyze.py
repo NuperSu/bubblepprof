@@ -4,11 +4,12 @@
 Reads the per-config JSONs and summary.csv produced by run.sh + aggregate.py,
 emits plots into bench/results/plots/ and a short analysis.md summary.
 
-Scope: this script characterises the `memusage.Compute` / `/debug/memusage`
-endpoint, not the bench harness. It restricts the analysis to `gc_pre=true`
-and one workload model at a time. Static mode isolates algorithmic cost;
-rotating mode preserves live allocation pressure. Select the workload with
-BENCH_ANALYZE_WORKLOAD (default: static).
+Scope: this script characterises one target-side benchmark mode at a time, not
+the bench harness. It restricts the analysis to `gc_pre=true` when available
+and one workload model at a time. Static mode isolates operation cost; rotating
+mode preserves live allocation pressure. Select the workload with
+BENCH_ANALYZE_WORKLOAD (default: static), and the benchmark mode with
+BENCH_ANALYZE_MODE (default: compute).
 
 Drops:
     * the 2 stray heap_mb=800 rows (partial earlier run);
@@ -33,6 +34,7 @@ RESULTS = ROOT / "results"
 PLOTS = RESULTS / "plots"
 PLOTS.mkdir(exist_ok=True)
 WORKLOAD = os.environ.get("BENCH_ANALYZE_WORKLOAD", "static")
+MODE = os.environ.get("BENCH_ANALYZE_MODE", "compute")
 GC_PRE_REQUEST = os.environ.get("BENCH_ANALYZE_GC_PRE", "auto").lower()
 SELECTED_GC_PRE: bool | None = None
 
@@ -61,6 +63,7 @@ def choose_gc_pre(df: pd.DataFrame) -> bool | None:
         return False
     return None
 
+
 def load_summary() -> pd.DataFrame:
     global SELECTED_GC_PRE
 
@@ -70,9 +73,13 @@ def load_summary() -> pd.DataFrame:
     if "workload" not in df.columns:
         df["workload"] = "static"
     df["workload"] = df["workload"].fillna("static")
+    if "mode" not in df.columns:
+        df["mode"] = "compute"
+    df["mode"] = df["mode"].fillna("compute")
     df = df[df["workload"] == WORKLOAD].copy()
+    df = df[df["mode"] == MODE].copy()
     if df.empty:
-        raise SystemExit(f"no configs found for workload={WORKLOAD!r} in {RESULTS / 'summary.csv'}")
+        raise SystemExit(f"no configs found for workload={WORKLOAD!r}, mode={MODE!r} in {RESULTS / 'summary.csv'}")
 
     SELECTED_GC_PRE = choose_gc_pre(df)
     if SELECTED_GC_PRE is not None:
@@ -113,6 +120,8 @@ def load_iterations() -> pd.DataFrame:
             continue
         if cfg.get("workload", "static") != WORKLOAD:
             continue
+        if cfg.get("mode", "compute") != MODE:
+            continue
         if SELECTED_GC_PRE is not None and parse_bool(cfg.get("gc_pre", False)) != SELECTED_GC_PRE:
             continue
         for it in d["iterations"]:
@@ -124,6 +133,7 @@ def load_iterations() -> pd.DataFrame:
                 "goroutines": cfg["goroutines"],
                 "match_fraction": cfg["match_fraction"],
                 "workload": cfg.get("workload", "static"),
+                "mode": cfg.get("mode", "compute"),
                 "index": it["index"],
                 "wall_ns": it["wall_ns"],
                 "go_heap_alloc_delta_b": it["go_heap_alloc_delta_b"],

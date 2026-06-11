@@ -16,6 +16,13 @@ type ComputeFunc func(ctx context.Context, req Request) (*Response, error)
 type HandlerOptions struct {
 	Opts                Options
 	MaxRequestBodyBytes int64
+
+	// Semaphore is the single-flight gate (capacity-1 channel). When nil
+	// the handler creates a private one. Supplying a shared channel lets
+	// multiple heap-dumping endpoints (e.g. /debug/memusage and
+	// /debug/memusage/bundle) serialize against each other, since each
+	// triggers a stop-the-world WriteHeapDump.
+	Semaphore chan struct{}
 }
 
 // Handler returns an http.Handler that serves POST /debug/memusage by
@@ -38,7 +45,10 @@ func Handler(compute ComputeFunc, hopts HandlerOptions) http.Handler {
 	if maxBody <= 0 {
 		maxBody = DefaultMaxRequestBodyBytes
 	}
-	sem := make(chan struct{}, 1)
+	sem := hopts.Semaphore
+	if sem == nil {
+		sem = make(chan struct{}, 1)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serve(w, r, compute, hopts.Opts, maxBody, sem)
 	})
@@ -119,66 +129,70 @@ func serve(
 }
 
 func writeComputeError(w http.ResponseWriter, err error) {
+	status, body := ErrorResponseFor(err)
+	writeError(w, status, body)
+}
+
+// ErrorResponseFor maps a compute/analyse error to the HTTP status code
+// and JSON error body served by the /debug/memusage endpoint. The CLI
+// uses the same mapping so error codes (unsupported_runtime,
+// string_missing, label_recovery_failed, capture_failed, parse_failed,
+// validation codes) are identical in both modes.
+func ErrorResponseFor(err error) (int, *ErrorResponse) {
 	var validation *ValidationError
 	if errors.As(err, &validation) {
-		writeError(w, http.StatusBadRequest, &ErrorResponse{
+		return http.StatusBadRequest, &ErrorResponse{
 			Error: validation.Msg,
 			Code:  validation.Code,
-		})
-		return
+		}
 	}
 	var unsupported *UnsupportedRuntimeError
 	if errors.As(err, &unsupported) {
-		writeError(w, http.StatusUnprocessableEntity, &ErrorResponse{
+		return http.StatusUnprocessableEntity, &ErrorResponse{
 			Error:     unsupported.Error(),
 			Code:      "unsupported_runtime",
 			GoVersion: unsupported.GoVersion,
 			GOARCH:    unsupported.GOARCH,
-		})
-		return
+		}
 	}
 	var stringMissing *StringMissingError
 	if errors.As(err, &stringMissing) {
-		writeError(w, http.StatusUnprocessableEntity, &ErrorResponse{
+		return http.StatusUnprocessableEntity, &ErrorResponse{
 			Error:     stringMissing.Error(),
 			Code:      "string_missing",
 			GoVersion: stringMissing.GoVersion,
 			GOARCH:    stringMissing.GOARCH,
 			Warnings:  stringMissing.Warnings,
-		})
-		return
+		}
 	}
 	var labelRecoveryFailed *LabelRecoveryFailedError
 	if errors.As(err, &labelRecoveryFailed) {
-		writeError(w, http.StatusUnprocessableEntity, &ErrorResponse{
+		return http.StatusUnprocessableEntity, &ErrorResponse{
 			Error:     labelRecoveryFailed.Error(),
 			Code:      "label_recovery_failed",
 			GoVersion: labelRecoveryFailed.GoVersion,
 			GOARCH:    labelRecoveryFailed.GOARCH,
 			Warnings:  labelRecoveryFailed.Warnings,
-		})
-		return
+		}
 	}
 	var captureFailed *CaptureFailedError
 	if errors.As(err, &captureFailed) {
-		writeError(w, http.StatusInternalServerError, &ErrorResponse{
+		return http.StatusInternalServerError, &ErrorResponse{
 			Error: captureFailed.Error(),
 			Code:  "capture_failed",
-		})
-		return
+		}
 	}
 	var parseFailed *ParseFailedError
 	if errors.As(err, &parseFailed) {
-		writeError(w, http.StatusInternalServerError, &ErrorResponse{
+		return http.StatusInternalServerError, &ErrorResponse{
 			Error: parseFailed.Error(),
 			Code:  "parse_failed",
-		})
-		return
+		}
 	}
-	writeError(w, http.StatusInternalServerError, &ErrorResponse{
+	return http.StatusInternalServerError, &ErrorResponse{
 		Error: err.Error(),
 		Code:  "internal_error",
-	})
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, body interface{}) {

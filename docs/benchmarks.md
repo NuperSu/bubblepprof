@@ -1,9 +1,16 @@
 # Benchmarks
 
-This document describes how `bubblepprof`'s `/debug/memusage` endpoint is
+This document describes how `bubblepprof`'s target-side profiling paths are
 measured for the thesis: what is measured, how, and how to reproduce.
 
 ## What is measured
+
+`cmd/bench` has two measurement modes:
+
+| Mode | Flag | What it measures in the target process |
+| --- | --- | --- |
+| In-process analysis | `-mode compute` | `memusage.Compute`: heap dump, lazy parse, label recovery, graph build, selected-root BFS |
+| External analyser target | `-mode bundle` | `bundle.CaptureSelf`: heap dump plus rodata snapshot streamed as a bundle; no parse, graph build, or BFS in the target |
 
 Per-iteration metrics captured by `cmd/bench`:
 
@@ -15,7 +22,8 @@ Per-iteration metrics captured by `cmd/bench`:
 | `go_total_alloc_delta_b` | `TotalAlloc` delta (cumulative bytes allocated) | `runtime.ReadMemStats` |
 | `vm_rss_after_kb` / `vm_hwm_after_kb` | Process resident set after the call; high-water mark | `/proc/self/status` |
 | `vm_peak_delta_kb` | Per-call peak RSS growth when Linux `clear_refs` can reset `VmHWM`; otherwise zero or a lower-fidelity cumulative delta | `/proc/self/clear_refs`, `/proc/self/status` |
-| `matched_goroutines`, `reachable_bytes` | Sanity-check fields from the JSON response | endpoint output |
+| `matched_goroutines`, `reachable_bytes` | Sanity-check fields from the JSON response in `compute` mode | endpoint output |
+| `bundle_bytes` | Bundle tar bytes emitted in `bundle` mode | counting discard writer |
 
 For per-stage timing (`capture` / `parse` / `labels` / `build` /
 `compute_from_analysis`) the binary writes one `runtime/trace` capture per
@@ -59,7 +67,9 @@ normal allocation pressure and GC pacing.
 | Rotating | `-workload rotating` | Each labeled goroutine retains a fixed-size ring and periodically replaces chunks. Resident heap stays roughly flat while allocation churn drives normal GC behavior, closer to `examples/log_ingest`. |
 
 Use static results for algorithmic cost and allocator pressure. Use rotating
-results for service-like RSS behavior.
+results for service-like RSS behavior. Compare `compute` and `bundle` rows for
+the same workload/configuration to quantify target RSS reduction from the
+external analyser.
 
 ## Configuration sweep
 
@@ -90,11 +100,19 @@ bash bench/run.sh --full
 bash bench/run.sh --quick-live
 bash bench/run.sh --full-live
 
+# target RSS comparison: in-process analysis vs external-analyser target capture
+BENCH_MODES="compute bundle" bash bench/run.sh --quick
+BENCH_MODES="compute bundle" bash bench/run.sh --quick-live
+
 # inspect a single configuration:
-go run ./cmd/bench -heap-mb 500 -goroutines 1000 \
+go run ./cmd/bench -mode compute -heap-mb 500 -goroutines 1000 \
   -iterations 20 -warmup 3 \
   -trace bench/results/single.trace \
   -out bench/results/single.json
+
+go run ./cmd/bench -mode bundle -heap-mb 500 -goroutines 1000 \
+  -iterations 20 -warmup 3 \
+  -out bench/results/single-bundle.json
 ```
 
 Results land in `bench/results/`:
@@ -154,6 +172,10 @@ measure slightly higher peak allocation than the production pipeline.
   defaults to GC before the dump. The full sweep includes both modes; the
   `gc_pre=false` rows isolate the pipeline cost without the pre-dump GC pause,
   and `gc_pre=true` rows reflect the production default.
+- **`bundle` mode is target-side only.** It measures the process serving
+  `GET /debug/memusage/bundle`: heap dump capture, rodata snapshot, and bundle
+  streaming. It intentionally excludes offline analyser RSS/CPU, because that
+  work happens in a separate process in production.
 - **Heartbeat ≠ exact STW.** The heartbeat upper-bounds STW with scheduling
   jitter on top; cross-check against the `.trace` file. Discrepancy of a few
   hundred microseconds is normal.

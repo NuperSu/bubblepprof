@@ -64,6 +64,23 @@ func (r *ProcessReader) Mappings() []Mapping {
 	return out
 }
 
+// EligibleStringRanges returns the runtime virtual-address ranges this
+// reader would serve ReadAtAddr from (the read-only mappings eligible
+// for string literal bytes). Used to snapshot those ranges into an
+// external-analyser bundle. The slice is safe to mutate.
+func (r *ProcessReader) EligibleStringRanges() []Mapping {
+	if r == nil {
+		return nil
+	}
+	var out []Mapping
+	for _, m := range r.maps {
+		if mappingEligibleForStringBody(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // ReadAtAddr implements Reader. It only succeeds when the requested
 // [addr, addr+size) range lies entirely inside a single eligible
 // mapping; cross-mapping reads return false.

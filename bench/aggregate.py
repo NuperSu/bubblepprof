@@ -27,6 +27,7 @@ METRICS = [
     "vm_hwm_after_kb",
     "vm_peak_delta_kb",
     "reachable_bytes",
+    "bundle_bytes",
 ]
 STATS = ["mean", "stddev", "min", "max", "p50", "p95", "p99"]
 
@@ -61,6 +62,7 @@ def row_for_json(path: Path) -> dict[str, str]:
 
     row: dict[str, str] = {
         "tag": cfg.get("tag", path.stem),
+        "mode": str(cfg.get("mode", "compute")),
         "heap_mb": str(cfg.get("heap_mb", "")),
         "goroutines": str(cfg.get("goroutines", "")),
         "match_fraction": str(cfg.get("match_fraction", "")),
@@ -110,7 +112,7 @@ def main(argv: list[str]) -> int:
     # Union of all keys across rows, with a stable preferred ordering for
     # the columns the thesis most often cites.
     preferred = [
-        "tag", "heap_mb", "goroutines", "match_fraction", "gc_pre",
+        "tag", "mode", "heap_mb", "goroutines", "match_fraction", "gc_pre",
         "pre_measure_gc", "reset_vmhwm", "workload", "ring", "rotate_interval_ms",
         "iterations", "warmup", "go_version", "goarch",
         "wall_ns_mean", "wall_ns_stddev", "wall_ns_p50", "wall_ns_p95", "wall_ns_p99",
@@ -120,6 +122,7 @@ def main(argv: list[str]) -> int:
         "vm_rss_after_kb_mean", "vm_hwm_after_kb_mean",
         "vm_peak_delta_kb_mean",
         "reachable_bytes_mean",
+        "bundle_bytes_mean",
         "time_maxrss_kb", "time_user_s", "time_sys_s", "time_elapsed",
         "time_minor_faults", "time_major_faults",
         "time_voluntary_ctx", "time_involuntary_ctx",

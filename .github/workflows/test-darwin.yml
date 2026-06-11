@@ -5,9 +5,6 @@ on:
     branches: ['**']
   pull_request:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   test:
     name: Test / ${{ matrix.go }} / ${{ matrix.label }}
@@ -84,18 +81,18 @@ jobs:
           - {go: tip,       runner: macos-latest, goos: darwin, goarch: arm64, label: darwin-arm64, required: false}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go ${{ matrix.go }}
         if: matrix.go != 'tip'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
           cache: true
 
       - name: Set up bootstrap Go (for gotip only)
         if: matrix.go == 'tip'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: false

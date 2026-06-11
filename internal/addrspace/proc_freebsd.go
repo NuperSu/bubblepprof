@@ -120,6 +120,44 @@ func (r *ProcessReader) Mappings() []Mapping {
 	return out
 }
 
+// EligibleStringRanges returns the virtual-address ranges this reader
+// would serve ReadAtAddr from, for snapshotting into an
+// external-analyser bundle. With procfs these are the read-only
+// mappings at live runtime addresses; with the on-disk ELF source they
+// are the file-backed PT_LOAD ranges at on-disk Vaddrs (correct only
+// for non-PIE binaries, the same constraint as ReadAtAddr).
+func (r *ProcessReader) EligibleStringRanges() []Mapping {
+	if r == nil {
+		return nil
+	}
+	if r.mem != nil {
+		var out []Mapping
+		for _, m := range r.maps {
+			if mappingEligibleForStringBody(m) {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	if r.elf != nil {
+		var out []Mapping
+		for _, s := range r.elf.Segments() {
+			end, ok := AddUint64(s.Vaddr, s.Filesz)
+			if !ok {
+				continue
+			}
+			out = append(out, Mapping{
+				Start: s.Vaddr,
+				End:   end,
+				Read:  true,
+				Path:  r.path,
+			})
+		}
+		return out
+	}
+	return nil
+}
+
 // ReadAtAddr implements Reader. With procfs it only serves addresses that
 // fall entirely within a single read-only mapping (same policy as Linux).
 // With the on-disk ELF source addr must lie inside a file-backed PT_LOAD

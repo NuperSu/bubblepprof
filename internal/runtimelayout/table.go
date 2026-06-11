@@ -57,9 +57,8 @@ var verifiedTable = []TableEntry{
 			Description:   "pre-release go1.27-devel 32-bit LE runtime.g.labels offset 0xd8 (verified on commit e62d3e6e)",
 		}),
 	},
-	// Verified on linux/amd64, linux/arm64 (go1.26.0–go1.26.3),
-	// darwin/amd64, darwin/arm64, windows/amd64 (go1.26.0–go1.26.3),
-	// and freebsd/amd64, freebsd/arm64 (stable, go1.26.*).
+	// Verified on linux/amd64, linux/arm64, darwin/amd64, darwin/arm64,
+	// windows/amd64, freebsd/amd64, and freebsd/arm64 for go1.26.*.
 	// Applies to all 64-bit little-endian platforms for go1.26.*.
 	{
 		VersionPrefix: "go1.26.",
@@ -71,8 +70,7 @@ var verifiedTable = []TableEntry{
 			Description:   "verified go1.26.* 64-bit LE (linux, darwin, windows, freebsd) runtime.g.labels offset 0x160",
 		}),
 	},
-	// Verified on linux/arm/v7 (go1.26.0–go1.26.3), linux/386 (go1.26.0–go1.26.3),
-	// and freebsd/386 (stable, go1.26.*).
+	// Verified on linux/arm/v7, linux/386, and freebsd/386 for go1.26.*.
 	// Applies to all 32-bit little-endian platforms for go1.26.*.
 	{
 		VersionPrefix: "go1.26.",
