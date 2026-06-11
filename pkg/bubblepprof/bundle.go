@@ -2,6 +2,8 @@ package bubblepprof
 
 import (
 	"net/http"
+	"runtime/debug"
+	"sync"
 
 	"github.com/NuperSu/bubblepprof/internal/bundle"
 	"github.com/NuperSu/bubblepprof/internal/memusage"
@@ -11,9 +13,29 @@ import (
 // expected to be mounted.
 const MemUsageBundlePath = "/debug/memusage/bundle"
 
-// producer is recorded in bundle metadata so an analyser can tell which
-// library version produced an artifact.
-const producer = "bubblepprof/v0.2.0"
+// modulePath is this library's module path as it appears in the
+// embedding binary's build info.
+const modulePath = "github.com/NuperSu/bubblepprof"
+
+// producer returns the string recorded in bundle metadata so an
+// analyser can tell which library version produced an artifact. The
+// version comes from the embedding binary's build info; when it is not
+// available (e.g. built from a workspace or this module's own tests)
+// the version part is omitted.
+var producer = sync.OnceValue(func() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		mods := append([]*debug.Module{&bi.Main}, bi.Deps...)
+		for _, m := range mods {
+			if m.Replace != nil {
+				m = m.Replace
+			}
+			if m.Path == modulePath && m.Version != "" && m.Version != "(devel)" {
+				return "bubblepprof/" + m.Version
+			}
+		}
+	}
+	return "bubblepprof"
+})
 
 // BundleOptions controls the behavior of BundleHandler.
 //
@@ -75,7 +97,7 @@ func bundleHandler(opts BundleOptions, sem chan struct{}) http.Handler {
 			GCBeforeHeapDump: !opts.DisableGCBeforeHeapDump,
 			DisableRodata:    opts.DisableRodataCapture,
 			MaxRodataBytes:   opts.MaxRodataBytes,
-			Producer:         producer,
+			Producer:         producer(),
 		},
 		Semaphore: sem,
 	})
