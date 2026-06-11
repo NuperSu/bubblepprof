@@ -97,13 +97,22 @@ func CaptureSelf(ctx context.Context, w io.Writer, opts CaptureOptions) error {
 	return Write(w, in)
 }
 
+// segmentSource is the part of addrspace.ProcessReader that
+// collectSegments consumes.
+type segmentSource interface {
+	addrspace.Reader
+	EligibleStringRanges() []addrspace.Mapping
+}
+
 // collectSegments turns the reader's eligible ranges into bundle
 // segments, probing each range's first and last chunk so unreadable
 // pseudo-mappings (e.g. [vvar]) are skipped up front instead of
 // corrupting the tar mid-stream. Returns the segments and the rodata
 // status ("ok" or "truncated"); skipped-unreadable ranges are recorded
-// as meta warnings without affecting the status.
-func collectSegments(r *addrspace.ProcessReader, maxBytes int64, meta *Meta) ([]Segment, string) {
+// as meta warnings without affecting the status. When nothing at all
+// could be collected the status degrades to "unavailable" so the
+// analyser warns before literal labels surface as string_missing.
+func collectSegments(r segmentSource, maxBytes int64, meta *Meta) ([]Segment, string) {
 	budget := maxBytes
 	if budget <= 0 {
 		budget = DefaultMaxRodataBytes
@@ -133,6 +142,10 @@ func collectSegments(r *addrspace.ProcessReader, maxBytes int64, meta *Meta) ([]
 			Path:  m.Path,
 			R:     &rangeReader{r: r, addr: m.Start, remaining: size},
 		})
+	}
+	if len(segments) == 0 && status == RodataOK {
+		status = RodataUnavailable
+		meta.Rodata.Reason = "no readable eligible string ranges"
 	}
 	return segments, status
 }

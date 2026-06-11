@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/NuperSu/bubblepprof/internal/addrspace"
 )
 
 func writeTestBundle(t *testing.T, in WriteInput) []byte {
@@ -81,10 +83,11 @@ func TestWriteOpenRoundTrip(t *testing.T) {
 		t.Errorf("segment 1 interior read = %q ok=%t", data, ok)
 	}
 
+	dumpPath := b.HeapDumpPath
 	if err := b.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if _, err := os.Stat(b.HeapDumpPath); !os.IsNotExist(err) && b.HeapDumpPath != "" {
+	if _, err := os.Stat(dumpPath); !os.IsNotExist(err) {
 		t.Errorf("temp dump not removed: %v", err)
 	}
 	if err := b.Close(); err != nil {
@@ -332,5 +335,174 @@ func TestHexUint64JSON(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`123`), &h); err == nil {
 		t.Fatal("non-string must error")
+	}
+}
+
+// fakeSegmentSource serves a fixed set of in-memory ranges through the
+// segmentSource interface so collectSegments can be tested without a
+// live process reader.
+type fakeSegmentSource struct {
+	ranges []addrspace.Mapping
+	data   map[uint64][]byte // keyed by range start
+}
+
+func (f *fakeSegmentSource) EligibleStringRanges() []addrspace.Mapping { return f.ranges }
+
+func (f *fakeSegmentSource) ReadAtAddr(addr, size uint64) ([]byte, bool) {
+	if size == 0 {
+		return []byte{}, true
+	}
+	for start, d := range f.data {
+		end := start + uint64(len(d))
+		if addr >= start && addr+size <= end {
+			out := make([]byte, size)
+			copy(out, d[addr-start:])
+			return out, true
+		}
+	}
+	return nil, false
+}
+
+func TestCollectSegmentsTruncation(t *testing.T) {
+	src := &fakeSegmentSource{
+		ranges: []addrspace.Mapping{
+			{Start: 0x1000, End: 0x1010, Read: true, Path: "/bin/a"}, // 16 bytes: fits
+			{Start: 0x2000, End: 0x2040, Read: true, Path: "/bin/b"}, // 64 bytes: over budget
+			{Start: 0x3000, End: 0x3008, Read: true, Path: "/bin/c"}, // 8 bytes: still fits
+		},
+		data: map[uint64][]byte{
+			0x1000: bytes.Repeat([]byte{1}, 16),
+			0x2000: bytes.Repeat([]byte{2}, 64),
+			0x3000: bytes.Repeat([]byte{3}, 8),
+		},
+	}
+	var meta Meta
+	segs, status := collectSegments(src, 32, &meta)
+	if status != RodataTruncated {
+		t.Fatalf("status = %q, want %q", status, RodataTruncated)
+	}
+	if len(segs) != 2 || segs[0].Addr != 0x1000 || segs[1].Addr != 0x3000 {
+		t.Fatalf("segments = %+v, want the two small ranges", segs)
+	}
+	if meta.Rodata.Reason == "" || len(meta.Warnings) == 0 {
+		t.Fatalf("truncation must record a reason and a warning: %+v", meta)
+	}
+}
+
+func TestCollectSegmentsSkipsUnreadable(t *testing.T) {
+	src := &fakeSegmentSource{
+		ranges: []addrspace.Mapping{
+			{Start: 0x1000, End: 0x1010, Read: true, Path: "[vvar]"}, // no data: probe fails
+			{Start: 0x2000, End: 0x2008, Read: true, Path: "/bin/a"},
+		},
+		data: map[uint64][]byte{0x2000: bytes.Repeat([]byte{7}, 8)},
+	}
+	var meta Meta
+	segs, status := collectSegments(src, 0, &meta)
+	if status != RodataOK {
+		t.Fatalf("status = %q, want %q", status, RodataOK)
+	}
+	if len(segs) != 1 || segs[0].Addr != 0x2000 {
+		t.Fatalf("segments = %+v, want only the readable range", segs)
+	}
+	if len(meta.Warnings) != 1 || !strings.Contains(meta.Warnings[0], "[vvar]") {
+		t.Fatalf("warnings = %v, want one skipped-unreadable entry", meta.Warnings)
+	}
+}
+
+func TestCollectSegmentsEmptyIsUnavailable(t *testing.T) {
+	var meta Meta
+	segs, status := collectSegments(&fakeSegmentSource{}, 0, &meta)
+	if len(segs) != 0 || status != RodataUnavailable {
+		t.Fatalf("segs = %v status = %q, want none/unavailable", segs, status)
+	}
+	if meta.Rodata.Reason == "" {
+		t.Fatal("unavailable status must carry a reason")
+	}
+}
+
+func TestOpenRejectsDuplicateHeapDump(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	meta, _ := json.Marshal(Meta{FormatVersion: FormatVersion, Rodata: RodataMeta{Status: RodataOK}})
+	for _, m := range []struct {
+		name string
+		data []byte
+	}{
+		{MetaMember, meta},
+		{HeapDumpMember, []byte("one")},
+		{HeapDumpMember, []byte("two")},
+	} {
+		if err := tw.WriteHeader(&tar.Header{Name: m.name, Size: int64(len(m.data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(m.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = tw.Close()
+	if _, err := Open(&buf); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("err = %v, want duplicate-member error", err)
+	}
+}
+
+func TestOpenMissingReferencedSegmentMember(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	meta, _ := json.Marshal(Meta{FormatVersion: FormatVersion, Rodata: RodataMeta{Status: RodataOK, Segments: 1}})
+	infos, _ := json.Marshal([]SegmentInfo{{Member: "rodata/00000.bin", Addr: 0x1000, Size: 4}})
+	for _, m := range []struct {
+		name string
+		data []byte
+	}{
+		{MetaMember, meta},
+		{SegmentsMember, infos},
+		{HeapDumpMember, []byte("dump")},
+	} {
+		if err := tw.WriteHeader(&tar.Header{Name: m.name, Size: int64(len(m.data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(m.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = tw.Close()
+	if _, err := Open(&buf); err == nil || !strings.Contains(err.Error(), "missing member") {
+		t.Fatalf("err = %v, want missing-member error", err)
+	}
+}
+
+func TestOpenWarnsOnEmptyOKSnapshot(t *testing.T) {
+	raw := writeTestBundle(t, WriteInput{
+		Meta:         Meta{Rodata: RodataMeta{Status: RodataOK}},
+		HeapDump:     strings.NewReader("d"),
+		HeapDumpSize: 1,
+	})
+	b := openTestBundle(t, raw)
+	if b.Segments != nil {
+		t.Fatalf("Segments = %v, want nil", b.Segments)
+	}
+	found := false
+	for _, w := range b.Warnings {
+		if strings.Contains(w, "literal pprof label strings may be unrecoverable") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings %v lack the literal-label degradation phrasing", b.Warnings)
+	}
+}
+
+func TestWriteShortSegmentReaderFails(t *testing.T) {
+	var buf bytes.Buffer
+	err := Write(&buf, WriteInput{
+		Segments: []Segment{
+			{Addr: 0x1000, Size: 8, R: strings.NewReader("abc")}, // 3 < 8 bytes
+		},
+		HeapDump:     strings.NewReader("d"),
+		HeapDumpSize: 1,
+	})
+	if err == nil {
+		t.Fatal("Write with a short segment reader must error")
 	}
 }

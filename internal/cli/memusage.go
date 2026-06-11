@@ -109,7 +109,9 @@ func analyzeBundle(ctx context.Context, b *bundle.Bundle, req memusage.Request, 
 // argument (downloaded fully first so a slow analysis cannot hold the
 // HTTP connection open).
 func openBundleSource(arg string, gc bool, timeout time.Duration) (io.ReadCloser, error) {
-	if !strings.HasPrefix(arg, "http://") && !strings.HasPrefix(arg, "https://") {
+	// URL schemes are case-insensitive (RFC 3986).
+	lower := strings.ToLower(arg)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return os.Open(arg)
 	}
 

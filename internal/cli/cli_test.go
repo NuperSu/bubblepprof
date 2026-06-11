@@ -2,6 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,5 +96,68 @@ func TestBundleURL(t *testing.T) {
 	}
 	if _, err := bundleURL("http://host \x7f", true); err == nil {
 		t.Error("unparsable URL must error")
+	}
+}
+
+// TestFetchEndToEnd drives the fetch subcommand against a stub server
+// (the bundle bytes are opaque to fetch, so no real capture is needed).
+func TestFetchEndToEnd(t *testing.T) {
+	payload := []byte("not-really-a-tar-but-fetch-does-not-care")
+	var gotPath, gotGC string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotGC = r.URL.Query().Get("gc")
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "bundle.tar")
+	var stdout, stderr bytes.Buffer
+	code := Main([]string{"fetch", srv.URL, "-o", out, "-gc=false"}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	if gotPath != "/debug/memusage/bundle" || gotGC != "0" {
+		t.Fatalf("request = %s?gc=%s, want /debug/memusage/bundle?gc=0", gotPath, gotGC)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("output = %q, want server payload", got)
+	}
+
+	// "-o -" streams the bundle bytes to stdout.
+	stdout.Reset()
+	stderr.Reset()
+	if code := Main([]string{"fetch", srv.URL, "-o", "-"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("stdout mode exit code = %d, stderr: %s", code, stderr.String())
+	}
+	if !bytes.Equal(stdout.Bytes(), payload) {
+		t.Fatalf("stdout = %q, want server payload", stdout.Bytes())
+	}
+}
+
+// TestFetchNon200 verifies a non-200 target response surfaces as a
+// transport failure, not a saved error page.
+func TestFetchNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"busy","code":"busy"}`, http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "bundle.tar")
+	var stdout, stderr bytes.Buffer
+	code := Main([]string{"fetch", srv.URL, "-o", out}, &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(stderr.String(), "429") {
+		t.Fatalf("stderr %q should mention the HTTP status", stderr.String())
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatalf("no output file should be created on failure: %v", err)
 	}
 }

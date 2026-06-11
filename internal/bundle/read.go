@@ -80,6 +80,10 @@ func Open(r io.Reader) (*Bundle, error) {
 				return nil, fmt.Errorf("bundle: parse %s: %w", SegmentsMember, err)
 			}
 		case hdr.Name == HeapDumpMember:
+			if dumpPresent {
+				cleanupDump()
+				return nil, fmt.Errorf("bundle: duplicate %s member", HeapDumpMember)
+			}
 			f, err := os.CreateTemp("", "bubblepprof-bundle-*.heap")
 			if err != nil {
 				return nil, fmt.Errorf("bundle: create heap dump temp file: %w", err)
@@ -147,6 +151,12 @@ func Open(r io.Reader) (*Bundle, error) {
 	// string_missing diagnostics read identically in both modes.
 	switch meta.Rodata.Status {
 	case RodataOK:
+		if b.Segments == nil {
+			// Defensive: a writer should report "unavailable" instead of
+			// an empty "ok" snapshot, but a string_missing failure must
+			// always come with an explanation.
+			b.Warnings = append(b.Warnings, rodataWarning("process memory reader unavailable", "bundle contains no rodata segments"))
+		}
 	case RodataDisabled:
 		b.Warnings = append(b.Warnings, "process memory reader disabled by options; literal pprof label strings may be unrecoverable")
 	case RodataTruncated:
