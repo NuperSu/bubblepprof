@@ -11,11 +11,9 @@ import (
 	"runtime/trace"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
-	"github.com/NuperSu/bubblepprof/internal/heapdump"
 	"github.com/NuperSu/bubblepprof/internal/heaplabels"
 	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
-	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
 // HeapDumpCapturer captures the calling process's heap into a file that
@@ -145,7 +143,8 @@ func (c *Computer) Close() error {
 	return nil
 }
 
-// Compute runs the full /debug/memusage pipeline:
+// Compute runs the full /debug/memusage pipeline (steps 2-6 are the
+// shared analyse side implemented by AnalyzeDump):
 //
 //  1. Capture a heap dump to a temp file.
 //  2. Parse it with ParseLazyContents so object content bytes are not
@@ -210,77 +209,22 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	}
 	defer f.Close()
 
-	parseRegion := trace.StartRegion(ctx, "memusage/parse")
-	snap, resolver, err := heapdump.ParseLazyContents(f, f, heapdump.Options{Strict: true})
-	parseRegion.End()
-	if err != nil {
-		return nil, &ParseFailedError{Cause: err}
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
 	procReader, procWarning := openProcessReader(c.Opts.DisableProcessMemoryReader)
 	if procReader != nil {
 		defer procReader.Close()
 	}
-
-	// Decode labels first so an unsupported runtime can short-circuit
-	// before the (expensive) graph build.
 	var extra addrspace.Reader
 	if procReader != nil {
 		extra = procReader
 	}
-	// Back the structural read Memory with the lazy resolver so we do
-	// not retain ~the workload heap worth of object content bytes in
-	// the Go heap. The decoder fetches bytes from f on demand via
-	// io.ReaderAt; f stays open until Compute returns (defer below).
-	heapMem := heaplabels.NewMemoryFromReader(resolver)
-	labelsRegion := trace.StartRegion(ctx, "memusage/labels")
-	result, err := recoverer.Recover(snap, heapMem, extra)
-	labelsRegion.End()
-	if err != nil {
-		return nil, fmt.Errorf("recover heap-native labels: %w", err)
-	}
-	diag := DiagnosticsFromHeapLabels(snap, result)
+	var extraWarnings []string
 	if procWarning != "" {
-		diag.Warnings = append(diag.Warnings, procWarning)
-	}
-	if diag.UnsupportedRuntime {
-		return nil, &UnsupportedRuntimeError{GoVersion: diag.GoVersion, GOARCH: diag.GOARCH}
+		extraWarnings = []string{procWarning}
 	}
 
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	// Drop per-object content bytes now that label recovery has consumed
-	// them. snapshotgraph.Build never reads Contents — only PointerAddrs,
-	// Addr, Size. Nilling out here lets the GC reclaim ~the workload's
-	// heap worth of bytes before Build allocates the graph.
-	for i := range snap.Objects {
-		snap.Objects[i].Contents = nil
-	}
-
-	buildRegion := trace.StartRegion(ctx, "memusage/build")
-	analysis, err := snapshotgraph.Build(snap, snapshotgraph.Options{})
-	buildRegion.End()
-	if err != nil {
-		return nil, fmt.Errorf("build object graph: %w", err)
-	}
-
-	// Build no longer needs the per-object PointerAddrs slices. Drop them
-	// so ComputeFromAnalysis runs against the graph alone.
-	for i := range snap.Objects {
-		snap.Objects[i].PointerAddrs = nil
-	}
-	snap = nil
-
-	computeRegion := trace.StartRegion(ctx, "memusage/compute_from_analysis")
-	resp, err := ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, c.Opts)
-	computeRegion.End()
-	return resp, err
+	// f serves both the streaming parse and lazy object-content reads;
+	// it stays open until analyzeDump returns (defer above).
+	return analyzeDump(ctx, f, f, recoverer, extra, extraWarnings, req, c.Opts)
 }
 
 // openProcessReader tries to open the in-process address-space reader

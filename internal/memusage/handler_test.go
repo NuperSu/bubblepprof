@@ -203,6 +203,37 @@ func TestHandler_Busy(t *testing.T) {
 	}
 }
 
+// TestHandler_SharedSemaphore verifies HandlerOptions.Semaphore is
+// honored: a gate held by another endpoint (e.g. an in-flight bundle
+// capture) makes this handler answer 429 busy.
+func TestHandler_SharedSemaphore(t *testing.T) {
+	sem := make(chan struct{}, 1)
+	sem <- struct{}{} // another endpoint holds the gate
+
+	h := Handler(stubCompute(&Response{}, nil), HandlerOptions{Semaphore: sem})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"a":"b"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rr.Code)
+	}
+	var body ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Code != "busy" {
+		t.Fatalf("code = %q, want busy", body.Code)
+	}
+
+	<-sem // gate released: the handler must serve again
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/debug/memusage", strings.NewReader(`{"labels":{"a":"b"}}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status after release = %d, want 200", rr.Code)
+	}
+}
+
 func TestHandler_BodyTooLarge(t *testing.T) {
 	huge := strings.Repeat("a", 4096)
 	body := `{"labels":{"job":"` + huge + `"}}`
