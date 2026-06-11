@@ -10,6 +10,9 @@
 #   --quick-live  small rotating-workload sweep.
 #   --full-live   full rotating-workload sweep.
 #
+# Set BENCH_MODES="compute bundle" to compare in-process analysis with
+# external-analyser target-side bundle capture in the same sweep.
+#
 # Requirements: Linux + /usr/bin/time (GNU time) + python3.
 
 set -euo pipefail
@@ -71,13 +74,18 @@ else
 fi
 
 trace_one="${BENCH_TRACE:-1}"  # set BENCH_TRACE=0 to skip trace iteration
+read -r -a bench_modes <<< "${BENCH_MODES:-compute}"
 
 run_one() {
-    local heap_mb="$1"
-    local goroutines="$2"
-    local match="$3"
-    local gcpre="$4"
+    local mode="$1"
+    local heap_mb="$2"
+    local goroutines="$3"
+    local match="$4"
+    local gcpre="$5"
     local tag="heap=${heap_mb}_g=${goroutines}_match=${match}_gc=${gcpre}"
+    if [[ "$mode" != "compute" ]]; then
+        tag="${mode}_${tag}"
+    fi
     if [[ "$workload" != "static" ]]; then
         tag="${workload}_${tag}"
     fi
@@ -90,6 +98,7 @@ run_one() {
 
     echo "==> $tag"
     local args=(
+        -mode "$mode"
         -heap-mb "$heap_mb"
         -goroutines "$goroutines"
         -match-fraction "$match"
@@ -114,7 +123,9 @@ for heap_mb in "${heap_mbs[@]}"; do
     for goroutines in "${goroutines_list[@]}"; do
         for match in "${match_fractions[@]}"; do
             for gcpre in "${gc_pres[@]}"; do
-                run_one "$heap_mb" "$goroutines" "$match" "$gcpre"
+                for bench_mode in "${bench_modes[@]}"; do
+                    run_one "$bench_mode" "$heap_mb" "$goroutines" "$match" "$gcpre"
+                done
             done
         done
     done

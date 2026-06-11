@@ -1,17 +1,19 @@
 // Command bench is a thesis-grade measurement harness for bubblepprof's
-// /debug/memusage pipeline. It spawns a parameterized synthetic workload,
-// drives N iterations of memusage.Compute against the running process
-// (in-process — no HTTP loopback noise), and emits a JSON report with
-// per-iteration measurements and aggregate statistics.
+// target-side profiling paths. It spawns a parameterized synthetic workload,
+// drives N iterations of either memusage.Compute (in-process analysis) or
+// bundle.CaptureSelf (external analyser target-side capture only) against the
+// running process, and emits a JSON report with per-iteration measurements and
+// aggregate statistics.
 //
 // Captured per iteration:
 //
-//   - wall-clock latency of Compute
-//   - max user-visible scheduling pause during Compute (heartbeat goroutine)
-//   - Go heap allocated by Compute (HeapAlloc delta, TotalAlloc delta)
+//   - wall-clock latency of the selected operation
+//   - max user-visible scheduling pause during the operation (heartbeat goroutine)
+//   - Go heap allocated by the operation (HeapAlloc delta, TotalAlloc delta)
 //   - process RSS before/after and per-call peak RSS delta on Linux
 //     (/proc/self/status VmRSS/VmHWM, optionally reset via clear_refs)
-//   - matched_goroutines, reachable_bytes from the response
+//   - matched_goroutines, reachable_bytes from the response in compute mode
+//   - bundle_bytes emitted in bundle mode
 //
 // Aggregates: mean, stddev, min, max, p50, p95, p99 per metric.
 //
@@ -27,6 +29,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"os"
@@ -40,10 +43,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/NuperSu/bubblepprof/internal/bundle"
 	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
 type config struct {
+	Mode           string  `json:"mode"`
 	HeapMB         int     `json:"heap_mb"`
 	Goroutines     int     `json:"goroutines"`
 	MatchFraction  float64 `json:"match_fraction"`
@@ -74,6 +79,7 @@ type iterationResult struct {
 	VmHWMReset        bool   `json:"vm_hwm_reset"`
 	MatchedGoroutines int    `json:"matched_goroutines"`
 	ReachableBytes    uint64 `json:"reachable_bytes"`
+	BundleBytes       int64  `json:"bundle_bytes,omitempty"`
 	UnderTrace        bool   `json:"under_trace,omitempty"`
 }
 
@@ -115,12 +121,13 @@ func main() {
 
 func parseFlags() config {
 	var cfg config
+	flag.StringVar(&cfg.Mode, "mode", "compute", "measurement mode: compute (in-process analysis) or bundle (external analyser target-side capture)")
 	flag.IntVar(&cfg.HeapMB, "heap-mb", 200, "resident user-heap target in MiB")
 	flag.IntVar(&cfg.Goroutines, "goroutines", 1000, "labeled worker goroutines to spawn")
 	flag.Float64Var(&cfg.MatchFraction, "match-fraction", 1.0, "fraction of workers whose labels match the query (0..1)")
 	flag.BoolVar(&cfg.GCPre, "gc-pre", false, "set memusage.Options.GCBeforeHeapDump")
-	flag.BoolVar(&cfg.PreMeasureGC, "pre-measure-gc", true, "run two runtime.GC passes immediately before each measured Compute")
-	flag.BoolVar(&cfg.ResetVMHWM, "reset-vmhwm", true, "reset Linux VmHWM before each measured Compute via /proc/self/clear_refs when available")
+	flag.BoolVar(&cfg.PreMeasureGC, "pre-measure-gc", true, "run two runtime.GC passes immediately before each measured operation")
+	flag.BoolVar(&cfg.ResetVMHWM, "reset-vmhwm", true, "reset Linux VmHWM before each measured operation via /proc/self/clear_refs when available")
 	flag.StringVar(&cfg.Workload, "workload", "static", "workload model: static or rotating")
 	flag.IntVar(&cfg.Ring, "ring", 8, "chunks retained per goroutine for -workload=rotating")
 	flag.IntVar(&cfg.RotateInterval, "rotate-ms", 100, "base chunk rotation interval in milliseconds for -workload=rotating")
@@ -139,6 +146,10 @@ func parseFlags() config {
 	if cfg.Workload != "static" && cfg.Workload != "rotating" {
 		fmt.Fprintf(os.Stderr, "bench: unknown -workload %q; using static\n", cfg.Workload)
 		cfg.Workload = "static"
+	}
+	if cfg.Mode != "compute" && cfg.Mode != "bundle" {
+		fmt.Fprintf(os.Stderr, "bench: unknown -mode %q; using compute\n", cfg.Mode)
+		cfg.Mode = "compute"
 	}
 	if cfg.Ring < 1 {
 		cfg.Ring = 1
@@ -164,13 +175,15 @@ func run(cfg config) error {
 		hb.stop()
 	}()
 
-	comp := memusage.NewComputer(memusage.Options{GCBeforeHeapDump: cfg.GCPre})
-	defer comp.Close()
-
 	req := memusage.Request{Labels: map[string]string{"job": "alpha"}}
+	var comp *memusage.Computer
+	if cfg.Mode == "compute" {
+		comp = memusage.NewComputer(memusage.Options{GCBeforeHeapDump: cfg.GCPre})
+		defer comp.Close()
+	}
 
 	for i := 0; i < cfg.Warmup; i++ {
-		if _, err := comp.Compute(ctx, req); err != nil {
+		if _, err := runOperation(ctx, cfg, comp, req); err != nil {
 			return fmt.Errorf("warmup iteration %d: %w", i, err)
 		}
 	}
@@ -205,11 +218,57 @@ func run(cfg config) error {
 	return emitJSON(cfg.OutPath, rep)
 }
 
-// runOne executes one measured Compute call and returns the captured metrics.
+type operationResult struct {
+	MatchedGoroutines int
+	ReachableBytes    uint64
+	BundleBytes       int64
+}
+
+func runOperation(ctx context.Context, cfg config, comp *memusage.Computer, req memusage.Request) (operationResult, error) {
+	switch cfg.Mode {
+	case "compute":
+		if comp == nil {
+			return operationResult{}, fmt.Errorf("compute mode requires a Computer")
+		}
+		resp, err := comp.Compute(ctx, req)
+		if err != nil {
+			return operationResult{}, err
+		}
+		return operationResult{
+			MatchedGoroutines: resp.MatchedGoroutines,
+			ReachableBytes:    resp.ReachableBytes,
+		}, nil
+	case "bundle":
+		cw := &countingWriter{w: io.Discard}
+		err := bundle.CaptureSelf(ctx, cw, bundle.CaptureOptions{
+			GCBeforeHeapDump: cfg.GCPre,
+			Producer:         "bubblepprof-bench",
+		})
+		if err != nil {
+			return operationResult{}, err
+		}
+		return operationResult{BundleBytes: cw.n}, nil
+	default:
+		return operationResult{}, fmt.Errorf("unknown mode %q", cfg.Mode)
+	}
+}
+
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.n += int64(n)
+	return n, err
+}
+
+// runOne executes one measured operation and returns the captured metrics.
 //
 // When -pre-measure-gc is enabled, a forced GC runs immediately before the
 // measurement so prior iterations' parsed snapshot, graph, and label maps
-// cannot accumulate and inflate the next Compute's wall time and HeapAlloc
+// cannot accumulate and inflate the next operation's wall time and HeapAlloc
 // deltas. Live rotating-workload runs normally disable that cleanup so the
 // process can behave like an allocation-active service.
 func runOne(
@@ -234,7 +293,7 @@ func runOne(
 
 	hb.reset()
 	start := time.Now()
-	resp, err := comp.Compute(ctx, req)
+	op, err := runOperation(ctx, cfg, comp, req)
 	wall := time.Since(start)
 	maxPause := hb.read()
 
@@ -262,8 +321,9 @@ func runOne(
 		VmHWMAfterKB:      vmHWMAfter,
 		VmPeakDeltaKB:     vmPeakDelta,
 		VmHWMReset:        hwmReset,
-		MatchedGoroutines: resp.MatchedGoroutines,
-		ReachableBytes:    resp.ReachableBytes,
+		MatchedGoroutines: op.MatchedGoroutines,
+		ReachableBytes:    op.ReachableBytes,
+		BundleBytes:       op.BundleBytes,
 	}, nil
 }
 
@@ -582,6 +642,7 @@ func summarize(rs []iterationResult) map[string]summary {
 		"vm_hwm_after_kb":        collect(func(r iterationResult) float64 { return float64(r.VmHWMAfterKB) }),
 		"vm_peak_delta_kb":       collect(func(r iterationResult) float64 { return float64(r.VmPeakDeltaKB) }),
 		"reachable_bytes":        collect(func(r iterationResult) float64 { return float64(r.ReachableBytes) }),
+		"bundle_bytes":           collect(func(r iterationResult) float64 { return float64(r.BundleBytes) }),
 	}
 }
 
