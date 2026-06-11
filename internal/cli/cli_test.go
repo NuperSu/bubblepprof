@@ -24,7 +24,9 @@ func TestMainDispatch(t *testing.T) {
 		{"memusage without labels", []string{"memusage", "x.tar"}, exitUsage, "", "-labels is required"},
 		{"memusage without arg", []string{"memusage", "-labels", "a=b"}, exitUsage, "", "exactly one bundle file"},
 		{"fetch without arg", []string{"fetch"}, exitUsage, "", "exactly one target URL"},
-		{"memusage missing file", []string{"memusage", "/nonexistent.tar", "-labels", "a=b"}, exitFailure, "", "no such file"},
+		// The OS error text differs per platform ("no such file" vs "The
+		// system cannot find the file specified"), so assert on the path.
+		{"memusage missing file", []string{"memusage", "/nonexistent.tar", "-labels", "a=b"}, exitFailure, "", "/nonexistent.tar"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
