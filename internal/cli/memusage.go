@@ -130,9 +130,10 @@ func analyzeBundle(ctx context.Context, b *bundle.Bundle, req memusage.Request, 
 }
 
 // openBundleSource returns a reader over the bundle bytes: the file
-// itself for a path argument, or a temp-file-backed download for a URL
-// argument (downloaded fully first so a slow analysis cannot hold the
-// HTTP connection open).
+// itself for a path argument, or the HTTP response body for a URL
+// argument. bundle.Open consumes the source completely before analysis
+// starts, so the target connection is not held during the slow analysis
+// phase and there is no need to write an intermediate copy of the tar.
 func openBundleSource(arg string, gc bool, timeout time.Duration) (io.ReadCloser, error) {
 	// URL schemes are case-insensitive (RFC 3986).
 	lower := strings.ToLower(arg)
@@ -141,38 +142,22 @@ func openBundleSource(arg string, gc bool, timeout time.Duration) (io.ReadCloser
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 	body, _, err := fetchBundle(ctx, arg, gc)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
-	defer body.Close()
-
-	tmp, err := os.CreateTemp("", "bubblepprof-fetch-*.tar")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(tmp, body); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-		return nil, fmt.Errorf("download bundle: %w", err)
-	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-		return nil, err
-	}
-	return &removeOnClose{File: tmp}, nil
+	return &cancelOnClose{ReadCloser: body, cancel: cancel}, nil
 }
 
-// removeOnClose deletes the temp file when the download is closed.
-type removeOnClose struct {
-	*os.File
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
 }
 
-func (r *removeOnClose) Close() error {
-	err := r.File.Close()
-	_ = os.Remove(r.File.Name())
+func (r *cancelOnClose) Close() error {
+	err := r.ReadCloser.Close()
+	r.cancel()
 	return err
 }
 
