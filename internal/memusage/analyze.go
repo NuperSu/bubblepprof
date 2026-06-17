@@ -9,6 +9,7 @@ import (
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
 	"github.com/NuperSu/bubblepprof/internal/heapdump"
 	"github.com/NuperSu/bubblepprof/internal/heaplabels"
+	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
@@ -64,32 +65,10 @@ func analyzeDump(
 		recoverer = DefaultLabelRecoverer{}
 	}
 
-	parseRegion := trace.StartRegion(ctx, "memusage/parse")
-	snap, resolver, err := heapdump.ParseLazyContents(r, ra, heapdump.Options{Strict: true})
-	parseRegion.End()
+	snap, result, diag, err := parseAndRecoverLabels(ctx, r, ra, recoverer, extra, extraWarnings)
 	if err != nil {
-		return nil, &ParseFailedError{Cause: err}
-	}
-
-	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
-	// Decode labels first so an unsupported runtime can short-circuit
-	// before the (expensive) graph build.
-	//
-	// Back the structural read Memory with the lazy resolver so we do
-	// not retain ~the workload heap worth of object content bytes in
-	// the Go heap. The decoder fetches bytes from ra on demand.
-	heapMem := heaplabels.NewMemoryFromReader(resolver)
-	labelsRegion := trace.StartRegion(ctx, "memusage/labels")
-	result, err := recoverer.Recover(snap, heapMem, extra)
-	labelsRegion.End()
-	if err != nil {
-		return nil, fmt.Errorf("recover heap-native labels: %w", err)
-	}
-	diag := DiagnosticsFromHeapLabels(snap, result)
-	diag.Warnings = append(diag.Warnings, extraWarnings...)
 	if diag.UnsupportedRuntime {
 		return nil, &UnsupportedRuntimeError{GoVersion: diag.GoVersion, GOARCH: diag.GOARCH}
 	}
@@ -125,4 +104,47 @@ func analyzeDump(
 	resp, err := ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, opts)
 	computeRegion.End()
 	return resp, err
+}
+
+func parseAndRecoverLabels(
+	ctx context.Context,
+	r io.Reader,
+	ra io.ReaderAt,
+	recoverer LabelRecoverer,
+	extra addrspace.Reader,
+	extraWarnings []string,
+) (*heapsnapshot.HeapSnapshot, heaplabels.Result, Diagnostics, error) {
+	if recoverer == nil {
+		recoverer = DefaultLabelRecoverer{}
+	}
+	parseRegion := trace.StartRegion(ctx, "memusage/parse")
+	snap, resolver, err := heapdump.ParseLazyContents(r, ra, heapdump.Options{Strict: true})
+	parseRegion.End()
+	if err != nil {
+		return nil, heaplabels.Result{}, Diagnostics{}, &ParseFailedError{Cause: err}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, heaplabels.Result{}, Diagnostics{}, err
+	}
+
+	// Decode labels first so an unsupported runtime can short-circuit
+	// before the (expensive) graph build.
+	//
+	// Back the structural read Memory with the lazy resolver so we do
+	// not retain ~the workload heap worth of object content bytes in
+	// the Go heap. The decoder fetches bytes from ra on demand.
+	heapMem := heaplabels.NewMemoryFromReader(resolver)
+	labelsRegion := trace.StartRegion(ctx, "memusage/labels")
+	result, err := recoverer.Recover(snap, heapMem, extra)
+	labelsRegion.End()
+	if err != nil {
+		return nil, heaplabels.Result{}, Diagnostics{}, fmt.Errorf("recover heap-native labels: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, heaplabels.Result{}, Diagnostics{}, err
+	}
+	diag := DiagnosticsFromHeapLabels(snap, result)
+	diag.Warnings = append(diag.Warnings, extraWarnings...)
+	return snap, result, diag, nil
 }

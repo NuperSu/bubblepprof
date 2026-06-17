@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,56 @@ func TestHandlerBusyWhenSemaphoreHeld(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil || body["code"] != "busy" {
 		t.Fatalf("body = %v, err %v", body, err)
 	}
+}
+
+func TestHandlerCaptureFailureBeforeStreamWritesJSON(t *testing.T) {
+	h := Handler(HandlerOptions{
+		CaptureFunc: func(context.Context, io.Writer, CaptureOptions) error {
+			return errors.New("capture broke")
+		},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/memusage/bundle", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["code"] != "capture_failed" {
+		t.Fatalf("body = %v", body)
+	}
+}
+
+func TestHandlerCaptureFailureAfterStreamAborts(t *testing.T) {
+	h := Handler(HandlerOptions{
+		CaptureFunc: func(_ context.Context, w io.Writer, _ CaptureOptions) error {
+			_, _ = io.WriteString(w, "partial tar")
+			return errors.New("capture broke")
+		},
+	})
+	rec := httptest.NewRecorder()
+
+	defer func() {
+		if got := recover(); got != http.ErrAbortHandler {
+			t.Fatalf("panic = %v, want http.ErrAbortHandler", got)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 headers already sent", rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/x-tar" {
+			t.Fatalf("Content-Type = %q", ct)
+		}
+		if rec.Body.String() != "partial tar" {
+			t.Fatalf("body = %q", rec.Body.String())
+		}
+	}()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/memusage/bundle", nil))
 }
 
 // TestHandlerServesParsableBundle captures a real bundle of the test

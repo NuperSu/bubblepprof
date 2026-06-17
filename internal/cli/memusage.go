@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -68,6 +69,7 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 	includeSystem := fs.Bool("include-system", false, "let system/background goroutines participate in label matching")
 	gc := fs.Bool("gc", true, "when fetching from a URL, run a garbage collection in the target before the heap dump")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total fetch timeout when the argument is a URL")
+	format := fs.String("format", "json", "output format: json or text")
 	target, err := parseWithOneArg(fs, args)
 	if err != nil {
 		fmt.Fprintln(stderr, "bubblepprof memusage: exactly one bundle file or target URL is required")
@@ -79,22 +81,14 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return exitUsage
 	}
-
-	src, err := openBundleSource(target, *gc, *timeout)
-	if err != nil {
-		fmt.Fprintf(stderr, "bubblepprof memusage: %v\n", err)
-		return exitFailure
+	if *format != "json" && *format != "text" {
+		fmt.Fprintf(stderr, "bubblepprof memusage: invalid -format %q; use json or text\n", *format)
+		return exitUsage
 	}
 
-	b, err := bundle.Open(src)
-	closeErr := src.Close()
+	b, err := loadBundle(target, *gc, *timeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "bubblepprof memusage: %v\n", err)
-		return exitFailure
-	}
-	if closeErr != nil {
-		fmt.Fprintf(stderr, "bubblepprof memusage: close bundle source: %v\n", closeErr)
-		_ = b.Close()
 		return exitFailure
 	}
 	defer b.Close()
@@ -103,14 +97,29 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 		IncludeSystemGoroutines: *includeSystem,
 	})
 	if err != nil {
-		// Same code mapping as the in-process endpoint, printed as the
-		// endpoint's JSON error body.
 		_, body := memusage.ErrorResponseFor(err)
-		writeIndentedJSON(stdout, body)
+		writeMemUsageOutput(stdout, *format, body)
 		return exitFailure
 	}
-	writeIndentedJSON(stdout, resp)
+	writeMemUsageOutput(stdout, *format, resp)
 	return exitOK
+}
+
+func loadBundle(target string, gc bool, timeout time.Duration) (*bundle.Bundle, error) {
+	src, err := openBundleSource(target, gc, timeout)
+	if err != nil {
+		return nil, err
+	}
+	b, openErr := bundle.Open(src)
+	closeErr := src.Close()
+	if openErr != nil {
+		return nil, openErr
+	}
+	if closeErr != nil {
+		_ = b.Close()
+		return nil, fmt.Errorf("close bundle source: %w", closeErr)
+	}
+	return b, nil
 }
 
 // analyzeBundle feeds an opened bundle into the shared analysis
@@ -168,4 +177,52 @@ func writeIndentedJSON(w io.Writer, v any) {
 		return
 	}
 	fmt.Fprintf(w, "%s\n", out)
+}
+
+func writeMemUsageOutput(w io.Writer, format string, v any) {
+	if format == "json" {
+		writeIndentedJSON(w, v)
+		return
+	}
+	switch value := v.(type) {
+	case *memusage.Response:
+		writeMemUsageText(w, value)
+	case *memusage.ErrorResponse:
+		writeErrorText(w, value)
+	default:
+		fmt.Fprintf(w, "error: unsupported text output type %T\n", v)
+	}
+}
+
+func writeMemUsageText(w io.Writer, resp *memusage.Response) {
+	keys := make([]string, 0, len(resp.Labels))
+	for key := range resp.Labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	fmt.Fprintln(w, "labels:")
+	for _, key := range keys {
+		fmt.Fprintf(w, "  %s=%s\n", key, resp.Labels[key])
+	}
+	fmt.Fprintf(w, "matched_goroutines: %d\n", resp.MatchedGoroutines)
+	fmt.Fprintf(w, "reachable_objects: %d\n", resp.ReachableObjects)
+	fmt.Fprintf(w, "reachable_bytes: %d\n", resp.ReachableBytes)
+	fmt.Fprintf(w, "global_overlap_objects: %d\n", resp.GlobalOverlapObjects)
+	fmt.Fprintf(w, "global_overlap_bytes: %d\n", resp.GlobalOverlapBytes)
+	fmt.Fprintf(w, "system_overlap_objects: %d\n", resp.SystemOverlapObjects)
+	fmt.Fprintf(w, "system_overlap_bytes: %d\n", resp.SystemOverlapBytes)
+}
+
+func writeErrorText(w io.Writer, resp *memusage.ErrorResponse) {
+	fmt.Fprintf(w, "error: %s\n", resp.Error)
+	fmt.Fprintf(w, "code: %s\n", resp.Code)
+	if resp.GoVersion != "" {
+		fmt.Fprintf(w, "go_version: %s\n", resp.GoVersion)
+	}
+	if resp.GOARCH != "" {
+		fmt.Fprintf(w, "goarch: %s\n", resp.GOARCH)
+	}
+	for _, warning := range resp.Warnings {
+		fmt.Fprintf(w, "warning: %s\n", warning)
+	}
 }

@@ -462,21 +462,6 @@ func TestDecodeString_NilDataPointer(t *testing.T) {
 	}
 }
 
-func TestMulUint64Overflow(t *testing.T) {
-	if _, ok := mulUint64(0, 5); !ok {
-		t.Fatal("0 * 5 should be ok")
-	}
-	if _, ok := mulUint64(5, 0); !ok {
-		t.Fatal("5 * 0 should be ok")
-	}
-	if _, ok := mulUint64(^uint64(0), 2); ok {
-		t.Fatal("overflow should fail")
-	}
-	if got, ok := mulUint64(3, 4); !ok || got != 12 {
-		t.Fatalf("3*4 = %d, %t", got, ok)
-	}
-}
-
 func TestCopyLabelsNil(t *testing.T) {
 	if got := copyLabels(nil); got != nil {
 		t.Fatalf("expected nil, got %v", got)

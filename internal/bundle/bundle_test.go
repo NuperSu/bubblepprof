@@ -319,6 +319,13 @@ func TestNewSegmentsReaderValidation(t *testing.T) {
 	if _, err := NewSegmentsReader([]SegmentInfo{{Addr: HexUint64(^uint64(0)), Size: 4}}, [][]byte{{1, 2, 3, 4}}); err == nil {
 		t.Error("overflowing range must error")
 	}
+	infos := []SegmentInfo{
+		{Member: "second", Addr: 0x1008, Size: 8},
+		{Member: "first", Addr: 0x1000, Size: 16},
+	}
+	if _, err := NewSegmentsReader(infos, [][]byte{make([]byte, 8), make([]byte, 16)}); err == nil || !strings.Contains(err.Error(), "overlap") {
+		t.Fatalf("overlapping ranges: err = %v", err)
+	}
 }
 
 func TestHexUint64JSON(t *testing.T) {
@@ -443,6 +450,41 @@ func TestOpenRejectsDuplicateHeapDump(t *testing.T) {
 	_ = tw.Close()
 	if _, err := Open(&buf); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("err = %v, want duplicate-member error", err)
+	}
+}
+
+func TestOpenRemovesExtractedDumpOnLaterFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: HeapDumpMember, Size: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("dump")); err != nil {
+		t.Fatal(err)
+	}
+	badMeta := []byte("{")
+	if err := tw.WriteHeader(&tar.Header{Name: MetaMember, Size: int64(len(badMeta))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(badMeta); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(&buf); err == nil || !strings.Contains(err.Error(), "parse "+MetaMember) {
+		t.Fatalf("Open: err = %v", err)
+	}
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary heap dump was not removed: %v", entries)
 	}
 }
 

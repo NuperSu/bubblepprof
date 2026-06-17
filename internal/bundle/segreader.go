@@ -10,6 +10,7 @@ import (
 // memorySegment is one saved read-only segment held in memory.
 type memorySegment struct {
 	start uint64
+	end   uint64
 	data  []byte
 }
 
@@ -36,15 +37,24 @@ func NewSegmentsReader(infos []SegmentInfo, data [][]byte) (*SegmentsReader, err
 		if uint64(len(data[i])) != info.Size {
 			return nil, fmt.Errorf("bundle: segment %s has %d bytes, expected %d", info.Member, len(data[i]), info.Size)
 		}
-		if _, ok := addrspace.AddUint64(uint64(info.Addr), info.Size); !ok {
+		end, ok := addrspace.AddUint64(uint64(info.Addr), info.Size)
+		if !ok {
 			return nil, fmt.Errorf("bundle: segment %s range overflows", info.Member)
 		}
 		if info.Size == 0 {
 			continue
 		}
-		segs = append(segs, memorySegment{start: uint64(info.Addr), data: data[i]})
+		segs = append(segs, memorySegment{start: uint64(info.Addr), end: end, data: data[i]})
 	}
 	sort.Slice(segs, func(i, j int) bool { return segs[i].start < segs[j].start })
+	for i := 1; i < len(segs); i++ {
+		if segs[i].start < segs[i-1].end {
+			return nil, fmt.Errorf(
+				"bundle: segment ranges [0x%x,0x%x) and [0x%x,0x%x) overlap",
+				segs[i-1].start, segs[i-1].end, segs[i].start, segs[i].end,
+			)
+		}
+	}
 	return &SegmentsReader{segments: segs}, nil
 }
 
@@ -74,8 +84,7 @@ func (r *SegmentsReader) ReadAtAddr(addr uint64, size uint64) ([]byte, bool) {
 		return nil, false
 	}
 	s := r.segments[i-1]
-	segEnd := s.start + uint64(len(s.data)) // overflow checked at construction
-	if addr < s.start || end > segEnd {
+	if addr < s.start || end > s.end {
 		return nil, false
 	}
 	out := make([]byte, size)

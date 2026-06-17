@@ -304,21 +304,8 @@ func ComputeFromAnalysis(
 	// runtime goroutine must not brick the endpoint. string_missing
 	// (unavailable string bytes) takes priority over other decode failures
 	// because it is the more actionable diagnosis.
-	stringMissing, failed := diag.eligibleFailures(knownGIDs, eligibleGIDs)
-	if stringMissing > 0 {
-		return nil, &StringMissingError{
-			GoVersion: diag.GoVersion,
-			GOARCH:    diag.GOARCH,
-			Warnings:  append([]string{}, diag.Warnings...),
-		}
-	}
-	if failed > 0 {
-		return nil, &LabelRecoveryFailedError{
-			GoVersion:        diag.GoVersion,
-			GOARCH:           diag.GOARCH,
-			FailedGoroutines: failed,
-			Warnings:         append([]string{}, diag.Warnings...),
-		}
+	if err := eligibleFailureError(diag, knownGIDs, eligibleGIDs); err != nil {
+		return nil, err
 	}
 
 	union := reachableFromGoroutines(g, matched)
@@ -348,6 +335,26 @@ func ComputeFromAnalysis(
 		SystemOverlapBytes:   systemBytes,
 	}
 	return resp, nil
+}
+
+func eligibleFailureError(diag Diagnostics, knownGIDs, eligibleGIDs map[uint64]struct{}) error {
+	stringMissing, failed := diag.eligibleFailures(knownGIDs, eligibleGIDs)
+	if stringMissing > 0 {
+		return &StringMissingError{
+			GoVersion: diag.GoVersion,
+			GOARCH:    diag.GOARCH,
+			Warnings:  append([]string{}, diag.Warnings...),
+		}
+	}
+	if failed > 0 {
+		return &LabelRecoveryFailedError{
+			GoVersion:        diag.GoVersion,
+			GOARCH:           diag.GOARCH,
+			FailedGoroutines: failed,
+			Warnings:         append([]string{}, diag.Warnings...),
+		}
+	}
+	return nil
 }
 
 // DiagnosticsFromHeapLabels converts a heaplabels.Result into Diagnostics.

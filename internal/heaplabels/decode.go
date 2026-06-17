@@ -118,7 +118,7 @@ func DecodeLabelsForGoroutine(structuralReader addrspace.Reader, bodyReader addr
 		gr.Error = fmt.Sprintf("unsupported pointer size %d", layout.PtrSize)
 		return gr
 	}
-	labelsFieldAddr, ok := addUint64(g.Addr, layout.GLabelsOffset)
+	labelsFieldAddr, ok := addrspace.AddUint64(g.Addr, layout.GLabelsOffset)
 	if !ok {
 		gr.Status = StatusMalformed
 		gr.Error = "runtime.g.labels field address overflows"
@@ -157,24 +157,24 @@ func DecodeLabelsForGoroutine(structuralReader addrspace.Reader, bodyReader addr
 func DecodeLabelMap(structuralReader addrspace.Reader, bodyReader addrspace.Reader, layout runtimelayout.Layout, opts Options, addr uint64) (map[string]string, error) {
 	opts = normalizeOptions(opts)
 	order := layout.ByteOrder()
-	setAddr, ok := addUint64(addr, layout.LabelMapSetOffset)
+	setAddr, ok := addrspace.AddUint64(addr, layout.LabelMapSetOffset)
 	if !ok {
 		return nil, decodeError{StatusMalformed, "labelMap set address overflows"}
 	}
-	listHeaderAddr, ok := addUint64(setAddr, layout.SetListOffset)
+	listHeaderAddr, ok := addrspace.AddUint64(setAddr, layout.SetListOffset)
 	if !ok {
 		return nil, decodeError{StatusMalformed, "label.Set list address overflows"}
 	}
 
-	sliceDataAddr, ok := addUint64(listHeaderAddr, layout.SliceDataOffset)
+	sliceDataAddr, ok := addrspace.AddUint64(listHeaderAddr, layout.SliceDataOffset)
 	if !ok {
 		return nil, decodeError{StatusMalformed, "label.Set list data address overflows"}
 	}
-	sliceLenAddr, ok := addUint64(listHeaderAddr, layout.SliceLenOffset)
+	sliceLenAddr, ok := addrspace.AddUint64(listHeaderAddr, layout.SliceLenOffset)
 	if !ok {
 		return nil, decodeError{StatusMalformed, "label.Set list length address overflows"}
 	}
-	sliceCapAddr, ok := addUint64(listHeaderAddr, layout.SliceCapOffset)
+	sliceCapAddr, ok := addrspace.AddUint64(listHeaderAddr, layout.SliceCapOffset)
 	if !ok {
 		return nil, decodeError{StatusMalformed, "label.Set list capacity address overflows"}
 	}
@@ -202,7 +202,7 @@ func DecodeLabelMap(structuralReader addrspace.Reader, bodyReader addrspace.Read
 	if dataPtr == 0 {
 		return nil, decodeError{StatusLabelArrayMissing, "label.Set list data pointer is nil"}
 	}
-	arrayBytes, ok := mulUint64(length, layout.LabelSize)
+	arrayBytes, ok := addrspace.MulUint64(length, layout.LabelSize)
 	if !ok {
 		return nil, decodeError{StatusMalformed, "label array size overflows"}
 	}
@@ -212,15 +212,15 @@ func DecodeLabelMap(structuralReader addrspace.Reader, bodyReader addrspace.Read
 
 	labels := make(map[string]string, length)
 	for i := uint64(0); i < length; i++ {
-		labelAddr, ok := addUint64(dataPtr, i*layout.LabelSize)
+		labelAddr, ok := addrspace.AddUint64(dataPtr, i*layout.LabelSize)
 		if !ok {
 			return nil, decodeError{StatusMalformed, "label address overflows"}
 		}
-		keyAddr, ok := addUint64(labelAddr, layout.LabelKeyOffset)
+		keyAddr, ok := addrspace.AddUint64(labelAddr, layout.LabelKeyOffset)
 		if !ok {
 			return nil, decodeError{StatusMalformed, "label key address overflows"}
 		}
-		valueAddr, ok := addUint64(labelAddr, layout.LabelValueOffset)
+		valueAddr, ok := addrspace.AddUint64(labelAddr, layout.LabelValueOffset)
 		if !ok {
 			return nil, decodeError{StatusMalformed, "label value address overflows"}
 		}
@@ -248,11 +248,11 @@ func DecodeLabelMap(structuralReader addrspace.Reader, bodyReader addrspace.Read
 func DecodeString(structuralReader addrspace.Reader, bodyReader addrspace.Reader, layout runtimelayout.Layout, opts Options, headerAddr uint64) (string, error) {
 	opts = normalizeOptions(opts)
 	order := layout.ByteOrder()
-	strDataAddr, ok := addUint64(headerAddr, layout.StringDataOffset)
+	strDataAddr, ok := addrspace.AddUint64(headerAddr, layout.StringDataOffset)
 	if !ok {
 		return "", decodeError{StatusMalformed, "string header data address overflows"}
 	}
-	strLenAddr, ok := addUint64(headerAddr, layout.StringLenOffset)
+	strLenAddr, ok := addrspace.AddUint64(headerAddr, layout.StringLenOffset)
 	if !ok {
 		return "", decodeError{StatusMalformed, "string header length address overflows"}
 	}
@@ -383,16 +383,6 @@ func containsLabels(have, want map[string]string) bool {
 		}
 	}
 	return true
-}
-
-func mulUint64(a, b uint64) (uint64, bool) {
-	if a == 0 || b == 0 {
-		return 0, true
-	}
-	if a > ^uint64(0)/b {
-		return 0, false
-	}
-	return a * b, true
 }
 
 func copyLabels(in map[string]string) map[string]string {

@@ -46,7 +46,7 @@ func NewMemory(snap *heapsnapshot.HeapSnapshot) *Memory {
 		if len(obj.Contents) == 0 {
 			continue
 		}
-		end, ok := addUint64(obj.Addr, uint64(len(obj.Contents)))
+		end, ok := addrspace.AddUint64(obj.Addr, uint64(len(obj.Contents)))
 		if !ok {
 			continue
 		}
@@ -93,7 +93,7 @@ func (m *Memory) Read(addr uint64, size uint64) ([]byte, bool) {
 	if addr == 0 {
 		return nil, false
 	}
-	end, ok := addUint64(addr, size)
+	end, ok := addrspace.AddUint64(addr, size)
 	if !ok {
 		return nil, false
 	}
@@ -154,9 +154,4 @@ func (m *Memory) ReadString(addr uint64, length uint64) (string, bool) {
 		return "", false
 	}
 	return string(b), true
-}
-
-func addUint64(a, b uint64) (uint64, bool) {
-	c := a + b
-	return c, c >= a
 }

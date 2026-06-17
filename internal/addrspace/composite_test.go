@@ -88,6 +88,21 @@ func TestCompositeOverflowRejected(t *testing.T) {
 	}
 }
 
+func TestMulUint64(t *testing.T) {
+	if got, ok := MulUint64(0, 5); !ok || got != 0 {
+		t.Fatalf("0*5 = %d, %t", got, ok)
+	}
+	if got, ok := MulUint64(5, 0); !ok || got != 0 {
+		t.Fatalf("5*0 = %d, %t", got, ok)
+	}
+	if _, ok := MulUint64(^uint64(0), 2); ok {
+		t.Fatal("overflow should fail")
+	}
+	if got, ok := MulUint64(3, 4); !ok || got != 12 {
+		t.Fatalf("3*4 = %d, %t", got, ok)
+	}
+}
+
 func TestCompositeSkipsNilReaders(t *testing.T) {
 	b := stubReader{name: "b", base: 0x2000, data: []byte{0xCC}}
 	c := Composite{Readers: []NamedReader{nil, b, nil}}

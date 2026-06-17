@@ -105,3 +105,12 @@ func AddUint64(a, b uint64) (uint64, bool) {
 	c := a + b
 	return c, c >= a
 }
+
+// MulUint64 returns a*b and reports false on uint64 wrap-around.
+func MulUint64(a, b uint64) (uint64, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	c := a * b
+	return c, c/a == b
+}

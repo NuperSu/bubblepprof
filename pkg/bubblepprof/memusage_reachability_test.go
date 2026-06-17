@@ -57,6 +57,7 @@ const (
 //   - Large maps (values across multi-object map backing storage).
 //   - Buffered channels (objects queued in channel buffers).
 //   - Interface values (data pointer inside a heap-resident eface struct).
+//   - Finalizer records (finalizable objects also appear under global roots).
 //
 // Each subtest starts a goroutine labeled with case=<label> that holds
 // ≥2 MiB of memory, then posts to /debug/memusage and asserts
@@ -161,21 +162,34 @@ func TestMemUsageHandler_ReachabilityThroughRuntimeDataStructures(t *testing.T) 
 		runtime.KeepAlive(carrier)
 	})
 
+	// Finalizer root: the payload is retained by the labeled goroutine and
+	// registered for finalization. Its reachable bytes must therefore also
+	// appear in the response's global-root overlap.
+	startReachabilityWorker(t, "finalizer-root", stop, func(ready chan<- struct{}, stop <-chan struct{}) {
+		payload := &reachabilityPayload{Pad: make([]byte, reachabilityPayloadSize)}
+		runtime.SetFinalizer(payload, func(*reachabilityPayload) {})
+		close(ready)
+		<-stop
+		runtime.KeepAlive(payload)
+	})
+
 	cases := []struct {
-		label    string
-		minBytes uint64
+		label          string
+		minBytes       uint64
+		minGlobalBytes uint64
 	}{
-		{"slice-backing", reachabilityMinBytes},
-		{"map-values", reachabilityMinBytes},
-		{"map-overflow", 4 << 20}, // ~10 MiB total across overflow buckets; conservative floor
-		{"channel-buffer", reachabilityMinBytes},
-		{"heap-defer", reachabilityMinBytes},
-		{"interface-value", reachabilityMinBytes},
+		{label: "slice-backing", minBytes: reachabilityMinBytes},
+		{label: "map-values", minBytes: reachabilityMinBytes},
+		{label: "map-overflow", minBytes: 4 << 20}, // ~10 MiB total across overflow buckets; conservative floor
+		{label: "channel-buffer", minBytes: reachabilityMinBytes},
+		{label: "heap-defer", minBytes: reachabilityMinBytes},
+		{label: "interface-value", minBytes: reachabilityMinBytes},
+		{label: "finalizer-root", minBytes: reachabilityMinBytes, minGlobalBytes: reachabilityMinBytes},
 	}
 	for _, c := range cases {
 		c := c
 		t.Run(c.label, func(t *testing.T) {
-			assertReachableAtLeast(t, srv.URL, c.label, c.minBytes)
+			assertReachableAtLeast(t, srv.URL, c.label, c.minBytes, c.minGlobalBytes)
 		})
 	}
 }
@@ -250,7 +264,7 @@ func processMemoryReaderSupported() bool {
 // is a hard failure on platforms with a verified process memory reader
 // (Linux, macOS, Windows, and FreeBSD with procfs mounted or a non-PIE
 // binary); on other platforms it signals a skip.
-func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64) {
+func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes, minGlobalBytes uint64) {
 	t.Helper()
 	body := bytes.NewReader([]byte(`{"labels":{"case":"` + label + `"}}`))
 	resp, err := http.Post(baseURL+MemUsagePath, "application/json", body)
@@ -276,6 +290,11 @@ func assertReachableAtLeast(t *testing.T, baseURL, label string, minBytes uint64
 			t.Errorf("label=%q: reachable_bytes=%d, want >=%d — "+
 				"check heap pointer traversal for this data structure type",
 				label, mr.ReachableBytes, minBytes)
+		}
+		if mr.GlobalOverlapBytes < minGlobalBytes {
+			t.Errorf("label=%q: global_overlap_bytes=%d, want >=%d — "+
+				"check finalizer/global root traversal",
+				label, mr.GlobalOverlapBytes, minGlobalBytes)
 		}
 	case http.StatusUnprocessableEntity:
 		var er memusage.ErrorResponse

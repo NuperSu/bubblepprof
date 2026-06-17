@@ -3,6 +3,7 @@
 //	bubblepprof fetch <url> [-o file]
 //	bubblepprof memusage <bundle-or-url> -labels k=v[,k=v...]
 //	bubblepprof memusage <bundle-or-url> -label k=v [-label k=v ...]
+//	bubblepprof bubbles <bundle-or-url>
 //
 // The analysis path is the same memusage.AnalyzeDump pipeline used by
 // the in-process /debug/memusage endpoint, fed by a capture bundle
@@ -37,6 +38,10 @@ Usage:
         labels contain every requested key/value pair. Accepts a saved
         bundle file or a target base URL (fetched on the fly). Use
         -label for values containing commas.
+
+  bubblepprof bubbles <bundle-file-or-url> [flags]
+        List exact pprof label sets and their goroutine counts without
+        building the heap object graph or computing reachability.
 
 Run "bubblepprof <command> -h" for command flags.
 `
@@ -78,6 +83,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return runFetch(args[1:], stdout, stderr)
 	case "memusage":
 		return runMemUsage(args[1:], stdout, stderr)
+	case "bubbles":
+		return runBubbles(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return exitOK

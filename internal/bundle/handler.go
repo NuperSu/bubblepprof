@@ -1,8 +1,10 @@
 package bundle
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -10,9 +12,16 @@ import (
 	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
+// CaptureFunc is the bundle-capture surface used by Handler. Production
+// defaults to CaptureSelf; tests may inject failures before or after the
+// response stream begins.
+type CaptureFunc func(context.Context, io.Writer, CaptureOptions) error
+
 // HandlerOptions configures Handler.
 type HandlerOptions struct {
 	Capture CaptureOptions
+
+	CaptureFunc CaptureFunc
 
 	// Semaphore is the single-flight gate (capacity-1 channel). When nil
 	// the handler creates a private one. Supplying the same channel used
@@ -35,16 +44,20 @@ type HandlerOptions struct {
 // failure mode is aborting the connection, so the client sees a
 // truncated tar instead of a falsely complete one.
 func Handler(hopts HandlerOptions) http.Handler {
+	capture := hopts.CaptureFunc
+	if capture == nil {
+		capture = CaptureSelf
+	}
 	sem := hopts.Semaphore
 	if sem == nil {
 		sem = make(chan struct{}, 1)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveBundle(w, r, hopts.Capture, sem)
+		serveBundle(w, r, capture, hopts.Capture, sem)
 	})
 }
 
-func serveBundle(w http.ResponseWriter, r *http.Request, copts CaptureOptions, sem chan struct{}) {
+func serveBundle(w http.ResponseWriter, r *http.Request, capture CaptureFunc, copts CaptureOptions, sem chan struct{}) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeJSONError(w, http.StatusMethodNotAllowed, &memusage.ErrorResponse{
@@ -82,7 +95,7 @@ func serveBundle(w http.ResponseWriter, r *http.Request, copts CaptureOptions, s
 	}
 
 	bw := &bundleResponseWriter{w: w}
-	if err := CaptureSelf(r.Context(), bw, copts); err != nil {
+	if err := capture(r.Context(), bw, copts); err != nil {
 		if !bw.wroteBody {
 			status, body := memusage.ErrorResponseFor(&memusage.CaptureFailedError{Cause: err})
 			writeJSONError(w, status, body)

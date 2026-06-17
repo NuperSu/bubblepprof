@@ -179,6 +179,38 @@ func TestBundle_CLIEndToEnd(t *testing.T) {
 	if resp.Labels[key] != value {
 		t.Fatalf("response labels = %#v", resp.Labels)
 	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = cli.Main([]string{"memusage", srv.URL, "-labels", key + "=" + value, "-format", "text"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("text cli exit code = %d\nstdout: %s\nstderr: %s", code, out.String(), errBuf.String())
+	}
+	if !strings.Contains(out.String(), "  "+key+"="+value) ||
+		!strings.Contains(out.String(), "matched_goroutines: ") {
+		t.Fatalf("unexpected text output:\n%s", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = cli.Main([]string{"bubbles", srv.URL}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("bubbles cli exit code = %d\nstdout: %s\nstderr: %s", code, out.String(), errBuf.String())
+	}
+	var bubbles memusage.BubblesResponse
+	if err := json.Unmarshal(out.Bytes(), &bubbles); err != nil {
+		t.Fatalf("decode bubbles output: %v\n%s", err, out.String())
+	}
+	found := false
+	for _, bubble := range bubbles.Bubbles {
+		if bubble.Labels[key] == value && bubble.GoroutineCount >= 1 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("bubbles output lacks %s=%s: %+v", key, value, bubbles.Bubbles)
+	}
 }
 
 // TestBundle_ParityWithInProcessEndpoint runs the same workload through

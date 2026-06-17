@@ -172,9 +172,18 @@ bubblepprof memusage app.tar -labels tenant=acme,tier=enterprise
 
 # Use -label repeatedly when a label value contains a comma
 bubblepprof memusage app.tar -label tenant=acme -label note=a,b
+
+# Render the same measurement as stable key/value text
+bubblepprof memusage app.tar -labels tenant=acme -format text
+
+# List exact label sets and goroutine counts without building the heap graph
+bubblepprof bubbles app.tar
 ```
 
-The output is the same JSON (and the same error codes) as `POST /debug/memusage`.
+`memusage` defaults to the same JSON (and the same error codes) as
+`POST /debug/memusage`; `-format text` is available for shell-oriented output.
+`bubbles` only parses the dump and recovers labels, so it can inventory the
+available exact label sets without graph construction or reachability.
 
 A bundle is a plain tar stream containing:
 

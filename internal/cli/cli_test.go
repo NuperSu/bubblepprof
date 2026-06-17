@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
 
 func TestMainDispatch(t *testing.T) {
@@ -23,10 +25,13 @@ func TestMainDispatch(t *testing.T) {
 		{"help", []string{"help"}, exitOK, "Usage:", ""},
 		{"memusage without labels", []string{"memusage", "x.tar"}, exitUsage, "", "-labels or -label is required"},
 		{"memusage without arg", []string{"memusage", "-labels", "a=b"}, exitUsage, "", "exactly one bundle file"},
+		{"memusage invalid format", []string{"memusage", "x.tar", "-labels", "a=b", "-format", "yaml"}, exitUsage, "", "invalid -format"},
+		{"bubbles without arg", []string{"bubbles"}, exitUsage, "", "exactly one bundle file"},
 		{"fetch without arg", []string{"fetch"}, exitUsage, "", "exactly one target URL"},
 		// The OS error text differs per platform ("no such file" vs "The
 		// system cannot find the file specified"), so assert on the path.
 		{"memusage missing file", []string{"memusage", "/nonexistent.tar", "-labels", "a=b"}, exitFailure, "", "/nonexistent.tar"},
+		{"bubbles missing file", []string{"bubbles", "/nonexistent.tar"}, exitFailure, "", "/nonexistent.tar"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -42,6 +47,37 @@ func TestMainDispatch(t *testing.T) {
 				t.Errorf("stderr %q missing %q", errBuf.String(), tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestWriteMemUsageText(t *testing.T) {
+	resp := &memusage.Response{
+		Labels:               map[string]string{"tenant": "acme", "job": "checkout"},
+		MatchedGoroutines:    2,
+		ReachableObjects:     3,
+		ReachableBytes:       4,
+		GlobalOverlapObjects: 5,
+		GlobalOverlapBytes:   6,
+		SystemOverlapObjects: 7,
+		SystemOverlapBytes:   8,
+	}
+	var out bytes.Buffer
+	writeMemUsageOutput(&out, "text", resp)
+	got := out.String()
+	jobIndex := strings.Index(got, "  job=checkout")
+	tenantIndex := strings.Index(got, "  tenant=acme")
+	if jobIndex < 0 || tenantIndex < 0 || jobIndex > tenantIndex {
+		t.Fatalf("labels are not sorted:\n%s", got)
+	}
+	for _, want := range []string{
+		"matched_goroutines: 2",
+		"reachable_bytes: 4",
+		"global_overlap_bytes: 6",
+		"system_overlap_bytes: 8",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("text output missing %q:\n%s", want, got)
+		}
 	}
 }
 
