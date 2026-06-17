@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -202,7 +203,7 @@ func writeMemUsageText(w io.Writer, resp *memusage.Response) {
 	sort.Strings(keys)
 	fmt.Fprintln(w, "labels:")
 	for _, key := range keys {
-		fmt.Fprintf(w, "  %s=%s\n", key, resp.Labels[key])
+		fmt.Fprintf(w, "  %s=%s\n", strconv.Quote(key), strconv.Quote(resp.Labels[key]))
 	}
 	fmt.Fprintf(w, "matched_goroutines: %d\n", resp.MatchedGoroutines)
 	fmt.Fprintf(w, "reachable_objects: %d\n", resp.ReachableObjects)
@@ -214,15 +215,15 @@ func writeMemUsageText(w io.Writer, resp *memusage.Response) {
 }
 
 func writeErrorText(w io.Writer, resp *memusage.ErrorResponse) {
-	fmt.Fprintf(w, "error: %s\n", resp.Error)
-	fmt.Fprintf(w, "code: %s\n", resp.Code)
+	fmt.Fprintf(w, "error: %s\n", strconv.Quote(resp.Error))
+	fmt.Fprintf(w, "code: %s\n", strconv.Quote(resp.Code))
 	if resp.GoVersion != "" {
-		fmt.Fprintf(w, "go_version: %s\n", resp.GoVersion)
+		fmt.Fprintf(w, "go_version: %s\n", strconv.Quote(resp.GoVersion))
 	}
 	if resp.GOARCH != "" {
-		fmt.Fprintf(w, "goarch: %s\n", resp.GOARCH)
+		fmt.Fprintf(w, "goarch: %s\n", strconv.Quote(resp.GOARCH))
 	}
 	for _, warning := range resp.Warnings {
-		fmt.Fprintf(w, "warning: %s\n", warning)
+		fmt.Fprintf(w, "warning: %s\n", strconv.Quote(warning))
 	}
 }

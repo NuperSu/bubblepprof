@@ -186,7 +186,7 @@ func TestBundle_CLIEndToEnd(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("text cli exit code = %d\nstdout: %s\nstderr: %s", code, out.String(), errBuf.String())
 	}
-	if !strings.Contains(out.String(), "  "+key+"="+value) ||
+	if !strings.Contains(out.String(), `  "`+key+`"="`+value+`"`) ||
 		!strings.Contains(out.String(), "matched_goroutines: ") {
 		t.Fatalf("unexpected text output:\n%s", out.String())
 	}

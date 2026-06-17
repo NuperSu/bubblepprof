@@ -64,8 +64,8 @@ func TestWriteMemUsageText(t *testing.T) {
 	var out bytes.Buffer
 	writeMemUsageOutput(&out, "text", resp)
 	got := out.String()
-	jobIndex := strings.Index(got, "  job=checkout")
-	tenantIndex := strings.Index(got, "  tenant=acme")
+	jobIndex := strings.Index(got, `  "job"="checkout"`)
+	tenantIndex := strings.Index(got, `  "tenant"="acme"`)
 	if jobIndex < 0 || tenantIndex < 0 || jobIndex > tenantIndex {
 		t.Fatalf("labels are not sorted:\n%s", got)
 	}
@@ -78,6 +78,55 @@ func TestWriteMemUsageText(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("text output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestWriteMemUsageTextQuotesLabels(t *testing.T) {
+	resp := &memusage.Response{
+		Labels: map[string]string{
+			"line\nkey=part": "value\nmatched_goroutines: 999",
+			`quote"`:         `slash\and"quote`,
+		},
+	}
+	var out bytes.Buffer
+	writeMemUsageOutput(&out, "text", resp)
+
+	want := "" +
+		"labels:\n" +
+		`  "line\nkey=part"="value\nmatched_goroutines: 999"` + "\n" +
+		`  "quote\""="slash\\and\"quote"` + "\n" +
+		"matched_goroutines: 0\n" +
+		"reachable_objects: 0\n" +
+		"reachable_bytes: 0\n" +
+		"global_overlap_objects: 0\n" +
+		"global_overlap_bytes: 0\n" +
+		"system_overlap_objects: 0\n" +
+		"system_overlap_bytes: 0\n"
+	if got := out.String(); got != want {
+		t.Fatalf("text output:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestWriteErrorTextQuotesStrings(t *testing.T) {
+	resp := &memusage.ErrorResponse{
+		Error:     "failed\ncode: forged",
+		Code:      "string_missing",
+		GoVersion: "go1.25\nwarning: forged",
+		GOARCH:    `amd64"suffix`,
+		Warnings:  []string{"first\nwarning: forged", `slash\quote"`},
+	}
+	var out bytes.Buffer
+	writeMemUsageOutput(&out, "text", resp)
+
+	want := "" +
+		`error: "failed\ncode: forged"` + "\n" +
+		`code: "string_missing"` + "\n" +
+		`go_version: "go1.25\nwarning: forged"` + "\n" +
+		`goarch: "amd64\"suffix"` + "\n" +
+		`warning: "first\nwarning: forged"` + "\n" +
+		`warning: "slash\\quote\""` + "\n"
+	if got := out.String(); got != want {
+		t.Fatalf("text error output:\n%s\nwant:\n%s", got, want)
 	}
 }
 
