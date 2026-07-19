@@ -58,6 +58,14 @@ jobs:
             if [ "${{ matrix.use_gotip }}" = "true" ]; then
               GOBIN="$(go env GOPATH)/bin"
               export PATH="$GOBIN:$PATH"
+              # Go tip (currently go1.28-devel) requires Go 1.26 to
+              # bootstrap. The FreeBSD package repository still provides
+              # Go 1.25 as the default `go` package, and automatic toolchain
+              # module downloads are unavailable on FreeBSD.
+              go install golang.org/dl/go1.26.5@latest
+              go1.26.5 download
+              GOROOT_BOOTSTRAP="$(go1.26.5 env GOROOT)"
+              export GOROOT_BOOTSTRAP
               go install golang.org/dl/gotip@latest
               gotip download
               gotip version
