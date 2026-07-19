@@ -191,10 +191,17 @@ func dynamicString(s string) string {
 // entry from the full build version string.
 //
 //   - Release builds ("go1.26.3")     → "go1.26."
+//   - Release candidates ("go1.27rc2") → "go1.27"
 //   - Devel builds  ("go1.27-devel_e62d3e6e") → "go1.27-devel"
 //   - Bare devel    ("go1.27-devel")  → "go1.27-devel"
 func tableVersionPrefix(goVersion string) string {
+	if i := strings.Index(goVersion, "-devel"); i != -1 {
+		return goVersion[:i+len("-devel")]
+	}
 	if i := strings.Index(goVersion, "_"); i != -1 {
+		return goVersion[:i]
+	}
+	if i := strings.Index(goVersion, "rc"); i != -1 {
 		return goVersion[:i]
 	}
 	if i := strings.LastIndex(goVersion, "."); i != -1 {

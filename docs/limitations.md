@@ -2,9 +2,9 @@
 
 ## Runtime layout dependency
 
-`runtime.g.labels` is a private field of the `runtime.g` struct. Its byte offset depends on the **exact Go version and pointer size** (4 or 8 bytes). `bubblepprof` uses a static table of verified offsets. Because the offset is determined by Go's struct layout rules — not by the specific architecture — all 64-bit little-endian platforms share one entry per Go version, and all 32-bit little-endian platforms share another.
+`runtime.g.labels` is a private field of the `runtime.g` struct. Its byte offset depends on the **Go release family and pointer size** (4 or 8 bytes). `bubblepprof` uses a static table of tested offsets. Because the offset is determined by Go's struct layout rules — not by the specific architecture — all 64-bit little-endian platforms share one entry per Go version, and all 32-bit little-endian platforms share another.
 
-**Current verified support**: go1.24.\*–go1.26.\*, 64-bit little-endian (amd64, arm64) on Linux, macOS, Windows, and FreeBSD; 32-bit little-endian (arm, 386) on Linux and FreeBSD. Experimental (not required in CI) support exists for go1.27-devel (tip) builds; the pre-release offset may change before go1.27.0 ships.
+**Current verified support**: go1.24.\*–go1.26.\*, 64-bit little-endian (amd64, arm64) on Linux, macOS, Windows, and FreeBSD; 32-bit little-endian (arm, 386) on Linux and FreeBSD. Go 1.27 family support is enabled based on successful go1.27rc2 tests on Linux/amd64 and Linux/386; go1.27.0 and later patch releases have not yet been verified. Experimental go1.28-devel support was tested on Linux/amd64 and Linux/386 with gotip commit `e59fbed6bc`.
 
 On any other Go version the endpoint returns `422 unsupported_runtime` and does not proceed. Future work requires either manual verification of new Go releases or a DWARF-based layout discovery path.
 

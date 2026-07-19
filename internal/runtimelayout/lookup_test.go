@@ -1,6 +1,7 @@
 package runtimelayout
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -38,7 +39,6 @@ func TestLookupVerifiedGo126AMD64(t *testing.T) {
 
 func TestLookupMisses(t *testing.T) {
 	cases := []LookupInput{
-		{GoVersion: "go1.27.0", GOARCH: "amd64", PtrSize: 8},
 		{GoVersion: "go1.26.3", GOARCH: "amd64", PtrSize: 8, BigEndian: true},
 		{GoVersion: "", GOARCH: "amd64", PtrSize: 8},
 		{GoVersion: "go1.23.0", GOARCH: "amd64", PtrSize: 8},
@@ -46,6 +46,31 @@ func TestLookupMisses(t *testing.T) {
 	for _, c := range cases {
 		if _, ok := Lookup(c); ok {
 			t.Fatalf("Lookup(%+v) returned true, want false", c)
+		}
+	}
+}
+
+func TestLookupVerifiedGo127(t *testing.T) {
+	versions := []string{"go1.27rc2", "go1.27.0", "go1.27.1"}
+	for _, ptrSize := range []int{8, 4} {
+		for _, version := range versions {
+			t.Run(fmt.Sprintf("%s/ptr%d", version, ptrSize), func(t *testing.T) {
+				layout, ok := Lookup(LookupInput{
+					GoVersion: version,
+					GOARCH:    "testarch",
+					PtrSize:   ptrSize,
+				})
+				if !ok {
+					t.Fatalf("Lookup(%q, ptr size %d) returned false", version, ptrSize)
+				}
+				wantOffset := uint64(0x160)
+				if ptrSize == 4 {
+					wantOffset = 0xd8
+				}
+				if layout.GLabelsOffset != wantOffset {
+					t.Fatalf("GLabelsOffset = %#x, want %#x", layout.GLabelsOffset, wantOffset)
+				}
+			})
 		}
 	}
 }

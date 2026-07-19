@@ -12,14 +12,16 @@ func TestVerifiedTableShape(t *testing.T) {
 		gLabelsOffset uint64
 	}
 	want := []wantEntry{
-		{"go1.27-devel", 8, 0x160},
-		{"go1.27-devel", 4, 0xd8},
+		{"go1.27", 8, 0x160},
+		{"go1.27", 4, 0xd8},
 		{"go1.26.", 8, 0x160},
 		{"go1.26.", 4, 0xd8},
 		{"go1.25.", 8, 0x158},
 		{"go1.25.", 4, 0xd0},
 		{"go1.24.", 8, 0x160},
 		{"go1.24.", 4, 0xd4},
+		{"go1.28-devel", 8, 0x160},
+		{"go1.28-devel", 4, 0xd8},
 	}
 	if len(verifiedTable) != len(want) {
 		t.Fatalf("verifiedTable size = %d, want %d; add a regression test if expanding", len(verifiedTable), len(want))
