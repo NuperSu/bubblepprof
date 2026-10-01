@@ -2,12 +2,14 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -37,32 +39,38 @@ func runFetch(args []string, stdout, stderr io.Writer) int {
 	}
 	defer body.Close()
 
-	var dst io.Writer
 	name := *out
-	switch name {
-	case "-":
-		dst = stdout
-	case "":
-		name = fmt.Sprintf("bubblepprof-%s-%d.tar", host, time.Now().Unix())
-		fallthrough
-	default:
-		f, err := os.Create(name)
-		if err != nil {
-			fmt.Fprintf(stderr, "bubblepprof fetch: %v\n", err)
+	if name == "-" {
+		if _, err := io.Copy(stdout, body); err != nil {
+			fmt.Fprintf(stderr, "bubblepprof fetch: download: %v\n", err)
 			return exitFailure
 		}
-		defer f.Close()
-		dst = f
-	}
-
-	if _, err := io.Copy(dst, body); err != nil {
-		fmt.Fprintf(stderr, "bubblepprof fetch: download: %v\n", err)
-		return exitFailure
-	}
-	if name != "-" {
+	} else {
+		if name == "" {
+			name = fmt.Sprintf("bubblepprof-%s-%d.tar", host, time.Now().Unix())
+		}
+		if err := saveDownload(name, body); err != nil {
+			fmt.Fprintf(stderr, "bubblepprof fetch: download: %v\n", err)
+			return exitFailure
+		}
 		fmt.Fprintf(stderr, "wrote %s\n", name)
 	}
 	return exitOK
+}
+
+// saveDownload replaces the destination only after a complete, private download.
+func saveDownload(name string, src io.Reader) error {
+	f, err := os.CreateTemp(filepath.Dir(name), ".bubblepprof-download-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, copyErr := io.Copy(f, src)
+	closeErr := f.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), name)
 }
 
 // fetchBundle issues the GET request and returns the response body and
