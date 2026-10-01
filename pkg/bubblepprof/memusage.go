@@ -49,6 +49,9 @@ type MemUsageOptions struct {
 	// internal default (1 MiB).
 	MaxRequestBodyBytes int64
 
+	// MaxMemRangeBytes caps each heap-dump memory record. Zero uses 1 GiB.
+	MaxMemRangeBytes uint64
+
 	// Resource limits applied during validation. Zero falls back to the
 	// internal defaults.
 	MaxLabels          int
@@ -122,6 +125,7 @@ func (o MemUsageOptions) toInternal() memusage.Options {
 		GCBeforeHeapDump:           !o.DisableGCBeforeHeapDump,
 		IncludeSystemGoroutines:    o.IncludeSystemGoroutines,
 		DisableProcessMemoryReader: o.DisableProcessMemoryReader,
+		MaxMemRangeBytes:           o.MaxMemRangeBytes,
 		MaxLabels:                  o.MaxLabels,
 		MaxLabelKeyBytes:           o.MaxLabelKeyBytes,
 		MaxLabelValueBytes:         o.MaxLabelValueBytes,

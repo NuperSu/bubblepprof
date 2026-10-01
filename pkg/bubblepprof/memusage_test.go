@@ -103,3 +103,10 @@ func TestRegisterMemUsage(t *testing.T) {
 		t.Fatalf("status = %d, want 400 (handler reachable on %s)", rr.Code, MemUsagePath)
 	}
 }
+
+func TestMemUsageOptions_MemoryLimitFlows(t *testing.T) {
+	const limit = 2 << 30
+	if got := (MemUsageOptions{MaxMemRangeBytes: limit}).toInternal().MaxMemRangeBytes; got != limit {
+		t.Fatalf("MaxMemRangeBytes=%d want %d", got, limit)
+	}
+}

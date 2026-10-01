@@ -16,6 +16,7 @@ import (
 func runBubbles(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("bubbles", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	maxMemRange := fs.Uint64("max-mem-range-bytes", 0, "maximum bytes per heap memory record (0 uses 1 GiB)")
 	includeSystem := fs.Bool("include-system", false, "include system/background goroutines")
 	gc := fs.Bool("gc", true, "when fetching from a URL, run a garbage collection in the target before the heap dump")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total fetch timeout when the argument is a URL")
@@ -34,6 +35,7 @@ func runBubbles(args []string, stdout, stderr io.Writer) int {
 	defer b.Close()
 
 	resp, err := listBundleBubbles(context.Background(), b, memusage.Options{
+		MaxMemRangeBytes:        *maxMemRange,
 		IncludeSystemGoroutines: *includeSystem,
 	})
 	if err != nil {

@@ -39,10 +39,42 @@ func (b *Bundle) Close() error {
 	return nil
 }
 
+// ReaderOptions bounds members retained in memory. Zero selects the default.
+// Heap dumps are streamed to disk and are not subject to these limits.
+type ReaderOptions struct {
+	MaxRodataBytes       int64 // aggregate segment bytes; default 256 MiB
+	MaxMetadataBytes     int64 // meta.json; default 16 MiB
+	MaxSegmentIndexBytes int64 // rodata/segments.json; default 16 MiB
+}
+
+const (
+	DefaultMaxMetadataBytes     = 16 << 20
+	DefaultMaxSegmentIndexBytes = 16 << 20
+)
+
 // Open reads a bundle tar in a single pass. Member order is not
 // significant; unknown members are ignored for forward compatibility.
 // Callers must Close the returned Bundle.
 func Open(r io.Reader) (*Bundle, error) {
+	return OpenWithOptions(r, ReaderOptions{})
+}
+
+// OpenWithOptions reads a bundle with configurable in-memory member limits.
+func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
+	if opts.MaxRodataBytes < 0 || opts.MaxMetadataBytes < 0 || opts.MaxSegmentIndexBytes < 0 {
+		return nil, fmt.Errorf("bundle: reader limits must be non-negative")
+	}
+	if opts.MaxRodataBytes == 0 {
+		opts.MaxRodataBytes = DefaultMaxRodataBytes
+	}
+	if opts.MaxMetadataBytes == 0 {
+		opts.MaxMetadataBytes = DefaultMaxMetadataBytes
+	}
+	if opts.MaxSegmentIndexBytes == 0 {
+		opts.MaxSegmentIndexBytes = DefaultMaxSegmentIndexBytes
+	}
+	seen := make(map[string]bool)
+	var rodataBytes int64
 	var (
 		meta        *Meta
 		infos       []SegmentInfo
@@ -66,6 +98,31 @@ func Open(r io.Reader) (*Bundle, error) {
 			cleanupDump()
 			return nil, fmt.Errorf("bundle: read tar: %w", err)
 		}
+		isSegment := strings.HasPrefix(hdr.Name, segmentMemberPrefix) && strings.HasSuffix(hdr.Name, segmentMemberSuffix)
+		recognized := hdr.Name == MetaMember || hdr.Name == SegmentsMember || hdr.Name == HeapDumpMember || isSegment
+		if recognized {
+			if seen[hdr.Name] {
+				cleanupDump()
+				return nil, fmt.Errorf("bundle: duplicate %s member", hdr.Name)
+			}
+			seen[hdr.Name] = true
+			limit := int64(0)
+			switch {
+			case hdr.Name == MetaMember:
+				limit = opts.MaxMetadataBytes
+			case hdr.Name == SegmentsMember:
+				limit = opts.MaxSegmentIndexBytes
+			case isSegment:
+				limit = opts.MaxRodataBytes - rodataBytes
+			}
+			if hdr.Name != HeapDumpMember && (hdr.Size > limit || uint64(hdr.Size) > uint64(^uint(0)>>1)) {
+				cleanupDump()
+				return nil, fmt.Errorf("bundle: %s size %d exceeds limit %d or platform allocation bound", hdr.Name, hdr.Size, limit)
+			}
+			if isSegment {
+				rodataBytes += hdr.Size
+			}
+		}
 		switch {
 		case hdr.Name == MetaMember:
 			var m Meta
@@ -80,10 +137,6 @@ func Open(r io.Reader) (*Bundle, error) {
 				return nil, fmt.Errorf("bundle: parse %s: %w", SegmentsMember, err)
 			}
 		case hdr.Name == HeapDumpMember:
-			if dumpPresent {
-				cleanupDump()
-				return nil, fmt.Errorf("bundle: duplicate %s member", HeapDumpMember)
-			}
 			f, err := os.CreateTemp("", "bubblepprof-bundle-*.heap")
 			if err != nil {
 				return nil, fmt.Errorf("bundle: create heap dump temp file: %w", err)
@@ -96,7 +149,7 @@ func Open(r io.Reader) (*Bundle, error) {
 				return nil, fmt.Errorf("bundle: extract %s: %w", HeapDumpMember, errors.Join(copyErr, closeErr))
 			}
 			dumpPresent = true
-		case strings.HasPrefix(hdr.Name, segmentMemberPrefix) && strings.HasSuffix(hdr.Name, segmentMemberSuffix):
+		case isSegment:
 			data, err := io.ReadAll(tr)
 			if err != nil {
 				cleanupDump()

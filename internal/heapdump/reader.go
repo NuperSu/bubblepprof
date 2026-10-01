@@ -111,15 +111,15 @@ func (r *reader) bytesWithFileOffset() ([]byte, int64, error) {
 	if r.limits.MaxMemRangeSize != 0 && n > r.limits.MaxMemRangeSize {
 		return nil, 0, fmt.Errorf("memory range length %d exceeds limit %d", n, r.limits.MaxMemRangeSize)
 	}
+	if n > uint64(^uint(0)>>1) {
+		return nil, 0, fmt.Errorf("memory range length %d exceeds platform allocation bound", n)
+	}
 	payloadOff := r.offset
 	if n == 0 {
 		return nil, payloadOff, nil
 	}
-	buf := make([]byte, n)
-	if err := r.readFull(buf); err != nil {
-		if err == io.EOF {
-			err = io.ErrUnexpectedEOF
-		}
+	buf, err := r.readPayload(n)
+	if err != nil {
 		return nil, 0, err
 	}
 	return buf, payloadOff, nil
@@ -137,14 +137,36 @@ func (r *reader) String() (string, error) {
 	if n == 0 {
 		return "", nil
 	}
-	buf := make([]byte, n)
-	if err := r.readFull(buf); err != nil {
-		if err == io.EOF {
-			err = io.ErrUnexpectedEOF
-		}
+	if n > uint64(^uint(0)>>1) {
+		return "", fmt.Errorf("string length %d exceeds platform allocation bound", n)
+	}
+	buf, err := r.readPayload(n)
+	if err != nil {
 		return "", err
 	}
 	return string(buf), nil
+}
+
+// readPayload grows only as bytes arrive, never from an untrusted prefix alone.
+func (r *reader) readPayload(n uint64) ([]byte, error) {
+	const chunkSize = 64 << 10
+	chunk := make([]byte, min(n, chunkSize))
+	var buf []byte
+	for n > 0 {
+		part := chunk[:min(n, chunkSize)]
+		if err := r.readFull(part); err != nil {
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
+			return nil, err
+		}
+		if n <= chunkSize && len(buf) == 0 {
+			return part, nil
+		}
+		buf = append(buf, part...)
+		n -= uint64(len(part))
+	}
+	return buf, nil
 }
 
 // FieldList reads a heap dump field list terminated by FieldKindEol.

@@ -65,7 +65,7 @@ func analyzeDump(
 		recoverer = DefaultLabelRecoverer{}
 	}
 
-	snap, result, diag, err := parseAndRecoverLabels(ctx, r, ra, recoverer, extra, extraWarnings)
+	snap, result, diag, err := parseAndRecoverLabels(ctx, r, ra, recoverer, extra, extraWarnings, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -113,12 +113,13 @@ func parseAndRecoverLabels(
 	recoverer LabelRecoverer,
 	extra addrspace.Reader,
 	extraWarnings []string,
+	opts Options,
 ) (*heapsnapshot.HeapSnapshot, heaplabels.Result, Diagnostics, error) {
 	if recoverer == nil {
 		recoverer = DefaultLabelRecoverer{}
 	}
 	parseRegion := trace.StartRegion(ctx, "memusage/parse")
-	snap, resolver, err := heapdump.ParseLazyContents(r, ra, heapdump.Options{Strict: true})
+	snap, resolver, err := heapdump.ParseLazyContents(r, ra, heapdump.Options{Strict: true, MaxMemRangeBytes: opts.MaxMemRangeBytes})
 	parseRegion.End()
 	if err != nil {
 		return nil, heaplabels.Result{}, Diagnostics{}, &ParseFailedError{Cause: err}

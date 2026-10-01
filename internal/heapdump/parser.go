@@ -24,7 +24,7 @@ type Options struct {
 	MaxStringBytes uint64
 
 	// MaxMemRangeBytes is an upper bound on length-prefixed memory ranges
-	// (object contents, frame contents, data/bss). Zero means no limit.
+	// (object contents, frame contents, data/bss). Zero uses the 1 GiB default.
 	MaxMemRangeBytes uint64
 
 	// Strict turns recoverable problems (unknown field kinds, out-of-bounds
@@ -33,7 +33,8 @@ type Options struct {
 }
 
 const (
-	defaultMaxStringBytes = 16 << 20 // 16 MiB
+	DefaultMaxMemRangeBytes = 1 << 30  // 1 GiB per memory record
+	defaultMaxStringBytes   = 16 << 20 // 16 MiB
 )
 
 // Parse reads a heap dump from r and returns the normalized snapshot.
@@ -76,6 +77,10 @@ func ParseLazyContents(stream io.Reader, ra io.ReaderAt, opts Options) (*heapsna
 func parseInto(r io.Reader, opts Options, tracker *ContentResolver) (*heapsnapshot.HeapSnapshot, *ContentResolver, error) {
 	if opts.MaxStringBytes == 0 {
 		opts.MaxStringBytes = defaultMaxStringBytes
+	}
+
+	if opts.MaxMemRangeBytes == 0 {
+		opts.MaxMemRangeBytes = DefaultMaxMemRangeBytes
 	}
 
 	rd := newReader(r, Limits{

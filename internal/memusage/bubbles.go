@@ -35,7 +35,7 @@ func ListBubbles(
 	opts Options,
 ) (*BubblesResponse, error) {
 	snap, result, diag, err := parseAndRecoverLabels(
-		ctx, r, ra, DefaultLabelRecoverer{}, extra, extraWarnings,
+		ctx, r, ra, DefaultLabelRecoverer{}, extra, extraWarnings, opts,
 	)
 	if err != nil {
 		return nil, err

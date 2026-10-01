@@ -67,6 +67,7 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 	labels := labelsFlag{}
 	fs.Var(labels, "labels", "comma-separated label selector key=value[,key=value...] (repeatable)")
 	fs.Var(exactLabelFlag{labels: labels}, "label", "single label selector key=value (repeat for values containing commas)")
+	maxMemRange := fs.Uint64("max-mem-range-bytes", 0, "maximum bytes per heap memory record (0 uses 1 GiB)")
 	includeSystem := fs.Bool("include-system", false, "let system/background goroutines participate in label matching")
 	gc := fs.Bool("gc", true, "when fetching from a URL, run a garbage collection in the target before the heap dump")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total fetch timeout when the argument is a URL")
@@ -95,6 +96,7 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 	defer b.Close()
 
 	resp, err := analyzeBundle(context.Background(), b, memusage.Request{Labels: labels}, memusage.Options{
+		MaxMemRangeBytes:        *maxMemRange,
 		IncludeSystemGoroutines: *includeSystem,
 	})
 	if err != nil {

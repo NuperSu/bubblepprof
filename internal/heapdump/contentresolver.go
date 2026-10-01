@@ -83,6 +83,9 @@ func (c *ContentResolver) readRef(ref contentRef, offsetWithinObject, size uint6
 	if fileOff < ref.fileOff {
 		return nil, false
 	}
+	if size > uint64(^uint(0)>>1) {
+		return nil, false
+	}
 	buf := make([]byte, size)
 	n, err := c.src.ReadAt(buf, fileOff)
 	if err != nil && err != io.EOF {

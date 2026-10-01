@@ -47,6 +47,9 @@ type Options struct {
 	// where process memory access is undesirable.
 	DisableProcessMemoryReader bool
 
+	// MaxMemRangeBytes caps each heap-dump memory record. Zero uses 1 GiB.
+	MaxMemRangeBytes uint64
+
 	// Resource limits. Zero values fall back to the Default* constants.
 	MaxLabels          int
 	MaxLabelKeyBytes   int
