@@ -105,7 +105,7 @@ func TestRegisterMemUsage(t *testing.T) {
 }
 
 func TestMemUsageOptions_MemoryLimitFlows(t *testing.T) {
-	const limit = 2 << 30
+	const limit uint64 = 2 << 30
 	if got := (MemUsageOptions{MaxMemRangeBytes: limit}).toInternal().MaxMemRangeBytes; got != limit {
 		t.Fatalf("MaxMemRangeBytes=%d want %d", got, limit)
 	}
