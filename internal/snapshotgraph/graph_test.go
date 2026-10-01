@@ -1125,3 +1125,30 @@ func TestSchedulerRootsUnresolvedSkippedSilently(t *testing.T) {
 		t.Fatalf("warnings = %v, want none", a.Warnings)
 	}
 }
+
+func TestFinalizerClosureRoots(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		for _, object := range []uint64{0, 0xdead, 0x1000} {
+			snap := &heapsnapshot.HeapSnapshot{Objects: []heapsnapshot.Object{
+				{Addr: 0x1000, Size: 8, PointerAddrs: []uint64{0x2000}},
+				{Addr: 0x2000, Size: 8},
+			}}
+			if queued {
+				snap.QueuedFinalizers = []heapsnapshot.QueuedFinalizer{{ObjectAddr: object, FuncVal: 0x1000}, {FuncVal: 0}, {FuncVal: 0xbeef}}
+			} else {
+				snap.Finalizers = []heapsnapshot.Finalizer{{ObjectAddr: object, FuncVal: 0x1000}, {FuncVal: 0}, {FuncVal: 0xbeef}}
+			}
+			a := mustBuild(t, snap)
+			if a.Stats.GlobalReachableObjects != 2 {
+				t.Fatalf("queued=%v object=%x: %+v", queued, object, a.Stats)
+			}
+			want := 1
+			if object == 0xdead {
+				want++
+			}
+			if a.Stats.UnresolvedFinalizerRoots != want {
+				t.Fatalf("unresolved=%d want %d", a.Stats.UnresolvedFinalizerRoots, want)
+			}
+		}
+	}
+}

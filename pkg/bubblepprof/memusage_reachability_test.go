@@ -173,6 +173,16 @@ func TestMemUsageHandler_ReachabilityThroughRuntimeDataStructures(t *testing.T) 
 		runtime.KeepAlive(payload)
 	})
 
+	startReachabilityWorker(t, "finalizer-closure", stop, func(ready chan<- struct{}, stop <-chan struct{}) {
+		payload := &reachabilityPayload{Pad: make([]byte, 8<<20)}
+		target := &reachabilityPayload{}
+		runtime.SetFinalizer(target, func(*reachabilityPayload) { runtime.KeepAlive(payload) })
+		close(ready)
+		<-stop
+		runtime.SetFinalizer(target, nil)
+		runtime.KeepAlive(payload)
+	})
+
 	cases := []struct {
 		label          string
 		minBytes       uint64
@@ -184,6 +194,7 @@ func TestMemUsageHandler_ReachabilityThroughRuntimeDataStructures(t *testing.T) 
 		{label: "channel-buffer", minBytes: reachabilityMinBytes},
 		{label: "heap-defer", minBytes: reachabilityMinBytes},
 		{label: "interface-value", minBytes: reachabilityMinBytes},
+		{label: "finalizer-closure", minBytes: 8 << 20, minGlobalBytes: 8 << 20},
 		{label: "finalizer-root", minBytes: reachabilityMinBytes, minGlobalBytes: reachabilityMinBytes},
 	}
 	for _, c := range cases {

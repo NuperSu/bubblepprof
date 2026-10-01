@@ -294,37 +294,24 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	for _, seg := range snap.BSS {
 		addSegmentGlobalRoots(seg, "bss", snap.Params.PtrSize, resolveGlobalRoot)
 	}
-	for _, fin := range snap.Finalizers {
-		ptr := fin.ObjectAddr
+	addFinalizerRoot := func(ptr uint64, kind string) {
 		if ptr == 0 {
-			continue
+			return
 		}
 		targetID, ok := g.FindObjectContaining(ptr)
 		if !ok {
 			a.Stats.UnresolvedFinalizerRoots++
-			continue
+			return
 		}
-		globalRoots = append(globalRoots, RootRef{
-			ObjectID: targetID,
-			Ptr:      ptr,
-			Kind:     "finalizer",
-		})
+		globalRoots = append(globalRoots, RootRef{ObjectID: targetID, Ptr: ptr, Kind: kind})
+	}
+	for _, fin := range snap.Finalizers {
+		addFinalizerRoot(fin.ObjectAddr, "finalizer")
+		addFinalizerRoot(fin.FuncVal, "finalizer")
 	}
 	for _, fin := range snap.QueuedFinalizers {
-		ptr := fin.ObjectAddr
-		if ptr == 0 {
-			continue
-		}
-		targetID, ok := g.FindObjectContaining(ptr)
-		if !ok {
-			a.Stats.UnresolvedFinalizerRoots++
-			continue
-		}
-		globalRoots = append(globalRoots, RootRef{
-			ObjectID: targetID,
-			Ptr:      ptr,
-			Kind:     "queued_finalizer",
-		})
+		addFinalizerRoot(fin.ObjectAddr, "queued_finalizer")
+		addFinalizerRoot(fin.FuncVal, "queued_finalizer")
 	}
 	a.Globals.Roots = globalRoots
 	a.Stats.GlobalRoots = len(globalRoots)
