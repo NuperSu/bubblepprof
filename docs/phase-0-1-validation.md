@@ -19,3 +19,14 @@ failures, invariant cached sets, cancellation, and repeated Close. Integration t
 compare repeated offline queries with the existing analyzer over the same captured
 bundle, query after extracted files are removed, and compare CLI batch responses
 with a separately opened session over the same snapshot.
+
+## gotip follow-up
+
+Validated `GOARCH=386 gotip test ./...` and `GOARCH=amd64 gotip test ./...`
+with `go1.28-devel_e203fe5746` (October 9, 2026). Both full suites pass.
+The live label offset probe identified a 32-bit runtime change from `0xd8`
+(previously verified commit `e59fbed6bc`) to `0xd4`; the 64-bit offset remains
+`0x160`. Development table entries now match verified commit prefixes rather
+than the entire development release family. Older verified captures retain
+support, while unknown development builds report unsupported runtime layouts.
+The probe emits commit-specific prefixes for future table additions.

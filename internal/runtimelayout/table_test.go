@@ -20,8 +20,10 @@ func TestVerifiedTableShape(t *testing.T) {
 		{"go1.25.", 4, 0xd0},
 		{"go1.24.", 8, 0x160},
 		{"go1.24.", 4, 0xd4},
-		{"go1.28-devel", 8, 0x160},
-		{"go1.28-devel", 4, 0xd8},
+		{"go1.28-devel_e59fbed6bc", 8, 0x160},
+		{"go1.28-devel_e59fbed6bc", 4, 0xd8},
+		{"go1.28-devel_e203fe5746", 8, 0x160},
+		{"go1.28-devel_e203fe5746", 4, 0xd4},
 	}
 	if len(verifiedTable) != len(want) {
 		t.Fatalf("verifiedTable size = %d, want %d; add a regression test if expanding", len(verifiedTable), len(want))
@@ -46,6 +48,27 @@ func TestVerifiedTableShape(t *testing.T) {
 		wantLabelSize := uint64(w.ptrSize) * 4
 		if e.Layout.LabelSize != wantLabelSize {
 			t.Errorf("[%d] Layout.LabelSize = %d, want %d", i, e.Layout.LabelSize, wantLabelSize)
+		}
+	}
+}
+
+func TestDevelopmentLayoutsAreCommitSpecific(t *testing.T) {
+	for _, tc := range []struct {
+		version   string
+		width     int
+		offset    uint64
+		supported bool
+	}{
+		{"go1.28-devel_e59fbed6bc", 4, 0xd8, true},
+		{"go1.28-devel_e203fe5746 Fri Oct 9 13:34:05 2026 -0700", 4, 0xd4, true},
+		{"go1.28-devel_e203fe5746 Fri Oct 9 13:34:05 2026 -0700", 8, 0x160, true},
+		{"go1.28-devel_unknown", 4, 0, false},
+		{"go1.28-devel_unknown", 8, 0, false},
+		{"go1.28-devel", 4, 0, false},
+	} {
+		layout, ok := Lookup(LookupInput{GoVersion: tc.version, PtrSize: tc.width})
+		if ok != tc.supported || ok && layout.GLabelsOffset != tc.offset {
+			t.Fatalf("%s/%d: supported=%t offset=%#x", tc.version, tc.width, ok, layout.GLabelsOffset)
 		}
 	}
 }
