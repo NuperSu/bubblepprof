@@ -10,15 +10,15 @@ is exactly what `POST /debug/memusage` answers.
 One long-lived **ingester goroutine per `(tenant, stream, shard)`**. Each ingester
 keeps references to a ring of in-memory log chunks, held only on its own goroutine stack —
 no chunk is shared between workloads. Every ingester also references **one** process-wide
-interned-label dictionary, which is the *only* shared memory in the program and therefore
-the only source of `global_overlap`.
+interned-label dictionary, which is the main deliberately shared application structure. Runtime
+scaffolding and label structures can contribute additional overlap.
 
-That split is the whole point:
+The bulk-memory pattern is approximately:
 
 ```
-reachable_bytes       = this selector's private chunks + the shared dictionary
-global_overlap_bytes  = the shared dictionary (reachable from a package-level global)
-reachable - overlap   = this selector's TRULY-PRIVATE heap
+reachable_bytes       ~= this selector's chunks + the shared dictionary
+global_overlap_bytes  ~= the shared dictionary (also globally reachable)
+exclusive reachability = use the CLI exclusive command against all other roots
 ```
 
 As you add labels the match narrows and `reachable_bytes` shrinks with it, while
@@ -184,3 +184,8 @@ goroutines can still reach the same objects. Query totals are not additive.
 `/debug/memusage` is as sensitive as `/debug/pprof`: a single call performs a stop-the-world
 heap dump and can expose label values and heap sizes. Protect it with the same controls and do
 not expose it to untrusted callers.
+
+See the [shared-cache investigation](../../docs/investigations.md#b-a-shared-cache)
+for pairwise sharing, exact unions, exclusive reachability, and witness paths.
+Subtracting global overlap alone does not establish exclusivity relative to
+other goroutines.

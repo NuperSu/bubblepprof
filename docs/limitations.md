@@ -4,7 +4,7 @@
 
 `runtime.g.labels` is a private field of the `runtime.g` struct. Its byte offset depends on the **Go release family and pointer size** (4 or 8 bytes). `bubblepprof` uses a static table of tested offsets. Because the offset is determined by Go's struct layout rules — not by the specific architecture — all 64-bit little-endian platforms share one entry per Go version, and all 32-bit little-endian platforms share another.
 
-**Current verified support**: go1.24.\*–go1.26.\*, 64-bit little-endian (amd64, arm64) on Linux, macOS, Windows, and FreeBSD; 32-bit little-endian (arm, 386) on Linux and FreeBSD. Go 1.27 family support is enabled based on successful go1.27rc2 tests on Linux/amd64 and Linux/386; go1.27.0 and later patch releases have not yet been verified. Experimental go1.28-devel support was tested on Linux/amd64 and Linux/386 with gotip commit `e59fbed6bc`.
+**Current verified support**: go1.24.\*–go1.26.\*, 64-bit little-endian (amd64, arm64) on Linux, macOS, Windows, and FreeBSD; 32-bit little-endian (arm, 386) on Linux and FreeBSD. Go 1.27 family support has passed go1.27.2 integration tests on Linux/amd64 and Linux/386. Experimental go1.28-devel support was tested on Linux/amd64 and Linux/386 with gotip commit `e59fbed6bc`.
 
 On any other Go version the endpoint returns `422 unsupported_runtime` and does not proceed. Future work requires either manual verification of new Go releases or a DWARF-based layout discovery path.
 
@@ -29,7 +29,7 @@ Heap-allocated label strings (e.g., from `strings.Clone("value")`) do not requir
 
 `reachable_bytes` is the **sum of shallow sizes** of heap objects reachable from matched goroutine roots. Each object is counted once. The size is the object's own footprint — not the transitive size of everything it points to.
 
-This is consistent with how `runtime.MemStats` counts objects, but it means that two goroutines sharing a large buffer will each appear to "reach" the full buffer; overlap with global or system roots is reported separately. Sharing between ordinary goroutines is included in each query but is not measured by those two overlap metrics.
+This is consistent with how `runtime.MemStats` counts objects, but it means that two goroutines sharing a large buffer will each appear to "reach" the full buffer; overlap with global or system roots is reported separately. Sharing between ordinary goroutines is included in each query but is not measured by those two overlap metrics. Use `compare`, `top`, and `exclusive` for exact shared and exclusive analysis.
 
 ## Global and system overlap is not subtracted
 
@@ -72,3 +72,11 @@ For current Go runtime versions (1.24+), `fieldKindIface` and `fieldKindEface` a
 ## Interior pointer resolution
 
 The heap dump records pointer fields as raw virtual addresses. When a pointer targets the interior of an object (e.g., a pointer to the second element of an array), `bubblepprof` resolves it to the enclosing object. This is correct for GC reachability but means that a single large array is attributed as one unit, not per-element.
+
+## Capture and analysis controls
+
+See [capture reliability](capture-reliability.md) for scratch directories,
+advisory free-space checks, cooldown, post-capture heap limits, streaming artifact
+limits, validated downloads, and cancellation boundaries. The runtime dump
+cannot be interrupted. These controls do not guarantee a maximum pause or
+reserve disk capacity.

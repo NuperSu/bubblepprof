@@ -1,6 +1,11 @@
 # bubblepprof
 
-`bubblepprof` is a Go heap profiler that reports memory usage per **pprof bubble** — a group of goroutines that share the same [`runtime/pprof`](https://pkg.go.dev/runtime/pprof) labels.
+`bubblepprof` is a Go heap-reference analyzer that reports reachable, exclusive, and shared memory per **pprof bubble** — a group of goroutines that share the same [`runtime/pprof`](https://pkg.go.dev/runtime/pprof) labels.
+
+Start with the [getting-started guide](docs/getting-started.md), then follow the
+[worker, shared-cache, growth, and pprof workflows](docs/investigations.md).
+See [capture controls](docs/capture-reliability.md) and
+[portable releases and supported platforms](docs/releases.md).
 
 It works in two modes:
 
@@ -24,7 +29,7 @@ It captures a heap dump, recovers pprof labels from goroutine runtime state, and
 | | `net/http/pprof` | `bubblepprof` |
 |---|---|---|
 | Unit | process | label-selected goroutine group |
-| Question | where are allocations coming from? | how much heap does job/tenant X hold? |
+| Question | where are allocations coming from? | how much heap is reachable from job/tenant X? |
 | Mechanism | sampling (allocs/heap) | stop-the-world heap dump + BFS |
 | Requires standard pprof labels? | no | yes (without labels the endpoint always returns 0 matches) |
 | Cost per query | low | high (stop-the-world) |
@@ -359,7 +364,7 @@ Latency is proportional to live heap size. Concurrent callers receive `429 Too M
 
 See [`docs/limitations.md`](docs/limitations.md) for a complete list. Key points:
 
-- Heap-native label recovery is verified for **go1.24.\*–go1.26.\*** on Linux, macOS, Windows, and FreeBSD (amd64, arm64, arm, 386). Go 1.27 family support is enabled based on successful go1.27rc2 tests on Linux (amd64 and 386). Experimental go1.28-devel support was tested with gotip commit `e59fbed6bc`. Other Go versions return `unsupported_runtime`.
+- Stable runtime layout families are **Go 1.24–1.27**, with little-endian 32-bit and 64-bit pointer widths. Go 1.27.2 passed local Linux amd64/386 integration suites. See [supported platforms and CI versions](docs/releases.md#supported-platforms) for native coverage and cross-compiled release targets. Gotip layouts are experimental and revision-sensitive; unknown layouts return `unsupported_runtime`.
 - Ordinary string literal labels are recovered via the in-process reader on Linux, macOS, FreeBSD, and Windows. On FreeBSD specifically, recovery requires *either* procfs mounted at `/proc` (the reader uses `/proc/self/mem`) *or* a non-PIE binary (the reader falls back to the on-disk ELF; PIE would shift the runtime addresses and break that fallback). On other platforms — or on FreeBSD when neither condition holds — literal labels return `string_missing`.
 - Sizes are **shallow** (the object itself, not transitive) and counts are **BFS-reachable** from the matched goroutine roots, not total process heap.
 - Global and system overlap is reported separately; it is not subtracted automatically.
@@ -425,8 +430,8 @@ releases the graph and cached sets; extracted bundle files are needed only durin
 loading. The internal session API is experimental.
 
 Capture identity uses the existing bundle timestamp and producer metadata. Go version
-and architecture come from the authoritative heap dump parameters. Application build
-information is unavailable in the current bundle format. Validation status `parsed`
+and architecture come from the authoritative heap dump parameters. New bundles include available application build information and capture settings;
+older version-1 bundles leave these fields unknown. Validation status `parsed`
 means the parser accepted the dump; `diagnostics_present` calls for inspection of the
 warnings, label recovery, and unresolved reference counters. Neither status guarantees
 that all process references were represented by the runtime dump.
