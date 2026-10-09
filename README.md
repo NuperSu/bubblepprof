@@ -469,3 +469,13 @@ for structured output and snapshot diagnostics.
 A witness proves reachability; removing one reference need not free the object.
 See [object inspection and explanations](docs/object-inspection.md) for shared
 object workflows, output limits, search budgets, and provenance details.
+
+### Compare captures
+
+```sh
+bubblepprof diff before.tar after.tar --by tenant
+bubblepprof diff before.tar after.tar --a tenant=atlas-bikes --b tenant=globex --format json
+```
+
+See [snapshot comparisons](docs/snapshot-diff.md) for shared/exclusive deltas,
+structural summaries, compatibility checks, and exact JSON byte deltas.

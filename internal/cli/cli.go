@@ -28,6 +28,11 @@ const usage = `bubblepprof is the external analyser for bubblepprof bundles.
 
 Usage:
 
+  bubblepprof diff before.tar after.tar --by key [--format json]
+  bubblepprof diff before.tar after.tar --labels k=v
+  bubblepprof diff before.tar after.tar --a k=v --b k=v
+        Compare reachable, exclusive, shared, and structural summaries.
+
   bubblepprof fetch <url> [flags]
         Download a capture bundle from a target process that serves
         GET /debug/memusage/bundle.
@@ -106,6 +111,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch args[0] {
+	case "diff":
+		return runDiff(args[1:], stdout, stderr)
 	case "fetch":
 		return runFetch(args[1:], stdout, stderr)
 	case "memusage":
