@@ -95,16 +95,25 @@ func TestBundleExportPprof(t *testing.T) {
 	if !reflect.DeepEqual(totals, []int64{int64(m["reachable"].Objects), int64(m["reachable"].Bytes), int64(m["exclusive"].Objects), int64(m["exclusive"].Bytes), int64(m["shared"].Objects), int64(m["shared"].Bytes)}) {
 		t.Fatal(totals, m)
 	}
-	for _, index := range []string{"reachable_space", "exclusive_space", "shared_space"} {
-		cmd := exec.Command("go", "tool", "pprof", "-top", "-sample_index="+index, output)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("go tool pprof: %v %s", err, out)
+	t.Run("pprof without a host C compiler", func(t *testing.T) {
+		// Reproduce a cross-build environment whose CC cannot build host tools.
+		t.Setenv("CC", filepath.Join(t.TempDir(), "missing-cross-compiler"))
+		t.Setenv("CGO_ENABLED", "1")
+		for _, index := range []string{"reachable_space", "exclusive_space", "shared_space"} {
+			cmd := exec.Command("go", "tool", "pprof", "-top", "-sample_index="+index, output)
+			// Go 1.25+ may build pprof for the host on demand, while CC still
+			// targets the test architecture (e.g. ARM under QEMU). This report
+			// only needs pure Go pprof; leave cgo enabled for the outer PIE tests.
+			cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("go tool pprof: %v %s", err, out)
+			}
+			if !strings.Contains(string(out), "bubblepprof summary") {
+				t.Fatalf("missing synthetic frames: %s", out)
+			}
 		}
-		if !strings.Contains(string(out), "bubblepprof summary") {
-			t.Fatalf("missing synthetic frames: %s", out)
-		}
-	}
+	})
 	stdout.Reset()
 	stderr.Reset()
 	if code := cli.Main([]string{"export", path, "--label", "phase5=export", "--format", "json"}, &stdout, &stderr); code != 0 {
