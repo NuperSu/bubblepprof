@@ -139,41 +139,23 @@ var verifiedTable = []TableEntry{
 	// Development runtime layouts are kept after released Go families because
 	// they may change at any commit and are not part of the stable support range.
 	{
-		VersionPrefix: "go1.28-devel_e59fbed6bc",
+		VersionPrefix: "go1.28-devel",
 		PtrSize:       8,
 		BigEndian:     false,
 		Layout: with64BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
 			GLabelsOffset: 0x160,
-			Description:   "verified go1.28-devel 64-bit LE (linux/amd64) runtime.g.labels offset 0x160 (verified on commit e59fbed6bc)",
+			Description:   "verified go1.28-devel 64-bit LE (linux/amd64) runtime.g.labels offset 0x160 (verified on commit e203fe5746)",
 		}),
 	},
 	{
-		VersionPrefix: "go1.28-devel_e59fbed6bc",
+		VersionPrefix: "go1.28-devel",
 		PtrSize:       4,
 		BigEndian:     false,
 		Layout: with32BitLittleEndianDefaults(Layout{
 			Source:        SourceTable,
-			GLabelsOffset: 0xd8,
-			Description:   "verified go1.28-devel 32-bit LE (linux/386) runtime.g.labels offset 0xd8 (verified on commit e59fbed6bc)",
-		}),
-	},
-	// Verified by live labeloffsetprobe on linux/amd64 and linux/386.
-	// Development layouts must be pinned: runtime.g can change within a release.
-	{
-		VersionPrefix: "go1.28-devel_e203fe5746",
-		PtrSize:       8,
-		Layout: with64BitLittleEndianDefaults(Layout{
-			Source: SourceTable, GLabelsOffset: 0x160,
-			Description: "verified go1.28-devel e203fe5746 linux/amd64 runtime.g.labels offset 0x160",
-		}),
-	},
-	{
-		VersionPrefix: "go1.28-devel_e203fe5746",
-		PtrSize:       4,
-		Layout: with32BitLittleEndianDefaults(Layout{
-			Source: SourceTable, GLabelsOffset: 0xd4,
-			Description: "verified go1.28-devel e203fe5746 linux/386 runtime.g.labels offset 0xd4",
+			GLabelsOffset: 0xd4,
+			Description:   "verified go1.28-devel 32-bit LE (linux/386) runtime.g.labels offset 0xd4 (verified on commit e203fe5746)",
 		}),
 	},
 }
