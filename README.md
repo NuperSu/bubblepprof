@@ -449,3 +449,23 @@ counts. Group totals are not additive and do not imply ownership.
 
 See [multi-bubble analysis](docs/multi-bubble-analysis.md) for selector syntax,
 root definitions, detailed categories, limits, and reusable session behavior.
+
+### Inspect objects and explain references
+
+```sh
+bubblepprof objects capture.tar --labels tenant=atlas-bikes --sort size --limit 20
+bubblepprof explain capture.tar --labels tenant=atlas-bikes --object 0xc000890000
+bubblepprof explain capture.tar --a tenant=atlas-bikes --b tenant=globex --object 0xc000890000 --by tenant
+bubblepprof explain capture.tar --labels tenant=atlas-bikes --top 20 --by tenant
+```
+
+Object reports include shallow sizes, reference counts, exclusive/shared
+classification, root/group relationships, and a size distribution for the full
+selected set. Explanations show bounded witness paths, with available pointer
+slot offsets and stack metadata. Aggregate mode ranks reachable, shared, and
+exclusive objects and explains representative examples. Use `--format json`
+for structured output and snapshot diagnostics.
+
+A witness proves reachability; removing one reference need not free the object.
+See [object inspection and explanations](docs/object-inspection.md) for shared
+object workflows, output limits, search budgets, and provenance details.

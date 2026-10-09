@@ -95,8 +95,9 @@ counts. Objects are sorted by descending size, then address and ID. The default
 limit is 20; zero returns the entire set. `truncated` distinguishes a limited
 listing from a complete one. Aggregate intersection counts always describe the
 full set, even when the listing is limited. IDs and addresses identify objects
-only within this snapshot. Reference paths and type reconstruction are later
-roadmap features.
+only within this snapshot. Use [object inspection and explanations](object-inspection.md)
+to classify objects and display witness paths from both selectors. Concrete type
+reconstruction remains outside these reports.
 
 ## Sessions, diagnostics, and cost
 
