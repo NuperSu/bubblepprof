@@ -196,3 +196,80 @@ func TestMultiBubbleThousandsOfGroups(t *testing.T) {
 func fmtGroup(i int) string { // deterministic unique values without a platform-sized address conversion
 	return string(rune(i + 100))
 }
+
+func TestMultiBubbleExactSetsAndMalformedReferences(t *testing.T) {
+	s := multiFixture()
+	defer s.Close()
+	ctx := context.Background()
+	s.analysis.Graph.Objects[0].Children = []snapshotgraph.ObjectID{0, snapshotgraph.ObjectID(math.MaxUint32)}
+	ar, _, err := s.selected(selector("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	br, _, err := s.selected(selector("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ar = append(ar, snapshotgraph.RootRef{ObjectID: snapshotgraph.ObjectID(math.MaxUint32)})
+	as, err := s.walk(ctx, ar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs, err := s.walk(ctx, br)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := func(ids ...snapshotgraph.ObjectID) objectSet {
+		out := objectSet{}
+		for _, id := range ids {
+			out[id] = struct{}{}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name      string
+		got, want objectSet
+	}{
+		{"A", as, want(0, 1, 2, 3, 4, 5, 6)},
+		{"B", bs, want(1, 2, 4, 7)},
+		{"A-only", difference(as, bs), want(0, 3, 5, 6)},
+		{"B-only", difference(bs, as), want(7)},
+		{"intersection", intersection(as, bs), want(1, 2, 4)},
+		{"union", union(as, bs), want(0, 1, 2, 3, 4, 5, 6, 7)},
+	} {
+		if !reflect.DeepEqual(tc.got, tc.want) {
+			t.Fatalf("%s: %v want %v", tc.name, tc.got, tc.want)
+		}
+	}
+	roots := append([]snapshotgraph.RootRef{}, s.analysis.Globals.Roots...)
+	for _, g := range s.analysis.Goroutines {
+		if g.GoroutineID != 1 && g.GoroutineID != 6 {
+			roots = append(roots, g.Roots...)
+		}
+	}
+	outside, err := s.walk(ctx, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := difference(as, outside); !reflect.DeepEqual(got, want(0)) {
+		t.Fatalf("exclusive set: %v", got)
+	}
+}
+
+func TestIncludedUngroupedSystemOverlap(t *testing.T) {
+	s := multiFixture()
+	defer s.Close()
+	s.opts.IncludeSystemGoroutines = true
+	r, err := s.Top(context.Background(), TopOptions{By: "tenant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.UngroupedGoroutines != 2 || r.ExcludedSystemGoroutines != 0 {
+		t.Fatalf("%+v", r)
+	}
+	for _, g := range r.Groups {
+		if g.Value == "a" && (g.SystemOverlap != (Measure{1, 7}) || g.UngroupedOverlap != (Measure{2, 13})) {
+			t.Fatalf("%+v", g)
+		}
+	}
+}

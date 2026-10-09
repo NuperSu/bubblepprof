@@ -381,6 +381,9 @@ func (s *Snapshot) Top(ctx context.Context, opts TopOptions) (*TopResult, error)
 		value, ok := s.labels[g.GoroutineID][opts.By]
 		if !ok {
 			ungrouped = append(ungrouped, g.Roots...)
+			if g.IsSystem || g.IsBackground {
+				system = append(system, g.Roots...)
+			}
 			out.UngroupedGoroutines++
 			continue
 		}
