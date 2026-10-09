@@ -361,3 +361,94 @@ func TestBundleExploreBatch(t *testing.T) {
 		t.Fatal("batch differs from session")
 	}
 }
+
+func TestBundleMultiBubbleCommands(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live heap dump")
+	}
+	stop := startLabeledGoroutine(t, pprof.Labels(strings.Clone("tenant"), strings.Clone("phase2"), strings.Clone("role"), strings.Clone("phase2-worker")), 1<<20)
+	defer stop()
+	rr := httptest.NewRecorder()
+	BundleHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, MemUsageBundlePath, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatal(rr.Body.String())
+	}
+	path := filepath.Join(t.TempDir(), "capture.tar")
+	if err := os.WriteFile(path, rr.Body.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := offline.OpenSnapshot(context.Background(), path, memusage.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a := memusage.Request{Labels: map[string]string{"tenant": "phase2"}}
+	b := memusage.Request{Labels: map[string]string{"role": "phase2-worker"}}
+	comparison, err := s.Compare(context.Background(), a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Shared.Bytes == 0 || len(comparison.OverlappingGoroutines) == 0 {
+		t.Fatalf("%+v", comparison)
+	}
+	top, err := s.Top(context.Background(), memusage.TopOptions{By: "tenant", Sort: "shared", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exclusive, err := s.Exclusive(context.Background(), a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := s.Shared(context.Background(), a, b, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query, err := s.Query(context.Background(), a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exclusive.Reachable.Bytes != query.ReachableBytes || exclusive.Reachable.Objects != query.ReachableObjects {
+		t.Fatal("query parity")
+	}
+	cases := []struct {
+		command string
+		args    []string
+		want    any
+	}{
+		{"top", []string{"--by", "tenant", "--sort", "shared", "--limit", "1"}, top},
+		{"compare", []string{"--a", "tenant=phase2", "--b", "role=phase2-worker"}, comparison},
+		{"exclusive", []string{"--labels", "tenant=phase2"}, exclusive},
+		{"shared", []string{"--a", "tenant=phase2", "--b", "role=phase2-worker", "--limit", "0"}, shared},
+	}
+	for _, tc := range cases {
+		t.Run(tc.command, func(t *testing.T) {
+			args := append([]string{tc.command, path, "--format", "json"}, tc.args...)
+			var out, stderr bytes.Buffer
+			if code := cli.Main(args, &out, &stderr); code != 0 {
+				t.Fatalf("%d: %s %s", code, &out, &stderr)
+			}
+			var got struct {
+				Result   json.RawMessage
+				Metadata memusage.SnapshotMetadata
+			}
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(tc.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var gv, wv any
+			json.Unmarshal(got.Result, &gv)
+			json.Unmarshal(want, &wv)
+			if !reflect.DeepEqual(gv, wv) || got.Metadata.Graph.Objects == 0 {
+				t.Fatalf("CLI differs from reusable session: %s", &out)
+			}
+			out.Reset()
+			args = append([]string{tc.command, path}, tc.args...)
+			if code := cli.Main(args, &out, &stderr); code != 0 || !strings.Contains(out.String(), "validation:") {
+				t.Fatalf("text output: %d %s %s", code, &out, &stderr)
+			}
+		})
+	}
+}

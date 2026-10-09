@@ -47,6 +47,19 @@ Usage:
         Evaluate a JSON array of label requests using one graph, and report
         capture metadata, diagnostics, and indexed label groups.
 
+  bubblepprof top <bundle-file-or-url> --by key [--sort reachable|exclusive|shared]
+        Rank label groups, with exclusive and detailed shared reachability.
+
+  bubblepprof compare <bundle-file-or-url> --a k=v --b k=v
+        Compare exact reachable sets; report overlapping goroutine selections.
+
+  bubblepprof shared <bundle-file-or-url> --a k=v --b k=v [--limit 20]
+        Inspect shared object IDs, addresses, shallow sizes, and reference counts.
+
+  bubblepprof exclusive <bundle-file-or-url> --labels k=v
+        Compare a selection against all other modeled roots.
+
+These commands accept --format json for metadata and machine-readable results.
 Run "bubblepprof <command> -h" for command flags.
 `
 
@@ -87,6 +100,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return runFetch(args[1:], stdout, stderr)
 	case "memusage":
 		return runMemUsage(args[1:], stdout, stderr)
+	case "top", "compare", "shared", "exclusive":
+		return runMultiBubble(args[0], args[1:], stdout, stderr)
 	case "explore":
 		return runExplore(args[1:], stdout, stderr)
 	case "bubbles":
