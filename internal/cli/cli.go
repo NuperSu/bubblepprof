@@ -59,6 +59,16 @@ Usage:
   bubblepprof exclusive <bundle-file-or-url> --labels k=v
         Compare a selection against all other modeled roots.
 
+  bubblepprof objects <bundle-file-or-url> --labels k=v [--sort size --limit 20]
+        Inspect reachable objects, classifications, root/group relationships,
+        and a size distribution covering all selected objects.
+
+  bubblepprof explain <bundle-file-or-url> --labels k=v --object 0xc000890000
+  bubblepprof explain <bundle-file-or-url> --a k=v --b k=v --object 0xc000890000
+  bubblepprof explain <bundle-file-or-url> --labels k=v --top 20
+        Explain one object or aggregate findings with bounded witness paths.
+        Use --by key to discover other groups reaching the objects.
+
 These commands accept --format json for metadata and machine-readable results.
 Run "bubblepprof <command> -h" for command flags.
 `
@@ -100,6 +110,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return runFetch(args[1:], stdout, stderr)
 	case "memusage":
 		return runMemUsage(args[1:], stdout, stderr)
+	case "objects", "explain":
+		return runInspection(args[0], args[1:], stdout, stderr)
 	case "top", "compare", "shared", "exclusive":
 		return runMultiBubble(args[0], args[1:], stdout, stderr)
 	case "explore":

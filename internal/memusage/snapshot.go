@@ -27,6 +27,7 @@ type Snapshot struct {
 }
 
 type SnapshotMetadata struct {
+	ReferenceProvenance bool                    `json:"reference_provenance"`
 	GoVersion           string                  `json:"go_version"`
 	GOARCH              string                  `json:"goarch"`
 	Parser              heapsnapshot.ParseStats `json:"parser"`
@@ -92,7 +93,7 @@ func newSnapshot(a *snapshotgraph.Analysis, labels map[uint64]map[string]string,
 			sort.Slice(gids, func(i, j int) bool { return gids[i] < gids[j] })
 		}
 	}
-	s.metadata = SnapshotMetadata{GoVersion: diag.GoVersion, GOARCH: diag.GOARCH, Graph: a.Stats, RecoveredGoroutines: len(labels), Validation: "parsed", Warnings: append(append([]string{}, diag.Warnings...), a.Warnings...)}
+	s.metadata = SnapshotMetadata{ReferenceProvenance: opts.KeepReferenceProvenance, GoVersion: diag.GoVersion, GOARCH: diag.GOARCH, Graph: a.Stats, RecoveredGoroutines: len(labels), Validation: "parsed", Warnings: append(append([]string{}, diag.Warnings...), a.Warnings...)}
 	if diag.FailedGoroutines > 0 || len(s.metadata.Warnings) > 0 || a.Stats.UnresolvedPointers > 0 {
 		s.metadata.Validation = "diagnostics_present"
 	}
