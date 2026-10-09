@@ -1,0 +1,79 @@
+name: Portable release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Release tests / ${{ matrix.runner }} / ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-latest, arch: amd64}
+          - {runner: ubuntu-latest, arch: '386'}
+          - {runner: macos-latest, arch: arm64}
+          - {runner: macos-26-intel, arch: amd64}
+          - {runner: windows-latest, arch: amd64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - name: Build CLI
+        env:
+          GOARCH: ${{ matrix.arch }}
+        run: go build ./cmd/bubblepprof
+      - name: Runtime, parser, graph, and end-to-end tests
+        env:
+          GOARCH: ${{ matrix.arch }}
+        run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - name: Build portable archives
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+          RELEASE_TYPE: ${{ github.ref_type }}
+        run: |
+          version=dev
+          if [ "$RELEASE_TYPE" = tag ]; then version="$RELEASE_REF"; fi
+          bash scripts/build-releases.sh "$version"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: bubblepprof-portable
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+
+  draft:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: bubblepprof-portable
+          path: dist
+      - name: Prepare draft release for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --generate-notes

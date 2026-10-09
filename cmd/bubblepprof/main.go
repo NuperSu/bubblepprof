@@ -11,6 +11,9 @@ import (
 	"github.com/NuperSu/bubblepprof/internal/cli"
 )
 
+var version = "dev"
+
 func main() {
+	cli.Version = version
 	os.Exit(cli.Main(os.Args[1:], os.Stdout, os.Stderr))
 }

@@ -10,3 +10,6 @@
 /tracked-files.zip
 /labeloffsetprobe
 /bench/results*
+
+# Local portable release archives
+/dist/
