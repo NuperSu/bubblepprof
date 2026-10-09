@@ -43,6 +43,9 @@ func runMultiBubble(command string, args []string, stdout, stderr io.Writer) int
 		fs.Var(exactLabelFlag{labels}, "label", "one exact key=value pair (repeatable)")
 	}
 	target, err := parseWithOneArg(fs, args)
+	if err == flag.ErrHelp {
+		return exitOK
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		fs.Usage()

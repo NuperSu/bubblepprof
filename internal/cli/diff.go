@@ -28,6 +28,9 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 	paths := []string{}
 	for {
 		if err := fs.Parse(args); err != nil {
+			if err == flag.ErrHelp {
+				return exitOK
+			}
 			return exitUsage
 		}
 		if fs.NArg() == 0 {

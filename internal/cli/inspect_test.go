@@ -19,3 +19,19 @@ func TestInspectUsageAndCommandHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpDoesNotReportMissingArguments(t *testing.T) {
+	for _, command := range []string{"inspect", "query", "labels", "fetch", "top", "objects", "explain", "explore", "export", "diff"} {
+		var out, err bytes.Buffer
+		if code := Main([]string{command, "-h"}, &out, &err); code != exitOK {
+			t.Fatal(command, code)
+		}
+		if bytes.Contains(err.Bytes(), []byte("missing argument")) || bytes.Contains(err.Bytes(), []byte("exactly one target URL is required")) || bytes.Contains(err.Bytes(), []byte("inspect requires")) {
+			t.Fatal(command, err.String())
+		}
+	}
+	var out, err bytes.Buffer
+	if code := Main([]string{"unknown", "-h"}, &out, &err); code != exitUsage {
+		t.Fatal("unknown command help succeeded")
+	}
+}

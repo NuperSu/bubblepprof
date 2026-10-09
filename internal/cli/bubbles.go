@@ -22,6 +22,9 @@ func runBubbles(args []string, stdout, stderr io.Writer) int {
 	gc := fs.Bool("gc", true, "when fetching from a URL, run a garbage collection in the target before the heap dump")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total fetch timeout when the argument is a URL")
 	target, err := parseWithOneArg(fs, args)
+	if err == flag.ErrHelp {
+		return exitOK
+	}
 	if err != nil || (*format != "text" && *format != "json") {
 		fmt.Fprintln(stderr, "bubblepprof bubbles: exactly one bundle file or target URL is required")
 		fs.Usage()

@@ -25,12 +25,19 @@ func runFetch(args []string, stdout, stderr io.Writer) int {
 	maxBytes := fs.Int64("max-bytes", 0, "maximum downloaded artifact bytes (0 is unlimited)")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total request timeout")
 	target, err := parseWithOneArg(fs, args)
-	if err != nil || *maxBytes < 0 || *timeout <= 0 {
+	if err == flag.ErrHelp {
+		return exitOK
+	}
+	if err != nil {
 		fmt.Fprintln(stderr, "bubblepprof fetch: exactly one target URL is required")
 		fs.Usage()
 		return exitUsage
 	}
 
+	if *maxBytes < 0 || *timeout <= 0 {
+		fmt.Fprintln(stderr, "bubblepprof fetch: max-bytes must be non-negative and timeout must be positive")
+		return exitUsage
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	body, host, err := fetchBundle(ctx, target, *gc)

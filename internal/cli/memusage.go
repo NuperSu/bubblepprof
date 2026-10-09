@@ -73,6 +73,9 @@ func runMemUsage(args []string, stdout, stderr io.Writer) int {
 	timeout := fs.Duration("timeout", 5*time.Minute, "total fetch timeout when the argument is a URL")
 	format := fs.String("format", "json", "output format: json or text")
 	target, err := parseWithOneArg(fs, args)
+	if err == flag.ErrHelp {
+		return exitOK
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "bubblepprof memusage: exactly one bundle file or target URL is required")
 		fs.Usage()

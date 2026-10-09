@@ -45,6 +45,9 @@ func runInspection(command string, args []string, stdout, stderr io.Writer) int 
 		fs.IntVar(&maxVisited, "max-visited", 0, "maximum visited objects per path search (0 permits V); exhaustion is explicit")
 	}
 	target, err := parseWithOneArg(fs, args)
+	if err == flag.ErrHelp {
+		return exitOK
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		fs.Usage()

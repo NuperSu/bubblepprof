@@ -24,6 +24,9 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	fs.Var(labels, "labels", "selector key=value[,key=value...]")
 	fs.Var(exactLabelFlag{labels}, "label", "one exact key=value pair")
 	target, err := parseWithOneArg(fs, args)
+	if err == flag.ErrHelp {
+		return exitOK
+	}
 	opts := memusage.Options{IncludeSystemGoroutines: *include, MaxMemRangeBytes: *max}
 	if err == nil {
 		if e := memusage.ValidateRequest(&memusage.Request{Labels: labels}, opts); e != nil {

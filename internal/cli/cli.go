@@ -15,7 +15,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"runtime"
 )
+
+// Version is set by the command at build time.
+var Version = "dev"
 
 // Exit codes: 0 success, 1 usage error, 2 analysis/transport failure.
 const (
@@ -27,6 +31,9 @@ const (
 const usage = `bubblepprof is the external analyser for bubblepprof bundles.
 
 Usage:
+
+  bubblepprof version
+        Print CLI version, build toolchain, and platform.
 
   bubblepprof inspect <bundle-file-or-url> [--format text|json]
         Inspect capture/build metadata and analysis completeness diagnostics.
@@ -118,18 +125,18 @@ func parseWithOneArg(fs *flag.FlagSet, args []string) (string, error) {
 // implementation behind cmd/bubblepprof, kept here so tests can drive
 // it in-process.
 func Main(args []string, stdout, stderr io.Writer) int {
-	code := runMain(args, stdout, stderr)
-	if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") && code == exitUsage {
-		return exitOK
-	}
-	return code
-}
-func runMain(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return exitUsage
 	}
 	switch args[0] {
+	case "version", "--version":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "version takes no arguments")
+			return exitUsage
+		}
+		fmt.Fprintf(stdout, "bubblepprof %s (%s %s/%s)\n", Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		return exitOK
 	case "export":
 		return runExport(args[1:], stdout, stderr)
 	case "diff":

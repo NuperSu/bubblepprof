@@ -23,6 +23,9 @@ func runExplore(args []string, stdout, stderr io.Writer) int {
 	include := fs.Bool("include-system", false, "include system/background goroutines")
 	max := fs.Uint64("max-mem-range-bytes", 0, "maximum bytes per heap memory record")
 	target, err := parseWithOneArg(fs, args)
+	if err == flag.ErrHelp {
+		return exitOK
+	}
 	if err != nil || *queries == "" {
 		fmt.Fprintln(stderr, "usage: bubblepprof explore <bundle-file-or-url> -queries queries.json")
 		return exitUsage
