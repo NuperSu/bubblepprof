@@ -479,3 +479,14 @@ bubblepprof diff before.tar after.tar --a tenant=atlas-bikes --b tenant=globex -
 
 See [snapshot comparisons](docs/snapshot-diff.md) for shared/exclusive deltas,
 structural summaries, compatibility checks, and exact JSON byte deltas.
+
+### Export reachability to pprof
+
+```sh
+bubblepprof export capture.tar --labels tenant=atlas-bikes --format pprof -o reachable.pb.gz
+go tool pprof -top -sample_index=shared_space reachable.pb.gz
+```
+
+See [pprof interoperability](docs/pprof-interop.md) for optional standard profile
+capture, sampled allocation evidence, JSON reports, and Pyroscope validation.
+The export uses explicitly synthetic summary frames, not allocation stacks.
