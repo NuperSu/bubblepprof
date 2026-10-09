@@ -31,3 +31,22 @@ func TestValidateArchive(t *testing.T) {
 		t.Fatal("duplicate member")
 	}
 }
+
+func TestReaderRejectsNonRegularAndTrailingMetadata(t *testing.T) {
+	for _, link := range []bool{false, true} {
+		var out bytes.Buffer
+		tw := tar.NewWriter(&out)
+		if link {
+			writeMember(tw, MetaMember, []byte(`{"format_version":1}`))
+			tw.WriteHeader(&tar.Header{Name: HeapDumpMember, Typeflag: tar.TypeSymlink, Linkname: "outside"})
+		} else {
+			writeMember(tw, MetaMember, []byte(`{"format_version":1} {}`))
+			writeMember(tw, HeapDumpMember, []byte("go1.7 heap dump\n\x00"))
+		}
+		tw.Close()
+		if b, err := Open(bytes.NewReader(out.Bytes())); err == nil {
+			b.Close()
+			t.Fatal("invalid archive accepted")
+		}
+	}
+}

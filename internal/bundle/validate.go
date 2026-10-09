@@ -139,3 +139,15 @@ func ValidateArchive(src io.Reader) error {
 	}
 	return nil
 }
+
+func decodeSingleJSON(r io.Reader, v any) error {
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return fmt.Errorf("unexpected trailing JSON")
+	}
+	return nil
+}

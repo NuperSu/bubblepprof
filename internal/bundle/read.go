@@ -2,7 +2,6 @@ package bundle
 
 import (
 	"archive/tar"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -108,6 +107,10 @@ func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
 		isSegment := strings.HasPrefix(hdr.Name, segmentMemberPrefix) && strings.HasSuffix(hdr.Name, segmentMemberSuffix)
 		recognized := hdr.Name == MetaMember || hdr.Name == SegmentsMember || hdr.Name == HeapDumpMember || isSegment || profileKind(hdr.Name) != ""
 		if recognized {
+			if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+				cleanupDump()
+				return nil, fmt.Errorf("bundle: %s is not a regular member", hdr.Name)
+			}
 			if seen[hdr.Name] {
 				cleanupDump()
 				return nil, fmt.Errorf("bundle: duplicate %s member", hdr.Name)
@@ -138,13 +141,13 @@ func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
 		switch {
 		case hdr.Name == MetaMember:
 			var m Meta
-			if err := json.NewDecoder(tr).Decode(&m); err != nil {
+			if err := decodeSingleJSON(tr, &m); err != nil {
 				cleanupDump()
 				return nil, fmt.Errorf("bundle: parse %s: %w", MetaMember, err)
 			}
 			meta = &m
 		case hdr.Name == SegmentsMember:
-			if err := json.NewDecoder(tr).Decode(&infos); err != nil {
+			if err := decodeSingleJSON(tr, &infos); err != nil {
 				cleanupDump()
 				return nil, fmt.Errorf("bundle: parse %s: %w", SegmentsMember, err)
 			}
