@@ -283,7 +283,7 @@ go run ./examples/log_ingest
 go run ./examples/log_ingest -tenants 8 -shards 4 -dict-mb 256
 ```
 
-One long-lived ingester goroutine per `(tenant, stream, shard)` privately owns a ring of
+One long-lived ingester goroutine per `(tenant, stream, shard)` keeps references to a ring of
 in-memory log chunks held **only on its own stack** — no chunk is shared between workloads.
 Every ingester also references a single process-wide interned-label dictionary, which is the
 **only** shared memory and the sole source of `global_overlap`. Labels form a six-dimension
@@ -298,7 +298,9 @@ tier    = enterprise | standard
 shard   = 0..shards-1
 ```
 
-The key insight: **private heap = `reachable_bytes − global_overlap_bytes`**. As you add
+In this deliberately isolated example, subtracting global overlap approximates the chunk
+memory. In general this difference is not exclusive memory: other goroutines can still
+reach these objects. As you add
 labels the match narrows, `reachable_bytes` shrinks with it, and `global_overlap_bytes`
 (the shared dictionary) stays roughly constant:
 
@@ -322,7 +324,7 @@ curl -s -XPOST 127.0.0.1:6060/debug/memusage -d '{"labels":{"service":"log-inges
 ```
 
 Example progression (small run, `-dict-mb 32 -ring 8 -chunk-kb 256`), reading
-`matched / reachable / global_overlap / private` in MiB:
+`matched / reachable / global_overlap / difference` in MiB:
 
 ```
 {tenant:atlas-bikes}              -> 4 / 41 / 33 /  8
@@ -334,7 +336,7 @@ Example progression (small run, `-dict-mb 32 -ring 8 -chunk-kb 256`), reading
 
 The example sets **no** finalizers on chunks (a finalizer would make an object a global root
 and pollute per-tenant attribution) — which is exactly what keeps `reachable − global_overlap`
-equal to the private heap. Interface data-word reachability is fully preserved for current Go
+close to the chunk total in this example. Interface data-word reachability is fully preserved for current Go
 versions (1.24+): the runtime's GC bitmap already emits interface data words as ordinary
 pointer slots, so no concrete-type restriction is needed on the data path.
 
@@ -378,3 +380,17 @@ go vet ./...
 ## License
 
 BSD 3-Clause. See [LICENSE](LICENSE).
+
+## Measurement definitions
+
+`reachable_bytes` sums the recorded shallow sizes of the distinct heap objects reachable
+from the union of matching goroutine roots. Each object is counted once per query,
+including through cycles, duplicate references, and interior pointers.
+
+`global_overlap_bytes` sums the intersection with objects reachable from data, bss,
+otherroot, finalizer, and queued-finalizer roots. `system_overlap_bytes` sums the
+intersection with system/background goroutine reachability; it is zero when system
+goroutines participate in matching via `-include-system`, preserving existing behavior.
+These intersections can overlap each other. Separate selectors can reach the same
+objects, so their totals are not additive. Neither subtraction establishes ownership
+or exclusivity relative to all other goroutines.

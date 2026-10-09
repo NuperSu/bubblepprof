@@ -42,7 +42,7 @@ type Graph struct {
 
 // validID reports whether id is a valid index into g.Objects.
 func (g *Graph) validID(id ObjectID) bool {
-	return g != nil && int(id) < len(g.Objects)
+	return g != nil && uint64(id) < uint64(len(g.Objects))
 }
 
 // FindObjectContaining resolves a non-zero pointer value to the object
