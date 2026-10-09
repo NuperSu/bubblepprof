@@ -1,6 +1,7 @@
 package snapshotgraph
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -28,6 +29,14 @@ import (
 // Analysis.Warnings with a "parse: " prefix so downstream consumers see
 // every recoverable problem in one place.
 func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
+	return BuildContext(context.Background(), snap, opts)
+}
+
+// BuildContext is Build with cancellation between objects, roots, and edge batches.
+func BuildContext(ctx context.Context, snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if snap == nil {
 		return nil, fmt.Errorf("snapshotgraph: snapshot is nil")
 	}
@@ -44,6 +53,9 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	zeroAddrWarned := false
 	zeroSizedWarned := false
 	for i := range snap.Objects {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		src := &snap.Objects[i]
 
 		// Address 0 cannot be used for lookup (would alias with nil
@@ -157,9 +169,17 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	}
 	seen := make([]uint32, len(g.Objects))
 	for i := range g.Objects {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fromID := g.Objects[i].ID
 		epoch := uint32(i) + 1
 		for pi, ptr := range snap.Objects[i].PointerAddrs {
+			if pi%1024 == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			a.Stats.RawObjectPointers++
 			if ptr == 0 {
 				a.Stats.ZeroObjectPointers++
@@ -188,11 +208,17 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	}
 
 	for i := range g.Objects {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		a.Stats.Edges += len(g.Objects[i].Children)
 	}
 
 	a.Goroutines = make([]GoroutineReachability, 0, len(snap.Goroutines))
 	for gi := range snap.Goroutines {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		gr := &snap.Goroutines[gi]
 		var roots []RootRef
 		for fi := range gr.Frames {
@@ -202,6 +228,11 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 				frame = &FrameInfo{SP: fr.SP, Depth: fr.Depth, EntryPC: fr.EntryPC, CurrentPC: fr.CurrentPC, ContinuePC: fr.ContinuePC}
 			}
 			for pi, ptr := range fr.PointerAddrs {
+				if pi%1024 == 0 {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+				}
 				if ptr == 0 {
 					continue
 				}
@@ -302,12 +333,21 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	}
 
 	for _, r := range snap.Globals {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		resolveGlobalRoot(r.Kind, r.PointerAddr, r.Addr, r.Description)
 	}
 	for _, seg := range snap.Data {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		addSegmentGlobalRoots(seg, "data", snap.Params.PtrSize, resolveGlobalRoot)
 	}
 	for _, seg := range snap.BSS {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		addSegmentGlobalRoots(seg, "bss", snap.Params.PtrSize, resolveGlobalRoot)
 	}
 	addFinalizerRoot := func(ptr uint64, kind string) {
@@ -322,10 +362,16 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		globalRoots = append(globalRoots, RootRef{ObjectID: targetID, Ptr: ptr, Kind: kind})
 	}
 	for _, fin := range snap.Finalizers {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		addFinalizerRoot(fin.ObjectAddr, "finalizer")
 		addFinalizerRoot(fin.FuncVal, "finalizer")
 	}
 	for _, fin := range snap.QueuedFinalizers {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		addFinalizerRoot(fin.ObjectAddr, "queued_finalizer")
 		addFinalizerRoot(fin.FuncVal, "queued_finalizer")
 	}
@@ -341,10 +387,19 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	a.Stats.Objects = len(g.Objects)
 	var bytes uint64
 	for i := range g.Objects {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if g.Objects[i].Size > math.MaxUint64-bytes {
+			return nil, fmt.Errorf("snapshotgraph: total object bytes overflow uint64")
+		}
 		bytes += g.Objects[i].Size
 	}
 	a.Stats.ObjectBytes = bytes
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return a, nil
 }
 
@@ -434,9 +489,17 @@ func dataSegmentPointerSlots(seg heapsnapshot.DataSegment, ptrSize int) []uint64
 	for _, f := range seg.Fields {
 		switch f.Kind {
 		case heapsnapshot.FieldKindPtr:
-			slots = append(slots, seg.Addr+f.Offset)
+			slot := uint64(0)
+			if f.Offset <= math.MaxUint64-seg.Addr {
+				slot = seg.Addr + f.Offset
+			}
+			slots = append(slots, slot)
 		case heapsnapshot.FieldKindIface, heapsnapshot.FieldKindEface:
-			slots = append(slots, seg.Addr+f.Offset+uint64(ptrSize))
+			slot := uint64(0)
+			if (ptrSize == 4 || ptrSize == 8) && f.Offset <= math.MaxUint64-uint64(ptrSize) && f.Offset+uint64(ptrSize) <= math.MaxUint64-seg.Addr {
+				slot = seg.Addr + f.Offset + uint64(ptrSize)
+			}
+			slots = append(slots, slot)
 		default:
 			continue
 		}

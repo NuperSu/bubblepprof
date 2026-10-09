@@ -5,15 +5,19 @@
 package heapdump
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
 
 // Options controls Parse behavior.
 type Options struct {
+	// Context optionally cancels record parsing and payload reads.
+	Context context.Context
 	// KeepObjectContents retains raw object bytes inside each Object.
 	// Off by default to avoid bringing back the old per-object memory
 	// problem. PointerAddrs is always populated regardless.
@@ -86,11 +90,17 @@ func parseInto(r io.Reader, opts Options, tracker *ContentResolver) (*heapsnapsh
 		opts.MaxMemRangeBytes = DefaultMaxMemRangeBytes
 	}
 
+	if opts.Context != nil {
+		if err := opts.Context.Err(); err != nil {
+			return nil, nil, err
+		}
+	}
 	rd := newReader(r, Limits{
 		MaxStringBytes:  opts.MaxStringBytes,
 		MaxMemRangeSize: opts.MaxMemRangeBytes,
 	})
 
+	rd.ctx = opts.Context
 	p := &parser{
 		r:    rd,
 		opts: opts,
@@ -107,6 +117,11 @@ func parseInto(r io.Reader, opts Options, tracker *ContentResolver) (*heapsnapsh
 	}
 	if err := p.parseRecords(); err != nil {
 		return nil, nil, err
+	}
+	if opts.Context != nil {
+		if err := opts.Context.Err(); err != nil {
+			return nil, nil, err
+		}
 	}
 	if tracker != nil {
 		tracker.finalize()
@@ -356,6 +371,9 @@ func (p *parser) parseObject() error {
 	fields, err := p.r.FieldList()
 	if err != nil {
 		return fmt.Errorf("object fields: %w", err)
+	}
+	if uint64(len(contents)) > math.MaxUint64-addr {
+		return fmt.Errorf("object address range overflows uint64")
 	}
 
 	if !p.haveParams {

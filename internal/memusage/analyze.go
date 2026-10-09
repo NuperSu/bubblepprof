@@ -81,7 +81,7 @@ func parseAndRecoverLabels(
 		recoverer = DefaultLabelRecoverer{}
 	}
 	parseRegion := trace.StartRegion(ctx, "memusage/parse")
-	snap, resolver, err := heapdump.ParseLazyContents(r, ra, heapdump.Options{Strict: true, MaxMemRangeBytes: opts.MaxMemRangeBytes, KeepPointerOffsets: opts.KeepReferenceProvenance})
+	snap, resolver, err := heapdump.ParseLazyContents(r, ra, heapdump.Options{Context: ctx, Strict: true, MaxMemRangeBytes: opts.MaxMemRangeBytes, KeepPointerOffsets: opts.KeepReferenceProvenance})
 	parseRegion.End()
 	if err != nil {
 		return nil, heaplabels.Result{}, Diagnostics{}, &ParseFailedError{Cause: err}

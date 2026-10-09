@@ -2,6 +2,7 @@ package heapdump
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 // memory ranges are length-prefixed by uvarints, and bools are 0/1
 // uvarints. See runtime/heapdump.go for the source of truth.
 type reader struct {
+	ctx    context.Context
 	r      *bufio.Reader
 	limits Limits
 	offset int64
@@ -38,6 +40,11 @@ func newReader(src io.Reader, limits Limits) *reader {
 func (r *reader) Offset() int64 { return r.offset }
 
 func (r *reader) readByte() (byte, error) {
+	if r.ctx != nil {
+		if err := r.ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
 	b, err := r.r.ReadByte()
 	if err == nil {
 		r.offset++
@@ -46,6 +53,11 @@ func (r *reader) readByte() (byte, error) {
 }
 
 func (r *reader) readFull(buf []byte) error {
+	if r.ctx != nil {
+		if err := r.ctx.Err(); err != nil {
+			return err
+		}
+	}
 	n, err := io.ReadFull(r.r, buf)
 	r.offset += int64(n)
 	return err
@@ -193,16 +205,21 @@ func (r *reader) FieldList() ([]heapsnapshot.Field, error) {
 // excluding the newline. It is used for the heap dump header which is
 // not uvarint-encoded.
 func (r *reader) readLine() (string, error) {
-	line, err := r.r.ReadString('\n')
-	r.offset += int64(len(line))
-	if err != nil {
-		if err == io.EOF && line == "" {
+	// The format signature is short. Bound malformed input without ReadString's
+	// unbounded allocation when a file has no newline.
+	line := make([]byte, 0, 32)
+	for len(line) < 1024 {
+		b, err := r.readByte()
+		if err != nil {
+			if err == io.EOF && len(line) > 0 {
+				err = io.ErrUnexpectedEOF
+			}
 			return "", err
 		}
-		if err == io.EOF {
-			return "", io.ErrUnexpectedEOF
+		if b == '\n' {
+			return string(line), nil
 		}
-		return "", err
+		line = append(line, b)
 	}
-	return line[:len(line)-1], nil
+	return "", fmt.Errorf("heap dump header exceeds 1024 bytes")
 }
