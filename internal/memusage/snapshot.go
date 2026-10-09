@@ -57,7 +57,7 @@ func loadSnapshot(ctx context.Context, r io.Reader, ra io.ReaderAt, recoverer La
 	for i := range snap.Objects {
 		snap.Objects[i].Contents = nil
 	}
-	a, err := snapshotgraph.Build(snap, snapshotgraph.Options{})
+	a, err := snapshotgraph.Build(snap, snapshotgraph.Options{KeepProvenance: opts.KeepReferenceProvenance})
 	if err != nil {
 		return nil, fmt.Errorf("build object graph: %w", err)
 	}

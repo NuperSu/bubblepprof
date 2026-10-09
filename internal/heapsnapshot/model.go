@@ -98,6 +98,9 @@ type Object struct {
 
 	Fields       []Field
 	PointerAddrs []uint64
+	// PointerOffsets is parallel to PointerAddrs when requested by the parser.
+	// Offsets identify the pointer slot within this allocation, including data words.
+	PointerOffsets []uint64
 }
 
 // Goroutine is one goroutine record. Frames are filled in as the parser

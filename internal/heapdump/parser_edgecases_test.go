@@ -139,3 +139,38 @@ func hasParseWarning(warnings []string, needle string) bool {
 	}
 	return false
 }
+
+func TestObjectPointerOffsets(t *testing.T) {
+	for _, ptrSize := range []int{4, 8} {
+		var buf bytes.Buffer
+		writeHeader(&buf)
+		writeParams(&buf, heapsnapshot.DumpParams{PtrSize: ptrSize, GOARCH: "test", BuildVersion: "go-test"})
+		contents := make([]byte, ptrSize*4)
+		if ptrSize == 4 {
+			binary.LittleEndian.PutUint32(contents[ptrSize:], 0x2004)
+			binary.LittleEndian.PutUint32(contents[ptrSize*3:], 0x3000)
+		} else {
+			binary.LittleEndian.PutUint64(contents[ptrSize:], 0x2004)
+			binary.LittleEndian.PutUint64(contents[ptrSize*3:], 0x3000)
+		}
+		writeUvarint(&buf, tagObject)
+		writeUvarint(&buf, 0x1000)
+		writeBytes(&buf, contents)
+		writeFieldList(&buf, []heapsnapshot.Field{{Kind: heapsnapshot.FieldKindPtr, Offset: 0}, {Kind: heapsnapshot.FieldKindPtr, Offset: uint64(ptrSize)}, {Kind: heapsnapshot.FieldKindEface, Offset: uint64(ptrSize * 2)}})
+		writeUvarint(&buf, tagEOF)
+		snap, err := Parse(bytes.NewReader(buf.Bytes()), Options{KeepPointerOffsets: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !equalUint64(snap.Objects[0].PointerOffsets, []uint64{uint64(ptrSize), uint64(ptrSize * 3)}) {
+			t.Fatalf("%+v", snap.Objects[0])
+		}
+		plain, err := Parse(bytes.NewReader(buf.Bytes()), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plain.Objects[0].PointerOffsets != nil {
+			t.Fatal("offset retention should be optional")
+		}
+	}
+}

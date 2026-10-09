@@ -152,11 +152,14 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 	// case: at exactly 2^32 objects the final object's epoch wraps to the
 	// zero "unseen" stamp and its duplicate edges are kept; reachability is
 	// unaffected since BFS dedups by ObjectID.)
+	if opts.KeepProvenance {
+		g.References = make([][]Reference, len(g.Objects))
+	}
 	seen := make([]uint32, len(g.Objects))
 	for i := range g.Objects {
 		fromID := g.Objects[i].ID
 		epoch := uint32(i) + 1
-		for _, ptr := range snap.Objects[i].PointerAddrs {
+		for pi, ptr := range snap.Objects[i].PointerAddrs {
 			a.Stats.RawObjectPointers++
 			if ptr == 0 {
 				a.Stats.ZeroObjectPointers++
@@ -168,6 +171,14 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 				continue
 			}
 			a.Stats.ResolvedObjectPointers++
+			if opts.KeepProvenance {
+				ref := Reference{Target: targetID, Pointer: ptr}
+				if pi < len(snap.Objects[i].PointerOffsets) {
+					ref.Offset = snap.Objects[i].PointerOffsets[pi]
+					ref.OffsetKnown = ref.Offset < snap.Objects[i].Size
+				}
+				g.References[fromID] = append(g.References[fromID], ref)
+			}
 			if seen[targetID] == epoch {
 				continue
 			}
@@ -186,6 +197,10 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 		var roots []RootRef
 		for fi := range gr.Frames {
 			fr := &gr.Frames[fi]
+			var frame *FrameInfo
+			if opts.KeepProvenance {
+				frame = &FrameInfo{SP: fr.SP, Depth: fr.Depth, EntryPC: fr.EntryPC, CurrentPC: fr.CurrentPC, ContinuePC: fr.ContinuePC}
+			}
 			for pi, ptr := range fr.PointerAddrs {
 				if ptr == 0 {
 					continue
@@ -205,6 +220,7 @@ func Build(snap *heapsnapshot.HeapSnapshot, opts Options) (*Analysis, error) {
 					SlotAddr: slot,
 					Kind:     "stack",
 					Detail:   fr.FuncName,
+					Frame:    frame,
 				})
 			}
 		}

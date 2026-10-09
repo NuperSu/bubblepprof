@@ -19,6 +19,9 @@ type Options struct {
 	// problem. PointerAddrs is always populated regardless.
 	KeepObjectContents bool
 
+	// KeepPointerOffsets retains object slot offsets for reference explanations.
+	KeepPointerOffsets bool
+
 	// MaxStringBytes is an upper bound on length-prefixed strings such as
 	// function names and wait reasons. Zero uses the parser default.
 	MaxStringBytes uint64
@@ -361,12 +364,16 @@ func (p *parser) parseObject() error {
 		}
 	}
 
-	var pointers []uint64
+	var pointers, offsets []uint64
+	var offsetDest *[]uint64
+	if p.opts.KeepPointerOffsets {
+		offsetDest = &offsets
+	}
 	if p.haveParams {
 		var warnErr error
-		iface, eface := extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, addr,
+		iface, eface := extractPointers(contents, fields, p.snap.Params.PtrSize, p.byteOrder, 0,
 			fmt.Sprintf("object 0x%x", addr),
-			&pointers, nil, func(msg string) {
+			&pointers, offsetDest, func(msg string) {
 				if warnErr == nil {
 					warnErr = p.warn("%s", msg)
 				}
@@ -379,10 +386,11 @@ func (p *parser) parseObject() error {
 	}
 
 	obj := heapsnapshot.Object{
-		Addr:         addr,
-		Size:         uint64(len(contents)),
-		Fields:       fields,
-		PointerAddrs: pointers,
+		Addr:           addr,
+		Size:           uint64(len(contents)),
+		Fields:         fields,
+		PointerAddrs:   pointers,
+		PointerOffsets: offsets,
 	}
 	if p.opts.KeepObjectContents {
 		obj.Contents = contents

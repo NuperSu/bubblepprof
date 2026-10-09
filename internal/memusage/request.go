@@ -28,6 +28,10 @@ type Request struct {
 
 // Options tune the behavior of Compute and ComputeFromAnalysis.
 type Options struct {
+	// KeepReferenceProvenance retains object pointer slots and stack metadata.
+	// Enable for object/path inspection; ordinary queries do not require it.
+	KeepReferenceProvenance bool
+
 	// GCBeforeHeapDump triggers runtime.GC() immediately before
 	// debug.WriteHeapDump in the production capture path. The pure
 	// compute path ignores it.

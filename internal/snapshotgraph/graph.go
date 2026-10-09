@@ -30,10 +30,31 @@ type ObjectRange struct {
 	ID    ObjectID
 }
 
+// Reference preserves one resolved pointer slot. Multiple slots may target the
+// same object; Children remains deduplicated. OffsetKnown distinguishes missing
+// provenance from the valid offset zero.
+type Reference struct {
+	Target      ObjectID
+	Pointer     uint64
+	Offset      uint64
+	OffsetKnown bool
+}
+
+type FrameInfo struct {
+	SP         uint64
+	Depth      uint64
+	EntryPC    uint64
+	CurrentPC  uint64
+	ContinuePC uint64
+}
+
 // Graph holds the compact process-wide object graph.
 type Graph struct {
 	Objects []Object
 	ByAddr  map[uint64]ObjectID
+
+	// References is optional and indexed by source ObjectID.
+	References [][]Reference
 
 	// ranges is sorted by Start. Used by FindObjectContaining for interior
 	// pointer lookups. Zero-sized objects are not in ranges.
@@ -80,6 +101,7 @@ type RootRef struct {
 	SlotAddr uint64
 	Kind     string
 	Detail   string
+	Frame    *FrameInfo
 }
 
 // GoroutineReachability is the reachability set rooted at a single
@@ -175,5 +197,6 @@ type Stats struct {
 
 // Options tunes the builder. Strict turns warnings into errors.
 type Options struct {
-	Strict bool
+	Strict         bool
+	KeepProvenance bool
 }
