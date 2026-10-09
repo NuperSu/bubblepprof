@@ -35,7 +35,18 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 	defer b.Close()
 	s, err := offline.LoadBundle(context.Background(), b, memusage.Options{MaxMemRangeBytes: *max})
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, body := memusage.ErrorResponseFor(err)
+		if *format == "json" {
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			enc.Encode(struct {
+				Capture       any                     `json:"capture"`
+				AnalysisError *memusage.ErrorResponse `json:"analysis_error"`
+			}{b.Meta, body})
+		} else {
+			fmt.Fprintf(stdout, "captured: %s; producer: %s\napplication build: %v\ncapture settings: %v\n", b.Meta.CreatedAt, b.Meta.Producer, b.Meta.ApplicationBuild, b.Meta.CaptureSettings)
+			writeMemUsageOutput(stdout, "text", body)
+		}
 		return exitFailure
 	}
 	defer s.Close()
