@@ -81,3 +81,20 @@ func TestPathLimitsAndInvalidIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestLongWitnessIsIterativeAndSearchBounded(t *testing.T) {
+	const n = 50000
+	g := &Graph{Objects: make([]Object, n)}
+	for i := 0; i < n-1; i++ {
+		g.Objects[i].Children = []ObjectID{ObjectID(i + 1)}
+	}
+	roots := []RootRef{{ObjectID: 0}}
+	w, err := FindPath(context.Background(), g, roots, n-1, 64)
+	if err != nil || w.Found || !w.SearchLimited {
+		t.Fatalf("%+v %v", w, err)
+	}
+	w, err = FindPath(context.Background(), g, roots, n-1, 0)
+	if err != nil || !w.Found || len(w.Objects) != n || w.Objects[n-1] != n-1 {
+		t.Fatalf("found=%t length=%d err=%v", w.Found, len(w.Objects), err)
+	}
+}

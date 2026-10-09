@@ -197,3 +197,26 @@ func TestInspectionValidationAndOverflow(t *testing.T) {
 		t.Fatal("closed snapshot")
 	}
 }
+
+func TestManyGroupMembershipsHaveBoundedOutput(t *testing.T) {
+	const n = 2000
+	g := &snapshotgraph.Graph{Objects: []snapshotgraph.Object{{ID: 0, Addr: 0x1000, Size: 8}}, ByAddr: map[uint64]snapshotgraph.ObjectID{0x1000: 0}}
+	a := &snapshotgraph.Analysis{Graph: g}
+	labels := map[uint64]map[string]string{}
+	for i := 0; i < n; i++ {
+		gid := uint64(i + 1)
+		a.Goroutines = append(a.Goroutines, snapshotgraph.GoroutineReachability{GoroutineID: gid, Roots: []snapshotgraph.RootRef{{ObjectID: 0}}})
+		labels[gid] = map[string]string{"group": fmtGroup(i)}
+	}
+	s := newSnapshot(a, labels, Diagnostics{}, Options{})
+	defer s.Close()
+	req := Request{Labels: labels[1]}
+	objects, err := s.Objects(context.Background(), req, ObjectOptions{By: "group", Limit: 1, GroupLimit: 2})
+	if err != nil || len(objects.Objects) != 1 || objects.Objects[0].GroupCount != n || len(objects.Objects[0].Groups) != 2 || !objects.Objects[0].GroupsTruncated {
+		t.Fatalf("%+v %v", objects, err)
+	}
+	e, err := s.Explain(context.Background(), 0x1000, []Request{req}, ExplainOptions{By: "group", MaxGroups: 2, MaxPaths: 2, MaxSteps: 1})
+	if err != nil || e.Object.GroupCount != n || len(e.Object.Groups) != 2 || len(e.Paths) != 2 || !e.PathsTruncated || e.ReachableSources != n+2 {
+		t.Fatalf("%+v %v", e, err)
+	}
+}

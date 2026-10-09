@@ -3,6 +3,7 @@ package heapdump
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 )
@@ -45,6 +46,20 @@ func extractPointers(
 		return 0, 0
 	}
 
+	record := func(ptr, offset uint64) {
+		if slots != nil {
+			if offset > math.MaxUint64-containerAddr {
+				if warn != nil {
+					warn(fmt.Sprintf("%s: pointer slot address overflows uint64", context))
+				}
+				return
+			}
+			*slots = append(*slots, containerAddr+offset)
+		}
+		if targets != nil {
+			*targets = append(*targets, ptr)
+		}
+	}
 	for _, f := range fields {
 		switch f.Kind {
 		case heapsnapshot.FieldKindPtr:
@@ -56,18 +71,19 @@ func extractPointers(
 				continue
 			}
 			if ptr != 0 {
-				if slots != nil {
-					*slots = append(*slots, containerAddr+f.Offset)
-				}
-				if targets != nil {
-					*targets = append(*targets, ptr)
-				}
+				record(ptr, f.Offset)
 			}
 		case heapsnapshot.FieldKindIface, heapsnapshot.FieldKindEface:
 			if f.Kind == heapsnapshot.FieldKindIface {
 				ifaceDecoded++
 			} else {
 				efaceDecoded++
+			}
+			if f.Offset > math.MaxUint64-uint64(ptrSize) {
+				if warn != nil {
+					warn(fmt.Sprintf("%s: iface/eface data word offset overflows uint64", context))
+				}
+				continue
 			}
 			dataWord, ok := readPointer(contents, f.Offset+uint64(ptrSize), ptrSize, byteOrder)
 			if !ok {
@@ -78,12 +94,7 @@ func extractPointers(
 				continue
 			}
 			if dataWord != 0 {
-				if slots != nil {
-					*slots = append(*slots, containerAddr+f.Offset+uint64(ptrSize))
-				}
-				if targets != nil {
-					*targets = append(*targets, dataWord)
-				}
+				record(dataWord, f.Offset+uint64(ptrSize))
 			}
 		default:
 			if warn != nil {
