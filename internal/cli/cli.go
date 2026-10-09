@@ -28,6 +28,9 @@ const usage = `bubblepprof is the external analyser for bubblepprof bundles.
 
 Usage:
 
+  bubblepprof export capture.tar --labels k=v --format pprof -o profile.pb.gz
+        Export synthetic reachability summaries; --format json for native metrics.
+
   bubblepprof diff before.tar after.tar --by key [--format json]
   bubblepprof diff before.tar after.tar --labels k=v
   bubblepprof diff before.tar after.tar --a k=v --b k=v
@@ -111,6 +114,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch args[0] {
+	case "export":
+		return runExport(args[1:], stdout, stderr)
 	case "diff":
 		return runDiff(args[1:], stdout, stderr)
 	case "fetch":
