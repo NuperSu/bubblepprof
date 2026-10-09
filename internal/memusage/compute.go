@@ -260,6 +260,14 @@ func ComputeFromAnalysis(
 	diag Diagnostics,
 	opts Options,
 ) (*Response, error) {
+	return computeFromAnalysis(req, analysis, labelsByGID, diag, opts, nil, nil)
+}
+
+type invariantReach struct {
+	global, system map[snapshotgraph.ObjectID]struct{}
+}
+
+func computeFromAnalysis(req Request, analysis *snapshotgraph.Analysis, labelsByGID map[uint64]map[string]string, diag Diagnostics, opts Options, cache *invariantReach, candidates map[uint64]struct{}) (*Response, error) {
 	if verr := ValidateRequest(&req, opts); verr != nil {
 		return nil, verr
 	}
@@ -291,6 +299,11 @@ func ComputeFromAnalysis(
 		}
 		eligibleGIDs[gr.GoroutineID] = struct{}{}
 		have := labelsByGID[gr.GoroutineID]
+		if candidates != nil {
+			if _, ok := candidates[gr.GoroutineID]; !ok {
+				continue
+			}
+		}
 		if !LabelsMatch(have, req.Labels) {
 			continue
 		}
@@ -315,9 +328,23 @@ func ComputeFromAnalysis(
 	// alone can be large.
 	var systemReach, globalReach map[snapshotgraph.ObjectID]struct{}
 	if len(union) > 0 {
-		globalReach = snapshotgraph.ReachableFrom(g, analysis.Globals.Roots)
+		if cache != nil && cache.global != nil {
+			globalReach = cache.global
+		} else {
+			globalReach = snapshotgraph.ReachableFrom(g, analysis.Globals.Roots)
+			if cache != nil {
+				cache.global = globalReach
+			}
+		}
 		if !opts.IncludeSystemGoroutines && len(systemGoroutines) > 0 {
-			systemReach = reachableFromGoroutines(g, systemGoroutines)
+			if cache != nil && cache.system != nil {
+				systemReach = cache.system
+			} else {
+				systemReach = reachableFromGoroutines(g, systemGoroutines)
+				if cache != nil {
+					cache.system = systemReach
+				}
+			}
 		}
 	}
 

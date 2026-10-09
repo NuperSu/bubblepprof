@@ -10,7 +10,6 @@ import (
 	"github.com/NuperSu/bubblepprof/internal/heapdump"
 	"github.com/NuperSu/bubblepprof/internal/heaplabels"
 	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
-	"github.com/NuperSu/bubblepprof/internal/snapshotgraph"
 )
 
 // AnalyzeDump runs the analyse side of the /debug/memusage pipeline
@@ -61,49 +60,12 @@ func analyzeDump(
 	if verr := ValidateRequest(&req, opts); verr != nil {
 		return nil, verr
 	}
-	if recoverer == nil {
-		recoverer = DefaultLabelRecoverer{}
-	}
-
-	snap, result, diag, err := parseAndRecoverLabels(ctx, r, ra, recoverer, extra, extraWarnings, opts)
+	session, err := loadSnapshot(ctx, r, ra, recoverer, extra, extraWarnings, opts)
 	if err != nil {
 		return nil, err
 	}
-	if diag.UnsupportedRuntime {
-		return nil, &UnsupportedRuntimeError{GoVersion: diag.GoVersion, GOARCH: diag.GOARCH}
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	// Drop per-object content bytes now that label recovery has consumed
-	// them. snapshotgraph.Build never reads Contents — only PointerAddrs,
-	// Addr, Size. Nilling out here lets the GC reclaim ~the workload's
-	// heap worth of bytes before Build allocates the graph.
-	for i := range snap.Objects {
-		snap.Objects[i].Contents = nil
-	}
-
-	buildRegion := trace.StartRegion(ctx, "memusage/build")
-	analysis, err := snapshotgraph.Build(snap, snapshotgraph.Options{})
-	buildRegion.End()
-	if err != nil {
-		return nil, fmt.Errorf("build object graph: %w", err)
-	}
-
-	// Past this point only the graph is consulted; drop the per-object
-	// PointerAddrs slices so ComputeFromAnalysis runs against the graph
-	// alone.
-	for i := range snap.Objects {
-		snap.Objects[i].PointerAddrs = nil
-	}
-	snap = nil
-
-	computeRegion := trace.StartRegion(ctx, "memusage/compute_from_analysis")
-	resp, err := ComputeFromAnalysis(req, analysis, result.LabelsByGID, diag, opts)
-	computeRegion.End()
-	return resp, err
+	defer session.Close()
+	return session.Query(ctx, req)
 }
 
 func parseAndRecoverLabels(
