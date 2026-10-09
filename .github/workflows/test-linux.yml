@@ -15,7 +15,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.3'
+          go-version: '1.26.9'
           cache: false
 
       - name: Check gofmt
@@ -38,67 +38,17 @@ jobs:
         include:
 
           # ── linux/amd64 ────────────────────────────────────────────────────
-          - {go: '1.24.0',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.1',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.2',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.3',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.4',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.5',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.6',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.7',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.8',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.9',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.10', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.11', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.12', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.24.13', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.0',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.1',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.2',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.3',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.4',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.5',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.6',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.7',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.8',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.9',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.25.10', runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.26.0',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.26.1',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.26.2',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
-          - {go: '1.26.3',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.24.13',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.25.14',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.26.9',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
+          - {go: '1.27.2',  runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: true}
           - {go: tip,       runner: ubuntu-latest, goos: linux, goarch: amd64, label: linux-amd64, required: false}
 
           # ── linux/arm64 (native arm64 runner) ─────────────────────────────
-          - {go: '1.24.0',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.1',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.2',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.3',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.4',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.5',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.6',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.7',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.8',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.9',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.10', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.11', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.12', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.24.13', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.0',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.1',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.2',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.3',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.4',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.5',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.6',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.7',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.8',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.9',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.25.10', runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.26.0',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.26.1',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.26.2',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
-          - {go: '1.26.3',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.24.13',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.25.14',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.26.9',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
+          - {go: '1.27.2',  runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: true}
           - {go: tip,       runner: ubuntu-22.04-arm, goos: linux, goarch: arm64, label: linux-arm64, required: false}
 
           # ── linux/386 ──────────────────────────────────────────────────────
@@ -106,35 +56,10 @@ jobs:
           # 32-bit Linux is not supported by Go's internal linker). The 32-bit
           # x86 toolchain (gcc-multilib + libc6-dev-i386) is installed below;
           # the resulting 32-bit ELF runs natively on x86-64 via IA-32 emulation.
-          - {go: '1.24.0',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.1',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.2',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.3',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.4',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.5',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.6',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.7',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.8',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.9',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.10', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.11', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.12', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.24.13', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.0',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.1',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.2',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.3',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.4',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.5',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.6',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.7',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.8',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.9',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.25.10', runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.26.0',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.26.1',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.26.2',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
-          - {go: '1.26.3',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
+          - {go: '1.24.13',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
+          - {go: '1.25.14',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
+          - {go: '1.26.9',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
+          - {go: '1.27.2',  runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: true}
           - {go: tip,       runner: ubuntu-latest, goos: linux, goarch: '386', label: linux-386, required: false}
 
           # ── linux/arm ARMv7 via QEMU user-space ───────────────────────────
@@ -143,35 +68,10 @@ jobs:
           # cgo is enabled (PIE on 32-bit Linux needs the external linker);
           # the arm cross-toolchain is installed below and QEMU_LD_PREFIX is
           # set in the Test step so the runtime loader finds the cross sysroot.
-          - {go: '1.24.0',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.1',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.2',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.3',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.4',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.5',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.6',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.7',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.8',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.9',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.10', runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.11', runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.12', runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.24.13', runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.0',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.1',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.2',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.3',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.4',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.5',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.6',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.7',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.8',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.9',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.25.10', runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.26.0',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.26.1',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.26.2',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
-          - {go: '1.26.3',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
+          - {go: '1.24.13',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
+          - {go: '1.25.14',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
+          - {go: '1.26.9',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
+          - {go: '1.27.2',  runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: true}
           - {go: tip,       runner: ubuntu-latest, goos: linux, goarch: arm, goarm: '7', label: linux-arm, qemu: true, required: false}
 
     steps:
