@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
 	"github.com/NuperSu/bubblepprof/internal/memusage"
@@ -25,6 +26,9 @@ type CaptureOptions struct {
 	// GCBeforeHeapDump triggers runtime.GC() before the dump so the
 	// bundle reflects live memory rather than floating garbage.
 	GCBeforeHeapDump bool
+	// Optional standard profiles are collected after the heap dump.
+	IncludeHeapProfile      bool
+	IncludeGoroutineProfile bool
 	// DisableRodata skips the read-only segment snapshot; literal pprof
 	// label strings then surface as string_missing during analysis.
 	DisableRodata bool
@@ -46,11 +50,13 @@ type CaptureOptions struct {
 // are read-only program data, so the two views are consistent without
 // stopping the world twice.
 func CaptureSelf(ctx context.Context, w io.Writer, opts CaptureOptions) error {
+	dumpStart := time.Now().UTC().Format(time.RFC3339Nano)
 	path, cleanup, err := memusage.RuntimeHeapDumpCapturer{}.CaptureHeapDump(ctx, opts.GCBeforeHeapDump)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+	dumpEnd := time.Now().UTC().Format(time.RFC3339Nano)
 
 	dump, err := os.Open(path)
 	if err != nil {
@@ -79,6 +85,27 @@ func CaptureSelf(ctx context.Context, w io.Writer, opts CaptureOptions) error {
 		HeapDumpSize: st.Size(),
 	}
 
+	in.Meta.HeapDumpStartedAt = dumpStart
+	in.Meta.HeapDumpFinishedAt = dumpEnd
+	in.Profiles = map[string][]byte{}
+	in.Meta.Profiles = map[string]ProfileMeta{}
+	for _, spec := range []struct {
+		enabled bool
+		member  string
+	}{{opts.IncludeHeapProfile, HeapProfileMember}, {opts.IncludeGoroutineProfile, GoroutineProfileMember}} {
+		if !spec.enabled {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		data, meta, err := collectProfile(profileKind(spec.member))
+		if err != nil {
+			return err
+		}
+		in.Profiles[spec.member] = data
+		in.Meta.Profiles[spec.member] = meta
+	}
 	budget := opts.MaxRodataBytes
 	if budget <= 0 {
 		budget = DefaultMaxRodataBytes

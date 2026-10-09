@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 )
 
@@ -26,6 +27,7 @@ type WriteInput struct {
 	Segments     []Segment
 	HeapDump     io.Reader
 	HeapDumpSize int64
+	Profiles     map[string][]byte
 }
 
 // Write streams a format-version-1 bundle tar to w: meta.json, then
@@ -45,6 +47,27 @@ func Write(w io.Writer, in WriteInput) error {
 		meta.Rodata.TotalBytes += s.Size
 	}
 
+	profileNames := []string{}
+	for name := range in.Profiles {
+		if profileKind(name) == "" {
+			return fmt.Errorf("bundle: unsupported profile member %q", name)
+		}
+		profileNames = append(profileNames, name)
+	}
+	sort.Strings(profileNames)
+	if len(profileNames) > 0 {
+		// Clone metadata before filling kind fields so callers retain their maps.
+		profiles := map[string]ProfileMeta{}
+		for k, v := range meta.Profiles {
+			profiles[k] = v
+		}
+		for _, name := range profileNames {
+			m := profiles[name]
+			m.Kind = profileKind(name)
+			profiles[name] = m
+		}
+		meta.Profiles = profiles
+	}
 	tw := tar.NewWriter(w)
 
 	metaBytes, err := json.MarshalIndent(&meta, "", "  ")
@@ -84,6 +107,11 @@ func Write(w io.Writer, in WriteInput) error {
 		}
 	}
 
+	for _, name := range profileNames {
+		if err := writeMember(tw, name, in.Profiles[name]); err != nil {
+			return err
+		}
+	}
 	if err := writeHeader(tw, HeapDumpMember, in.HeapDumpSize); err != nil {
 		return err
 	}

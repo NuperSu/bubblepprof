@@ -12,7 +12,8 @@ import (
 
 // Bundle is an opened capture artifact ready for analysis.
 type Bundle struct {
-	Meta Meta
+	Meta     Meta
+	Profiles map[string][]byte
 	// HeapDumpPath is the heap dump extracted to a temp file (removed
 	// by Close).
 	HeapDumpPath string
@@ -42,6 +43,7 @@ func (b *Bundle) Close() error {
 // ReaderOptions bounds members retained in memory. Zero selects the default.
 // Heap dumps are streamed to disk and are not subject to these limits.
 type ReaderOptions struct {
+	MaxProfileBytes      int64 // aggregate standard profiles; default 64 MiB
 	MaxRodataBytes       int64 // aggregate segment bytes; default 256 MiB
 	MaxMetadataBytes     int64 // meta.json; default 16 MiB
 	MaxSegmentIndexBytes int64 // rodata/segments.json; default 16 MiB
@@ -61,7 +63,7 @@ func Open(r io.Reader) (*Bundle, error) {
 
 // OpenWithOptions reads a bundle with configurable in-memory member limits.
 func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
-	if opts.MaxRodataBytes < 0 || opts.MaxMetadataBytes < 0 || opts.MaxSegmentIndexBytes < 0 {
+	if opts.MaxProfileBytes < 0 || opts.MaxRodataBytes < 0 || opts.MaxMetadataBytes < 0 || opts.MaxSegmentIndexBytes < 0 {
 		return nil, fmt.Errorf("bundle: reader limits must be non-negative")
 	}
 	if opts.MaxRodataBytes == 0 {
@@ -73,6 +75,11 @@ func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
 	if opts.MaxSegmentIndexBytes == 0 {
 		opts.MaxSegmentIndexBytes = DefaultMaxSegmentIndexBytes
 	}
+	if opts.MaxProfileBytes == 0 {
+		opts.MaxProfileBytes = DefaultMaxProfileBytes
+	}
+	profiles := map[string][]byte{}
+	var profileBytes int64
 	seen := make(map[string]bool)
 	var rodataBytes int64
 	var (
@@ -99,7 +106,7 @@ func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
 			return nil, fmt.Errorf("bundle: read tar: %w", err)
 		}
 		isSegment := strings.HasPrefix(hdr.Name, segmentMemberPrefix) && strings.HasSuffix(hdr.Name, segmentMemberSuffix)
-		recognized := hdr.Name == MetaMember || hdr.Name == SegmentsMember || hdr.Name == HeapDumpMember || isSegment
+		recognized := hdr.Name == MetaMember || hdr.Name == SegmentsMember || hdr.Name == HeapDumpMember || isSegment || profileKind(hdr.Name) != ""
 		if recognized {
 			if seen[hdr.Name] {
 				cleanupDump()
@@ -112,12 +119,17 @@ func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
 				limit = opts.MaxMetadataBytes
 			case hdr.Name == SegmentsMember:
 				limit = opts.MaxSegmentIndexBytes
+			case profileKind(hdr.Name) != "":
+				limit = opts.MaxProfileBytes - profileBytes
 			case isSegment:
 				limit = opts.MaxRodataBytes - rodataBytes
 			}
 			if hdr.Name != HeapDumpMember && (hdr.Size > limit || uint64(hdr.Size) > uint64(^uint(0)>>1)) {
 				cleanupDump()
 				return nil, fmt.Errorf("bundle: %s size %d exceeds limit %d or platform allocation bound", hdr.Name, hdr.Size, limit)
+			}
+			if profileKind(hdr.Name) != "" {
+				profileBytes += hdr.Size
 			}
 			if isSegment {
 				rodataBytes += hdr.Size
@@ -149,6 +161,13 @@ func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
 				return nil, fmt.Errorf("bundle: extract %s: %w", HeapDumpMember, errors.Join(copyErr, closeErr))
 			}
 			dumpPresent = true
+		case profileKind(hdr.Name) != "":
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				cleanupDump()
+				return nil, fmt.Errorf("bundle: read profile: %w", err)
+			}
+			profiles[hdr.Name] = data
 		case isSegment:
 			data, err := io.ReadAll(tr)
 			if err != nil {
@@ -178,7 +197,7 @@ func OpenWithOptions(r io.Reader, opts ReaderOptions) (*Bundle, error) {
 		return nil, fmt.Errorf("bundle: missing %s member", HeapDumpMember)
 	}
 
-	b := &Bundle{Meta: *meta, HeapDumpPath: dumpPath}
+	b := &Bundle{Profiles: profiles, Meta: *meta, HeapDumpPath: dumpPath}
 	b.Warnings = append(b.Warnings, meta.Warnings...)
 
 	if len(infos) > 0 {

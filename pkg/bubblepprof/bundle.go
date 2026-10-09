@@ -59,6 +59,10 @@ type BundleOptions struct {
 	// Segments that do not fit are dropped and the bundle's rodata
 	// status is recorded as "truncated".
 	MaxRodataBytes int64
+
+	// Include optional standard pprof profiles, collected after the heap dump.
+	IncludeHeapProfile      bool
+	IncludeGoroutineProfile bool
 }
 
 // BundleHandler returns an http.Handler that serves
@@ -94,10 +98,12 @@ func BundleHandlerWithOptions(opts BundleOptions) http.Handler {
 func bundleHandler(opts BundleOptions, sem chan struct{}) http.Handler {
 	return bundle.Handler(bundle.HandlerOptions{
 		Capture: bundle.CaptureOptions{
-			GCBeforeHeapDump: !opts.DisableGCBeforeHeapDump,
-			DisableRodata:    opts.DisableRodataCapture,
-			MaxRodataBytes:   opts.MaxRodataBytes,
-			Producer:         producer(),
+			GCBeforeHeapDump:        !opts.DisableGCBeforeHeapDump,
+			DisableRodata:           opts.DisableRodataCapture,
+			MaxRodataBytes:          opts.MaxRodataBytes,
+			Producer:                producer(),
+			IncludeHeapProfile:      opts.IncludeHeapProfile,
+			IncludeGoroutineProfile: opts.IncludeGoroutineProfile,
 		},
 		Semaphore: sem,
 	})

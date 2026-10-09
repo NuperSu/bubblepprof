@@ -58,8 +58,11 @@ type Meta struct {
 	PtrSize   int    `json:"ptr_size"`
 	BigEndian bool   `json:"big_endian"`
 
-	ApplicationBuild *ApplicationBuild `json:"application_build,omitempty"`
-	CaptureSettings  *CaptureSettings  `json:"capture_settings,omitempty"`
+	HeapDumpStartedAt  string                 `json:"heap_dump_started_at,omitempty"`
+	HeapDumpFinishedAt string                 `json:"heap_dump_finished_at,omitempty"`
+	Profiles           map[string]ProfileMeta `json:"profiles,omitempty"`
+	ApplicationBuild   *ApplicationBuild      `json:"application_build,omitempty"`
+	CaptureSettings    *CaptureSettings       `json:"capture_settings,omitempty"`
 
 	Rodata   RodataMeta `json:"rodata"`
 	Warnings []string   `json:"warnings"`
