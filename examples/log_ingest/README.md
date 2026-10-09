@@ -8,7 +8,7 @@ is exactly what `POST /debug/memusage` answers.
 ## What it does
 
 One long-lived **ingester goroutine per `(tenant, stream, shard)`**. Each ingester
-**privately** owns a ring of in-memory log chunks, held only on its own goroutine stack —
+keeps references to a ring of in-memory log chunks, held only on its own goroutine stack —
 no chunk is shared between workloads. Every ingester also references **one** process-wide
 interned-label dictionary, which is the *only* shared memory in the program and therefore
 the only source of `global_overlap`.
@@ -66,7 +66,7 @@ go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 | `-dict-mb` | `160` | shared interned-dictionary size, in MiB |
 | `-duration` | `0` | how long to run; `0` means until Ctrl+C / SIGTERM |
 
-Ingester count = `tenants × streams × shards`. Per-ingester private heap ≈ `ring × chunk-kb`.
+Ingester count = `tenants × streams × shards`. Per-ingester chunk memory ≈ `ring × chunk-kb`.
 Total private ≈ `ingesters × ring × chunk-kb`; total live ≈ that plus `dict-mb`.
 
 ## Labels
@@ -146,10 +146,10 @@ q '{"labels":{"tenant":"nonexistent"}}'
 | `matched_goroutines` | how many ingesters matched (`streams × shards` for a single tenant) |
 | `reachable_bytes` | matched ingesters' private chunks **plus** the shared dictionary |
 | `global_overlap_bytes` | the shared dictionary (constant across tenant/stream/shard selectors) |
-| **private heap** | compute it yourself: `reachable_bytes − global_overlap_bytes` |
+| **difference** | `reachable_bytes − global_overlap_bytes`; approximates chunk memory in this isolated demo |
 
 Example progression from a small run (`-dict-mb 32 -ring 8 -chunk-kb 256`), shown as
-`matched / reachable / global_overlap / private` in MiB:
+`matched / reachable / global_overlap / difference` in MiB:
 
 ```
 {tenant:atlas-bikes}              -> 4 / 41 / 33 /  8
@@ -163,15 +163,16 @@ Example progression from a small run (`-dict-mb 32 -ring 8 -chunk-kb 256`), show
 
 The example deliberately:
 
-- uses **only concrete types** on the data path — bubblepprof does not decode `iface`/`eface`
-  pointer fields into graph edges, so interface-only references would be under-counted;
+- uses concrete types on the data path; current Go runtime GC bitmaps also preserve
+  interface data words as ordinary pointer slots;
 - sets **no `runtime.SetFinalizer`** on chunks — a finalizer registers its object as a global
-  root, which would wrongly pull private chunks into `global_overlap`;
+  root, which correctly includes those chunks in `global_overlap`;
 - keeps each chunk ring reachable **only** from its ingester goroutine's stack, never from a
   shared registry.
 
-Those three choices are what make `reachable_bytes − global_overlap_bytes` a faithful measure
-of per-selector private heap.
+These choices make the difference approximate chunk memory in this isolated example.
+In general, subtracting global overlap does not measure exclusive memory: other ordinary
+goroutines can still reach the same objects. Query totals are not additive.
 
 > Note: `matched_goroutines` for the broad `{"service":"log-ingester"}` query can exceed the
 > ingester count — `net/http` spawns per-connection handler goroutines from inside the labeled

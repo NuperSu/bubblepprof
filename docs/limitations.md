@@ -29,13 +29,13 @@ Heap-allocated label strings (e.g., from `strings.Clone("value")`) do not requir
 
 `reachable_bytes` is the **sum of shallow sizes** of heap objects reachable from matched goroutine roots. Each object is counted once. The size is the object's own footprint — not the transitive size of everything it points to.
 
-This is consistent with how `runtime.MemStats` counts objects, but it means that two goroutines sharing a large buffer will each appear to "reach" the full buffer; the overlap is reported in `global_overlap_bytes` / `system_overlap_bytes`, not subtracted from `reachable_bytes`.
+This is consistent with how `runtime.MemStats` counts objects, but it means that two goroutines sharing a large buffer will each appear to "reach" the full buffer; overlap with global or system roots is reported separately. Sharing between ordinary goroutines is included in each query but is not measured by those two overlap metrics.
 
 ## Global and system overlap is not subtracted
 
 Objects reachable from both a matched goroutine and from global roots (data segment, BSS, finalizers) or system goroutines are included in `reachable_bytes` **and** reported in `global_overlap_bytes` / `system_overlap_bytes`. The endpoint does not automatically attribute shared objects to one owner.
 
-Callers that want exclusive attribution must subtract overlap manually or implement a more sophisticated ownership model.
+Subtracting global or system overlap does not establish exclusive reachability: other ordinary goroutines may also reach the objects. Exclusive reachability requires comparing against all other modeled roots. Go does not provide object ownership.
 
 ## Stop-the-world cost
 
