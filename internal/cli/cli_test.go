@@ -199,9 +199,9 @@ func TestBundleURL(t *testing.T) {
 }
 
 // TestFetchEndToEnd drives the fetch subcommand against a stub server
-// (the bundle bytes are opaque to fetch, so no real capture is needed).
+// (a structurally valid synthetic bundle needs no real capture).
 func TestFetchEndToEnd(t *testing.T) {
-	payload := []byte("not-really-a-tar-but-fetch-does-not-care")
+	payload := validDownloadBundle(t)
 	var gotPath, gotGC string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path

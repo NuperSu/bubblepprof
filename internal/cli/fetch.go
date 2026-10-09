@@ -22,9 +22,10 @@ func runFetch(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("o", "", "output file (default bubblepprof-<host>-<unixtime>.tar; \"-\" writes to stdout)")
 	gc := fs.Bool("gc", true, "run a garbage collection in the target before the heap dump")
+	maxBytes := fs.Int64("max-bytes", 0, "maximum downloaded artifact bytes (0 is unlimited)")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total request timeout")
 	target, err := parseWithOneArg(fs, args)
-	if err != nil {
+	if err != nil || *maxBytes < 0 || *timeout <= 0 {
 		fmt.Fprintln(stderr, "bubblepprof fetch: exactly one target URL is required")
 		fs.Usage()
 		return exitUsage
@@ -40,21 +41,37 @@ func runFetch(args []string, stdout, stderr io.Writer) int {
 	defer body.Close()
 
 	name := *out
+	if name == "" {
+		name = fmt.Sprintf("bubblepprof-%s-%d.tar", host, time.Now().Unix())
+	}
+	dir := ""
+	if name != "-" {
+		dir = filepath.Dir(name)
+	}
+	staged, err := stageDownload(dir, body, *maxBytes)
+	if err != nil {
+		fmt.Fprintf(stderr, "bubblepprof fetch: download: %v\n", err)
+		return exitFailure
+	}
+	defer os.Remove(staged.Name())
+	defer staged.Close()
 	if name == "-" {
-		if _, err := io.Copy(stdout, body); err != nil {
-			fmt.Fprintf(stderr, "bubblepprof fetch: download: %v\n", err)
+		if _, err := io.Copy(stdout, staged); err != nil {
+			fmt.Fprintln(stderr, err)
 			return exitFailure
 		}
 	} else {
-		if name == "" {
-			name = fmt.Sprintf("bubblepprof-%s-%d.tar", host, time.Now().Unix())
+		if err := staged.Close(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitFailure
 		}
-		if err := saveDownload(name, body); err != nil {
-			fmt.Fprintf(stderr, "bubblepprof fetch: download: %v\n", err)
+		if err := os.Rename(staged.Name(), name); err != nil {
+			fmt.Fprintln(stderr, err)
 			return exitFailure
 		}
 		fmt.Fprintf(stderr, "wrote %s\n", name)
 	}
+
 	return exitOK
 }
 
