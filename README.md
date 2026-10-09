@@ -430,3 +430,22 @@ information is unavailable in the current bundle format. Validation status `pars
 means the parser accepted the dump; `diagnostics_present` calls for inspection of the
 warnings, label recovery, and unresolved reference counters. Neither status guarantees
 that all process references were represented by the runtime dump.
+
+### Multi-bubble reachability
+
+```sh
+bubblepprof top capture.tar --by tenant --sort shared
+bubblepprof compare capture.tar --a tenant=atlas-bikes --b tenant=globex
+bubblepprof exclusive capture.tar --labels tenant=atlas-bikes
+bubblepprof shared capture.tar --a tenant=atlas-bikes --b tenant=globex --limit 20
+```
+
+Use `--format json` for capture metadata, diagnostics, object counts, and byte
+counts. Ranking distinguishes exclusive reachability, sharing with other bubbles,
+and overlap with globals, system, and ungrouped roots. Pairwise comparison reports
+exact differences, intersection, and union, including overlapping goroutine
+selections. Shared-object listings include IDs, addresses, sizes, and reference
+counts. Group totals are not additive and do not imply ownership.
+
+See [multi-bubble analysis](docs/multi-bubble-analysis.md) for selector syntax,
+root definitions, detailed categories, limits, and reusable session behavior.
