@@ -16,12 +16,13 @@ import (
 func runBubbles(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("bubbles", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	format := fs.String("format", "json", "json or text")
 	maxMemRange := fs.Uint64("max-mem-range-bytes", 0, "maximum bytes per heap memory record (0 uses 1 GiB)")
 	includeSystem := fs.Bool("include-system", false, "include system/background goroutines")
 	gc := fs.Bool("gc", true, "when fetching from a URL, run a garbage collection in the target before the heap dump")
 	timeout := fs.Duration("timeout", 5*time.Minute, "total fetch timeout when the argument is a URL")
 	target, err := parseWithOneArg(fs, args)
-	if err != nil {
+	if err != nil || (*format != "text" && *format != "json") {
 		fmt.Fprintln(stderr, "bubblepprof bubbles: exactly one bundle file or target URL is required")
 		fs.Usage()
 		return exitUsage
@@ -43,7 +44,13 @@ func runBubbles(args []string, stdout, stderr io.Writer) int {
 		writeIndentedJSON(stdout, body)
 		return exitFailure
 	}
-	writeIndentedJSON(stdout, resp)
+	if *format == "json" {
+		writeIndentedJSON(stdout, resp)
+	} else {
+		for _, group := range resp.Bubbles {
+			fmt.Fprintf(stdout, "%s: %d goroutines\n", selectorText(group.Labels), group.GoroutineCount)
+		}
+	}
 	return exitOK
 }
 

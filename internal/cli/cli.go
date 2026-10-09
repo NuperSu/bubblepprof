@@ -28,6 +28,15 @@ const usage = `bubblepprof is the external analyser for bubblepprof bundles.
 
 Usage:
 
+  bubblepprof inspect <bundle-file-or-url> [--format text|json]
+        Inspect capture/build metadata and analysis completeness diagnostics.
+
+  bubblepprof labels <bundle-file-or-url> [--format text|json]
+        List exact label sets (alias for bubbles; JSON by default).
+
+  bubblepprof query <bundle-file-or-url> --labels k=v [--format text|json]
+        Query reachable memory (alias for memusage; JSON by default).
+
   bubblepprof export capture.tar --labels k=v --format pprof -o profile.pb.gz
         Export synthetic reachability summaries; --format json for native metrics.
 
@@ -109,6 +118,13 @@ func parseWithOneArg(fs *flag.FlagSet, args []string) (string, error) {
 // implementation behind cmd/bubblepprof, kept here so tests can drive
 // it in-process.
 func Main(args []string, stdout, stderr io.Writer) int {
+	code := runMain(args, stdout, stderr)
+	if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") && code == exitUsage {
+		return exitOK
+	}
+	return code
+}
+func runMain(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return exitUsage
@@ -120,7 +136,9 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return runDiff(args[1:], stdout, stderr)
 	case "fetch":
 		return runFetch(args[1:], stdout, stderr)
-	case "memusage":
+	case "inspect":
+		return runInspect(args[1:], stdout, stderr)
+	case "memusage", "query":
 		return runMemUsage(args[1:], stdout, stderr)
 	case "objects", "explain":
 		return runInspection(args[0], args[1:], stdout, stderr)
@@ -128,7 +146,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return runMultiBubble(args[0], args[1:], stdout, stderr)
 	case "explore":
 		return runExplore(args[1:], stdout, stderr)
-	case "bubbles":
+	case "bubbles", "labels":
 		return runBubbles(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
