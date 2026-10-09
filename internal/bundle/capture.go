@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
 	"github.com/NuperSu/bubblepprof/internal/memusage"
@@ -78,6 +79,18 @@ func CaptureSelf(ctx context.Context, w io.Writer, opts CaptureOptions) error {
 		HeapDumpSize: st.Size(),
 	}
 
+	budget := opts.MaxRodataBytes
+	if budget <= 0 {
+		budget = DefaultMaxRodataBytes
+	}
+	in.Meta.CaptureSettings = &CaptureSettings{opts.GCBeforeHeapDump, opts.DisableRodata, budget}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		build := &ApplicationBuild{Path: info.Path, MainVersion: info.Main.Version, Settings: map[string]string{}}
+		for _, setting := range info.Settings {
+			build.Settings[setting.Key] = setting.Value
+		}
+		in.Meta.ApplicationBuild = build
+	}
 	var procReader *addrspace.ProcessReader
 	if opts.DisableRodata {
 		in.Meta.Rodata = RodataMeta{Status: RodataDisabled, Reason: "disabled by options"}

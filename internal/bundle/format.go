@@ -58,6 +58,9 @@ type Meta struct {
 	PtrSize   int    `json:"ptr_size"`
 	BigEndian bool   `json:"big_endian"`
 
+	ApplicationBuild *ApplicationBuild `json:"application_build,omitempty"`
+	CaptureSettings  *CaptureSettings  `json:"capture_settings,omitempty"`
+
 	Rodata   RodataMeta `json:"rodata"`
 	Warnings []string   `json:"warnings"`
 }
@@ -116,4 +119,16 @@ func (h *HexUint64) UnmarshalJSON(data []byte) error {
 	}
 	*h = HexUint64(v)
 	return nil
+}
+
+// Optional metadata is absent in older version-1 bundles.
+type ApplicationBuild struct {
+	Path        string            `json:"path"`
+	MainVersion string            `json:"main_version"`
+	Settings    map[string]string `json:"settings"`
+}
+type CaptureSettings struct {
+	GCBeforeHeapDump bool  `json:"gc_before_heap_dump"`
+	DisableRodata    bool  `json:"disable_rodata"`
+	MaxRodataBytes   int64 `json:"max_rodata_bytes"`
 }
