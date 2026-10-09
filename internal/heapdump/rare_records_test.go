@@ -162,6 +162,9 @@ func TestParseMemProfWithFrames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	if len(snap.MemProfiles) != 1 || snap.MemProfiles[0].Bucket == 0 {
+		t.Fatal("missing profile evidence")
+	}
 	if snap.Stats.MemProfCount != 1 {
 		t.Fatalf("MemProfCount = %d", snap.Stats.MemProfCount)
 	}
@@ -185,6 +188,9 @@ func TestParseMemProfZeroFrames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	if len(snap.MemProfiles) != 1 || snap.MemProfiles[0].Bucket == 0 {
+		t.Fatal("missing profile evidence")
+	}
 	if snap.Stats.MemProfCount != 1 {
 		t.Fatalf("MemProfCount = %d", snap.Stats.MemProfCount)
 	}
@@ -204,6 +210,9 @@ func TestParseAllocSample(t *testing.T) {
 	snap, err := Parse(buf, Options{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.AllocationSamples) != 1 || snap.AllocationSamples[0].Address != 0xabcd || snap.AllocationSamples[0].Bucket != 0xdef0 {
+		t.Fatal("missing allocation sample")
 	}
 	if snap.Stats.AllocSampleCount != 1 {
 		t.Fatalf("AllocSampleCount = %d", snap.Stats.AllocSampleCount)

@@ -44,10 +44,12 @@ type HeapSnapshot struct {
 	Data       []DataSegment
 	BSS        []DataSegment
 
-	Finalizers       []Finalizer
-	QueuedFinalizers []QueuedFinalizer
-	OSThreads        []OSThread
-	MemStats         map[string]uint64
+	Finalizers        []Finalizer
+	QueuedFinalizers  []QueuedFinalizer
+	OSThreads         []OSThread
+	MemStats          map[string]uint64
+	MemProfiles       []MemProfile
+	AllocationSamples []AllocationSample
 
 	Stats    ParseStats
 	Warnings []string
@@ -230,3 +232,19 @@ type ParseStats struct {
 	InterfaceFieldsDecoded int
 	EfaceFieldsDecoded     int
 }
+
+// MemProfile is genuine sampled allocation evidence emitted by the runtime.
+// Counters describe the bucket, not an individual object's lifetime.
+type MemProfile struct {
+	Bucket uint64            `json:"-"`
+	Size   uint64            `json:"allocation_size"`
+	Frames []AllocationFrame `json:"frames"`
+	Allocs uint64            `json:"bucket_allocs"`
+	Frees  uint64            `json:"bucket_frees"`
+}
+type AllocationFrame struct {
+	Function string `json:"function"`
+	File     string `json:"file"`
+	Line     uint64 `json:"line"`
+}
+type AllocationSample struct{ Address, Bucket uint64 }

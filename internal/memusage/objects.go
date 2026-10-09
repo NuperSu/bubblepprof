@@ -19,13 +19,14 @@ type ObjectOptions struct {
 
 type ObjectInfo struct {
 	SharedObject
-	Classification  string   `json:"classification"` // exclusive/shared relative to selection
-	Global          bool     `json:"global"`
-	OtherSystem     bool     `json:"other_system"`
-	OtherGoroutines bool     `json:"other_goroutines"`
-	Groups          []string `json:"groups"`
-	GroupCount      int      `json:"group_count"`
-	GroupsTruncated bool     `json:"groups_truncated"`
+	AllocationSamples []AllocationEvidence `json:"allocation_samples,omitempty"`
+	Classification    string               `json:"classification"` // exclusive/shared relative to selection
+	Global            bool                 `json:"global"`
+	OtherSystem       bool                 `json:"other_system"`
+	OtherGoroutines   bool                 `json:"other_goroutines"`
+	Groups            []string             `json:"groups"`
+	GroupCount        int                  `json:"group_count"`
+	GroupsTruncated   bool                 `json:"groups_truncated"`
 }
 
 type SizeBucket struct {
@@ -90,7 +91,7 @@ func (s *Snapshot) inspect(ctx context.Context, req Request) (*inspection, error
 
 func (s *Snapshot) objectInfo(id snapshotgraph.ObjectID, in *inspection) ObjectInfo {
 	o := s.analysis.Graph.Objects[id]
-	info := ObjectInfo{SharedObject: SharedObject{id, fmt.Sprintf("0x%x", o.Addr), o.Size, len(o.Children)}, Groups: []string{}}
+	info := ObjectInfo{AllocationSamples: cloneAllocations(s.allocations[id]), SharedObject: SharedObject{id, fmt.Sprintf("0x%x", o.Addr), o.Size, len(o.Children)}, Groups: []string{}}
 	_, selected := in.selected[id]
 	_, shared := in.outside[id]
 	switch {

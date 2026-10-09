@@ -804,44 +804,53 @@ func (p *parser) parsePanic() error {
 }
 
 func (p *parser) parseMemProf() error {
-	if _, err := p.r.Uvarint(); err != nil {
+	var m heapsnapshot.MemProfile
+	var err error
+	if m.Bucket, err = p.r.Uvarint(); err != nil {
 		return fmt.Errorf("bucket addr: %w", err)
 	}
-	if _, err := p.r.Uvarint(); err != nil {
+	if m.Size, err = p.r.Uvarint(); err != nil {
 		return fmt.Errorf("size: %w", err)
 	}
 	nstk, err := p.r.Uvarint()
 	if err != nil {
 		return fmt.Errorf("nstk: %w", err)
 	}
+	// Append only after reading each frame; never allocate from an untrusted count.
 	for i := uint64(0); i < nstk; i++ {
-		if _, err := p.r.String(); err != nil {
+		var f heapsnapshot.AllocationFrame
+		if f.Function, err = p.r.String(); err != nil {
 			return fmt.Errorf("frame[%d] func name: %w", i, err)
 		}
-		if _, err := p.r.String(); err != nil {
+		if f.File, err = p.r.String(); err != nil {
 			return fmt.Errorf("frame[%d] file: %w", i, err)
 		}
-		if _, err := p.r.Uvarint(); err != nil {
+		if f.Line, err = p.r.Uvarint(); err != nil {
 			return fmt.Errorf("frame[%d] line: %w", i, err)
 		}
+		m.Frames = append(m.Frames, f)
 	}
-	if _, err := p.r.Uvarint(); err != nil {
+	if m.Allocs, err = p.r.Uvarint(); err != nil {
 		return fmt.Errorf("allocs: %w", err)
 	}
-	if _, err := p.r.Uvarint(); err != nil {
+	if m.Frees, err = p.r.Uvarint(); err != nil {
 		return fmt.Errorf("frees: %w", err)
 	}
+	p.snap.MemProfiles = append(p.snap.MemProfiles, m)
 	p.snap.Stats.MemProfCount++
 	return nil
 }
 
 func (p *parser) parseAllocSample() error {
-	if _, err := p.r.Uvarint(); err != nil {
+	addr, err := p.r.Uvarint()
+	if err != nil {
 		return fmt.Errorf("addr: %w", err)
 	}
-	if _, err := p.r.Uvarint(); err != nil {
+	bucket, err := p.r.Uvarint()
+	if err != nil {
 		return fmt.Errorf("bucket: %w", err)
 	}
+	p.snap.AllocationSamples = append(p.snap.AllocationSamples, heapsnapshot.AllocationSample{Address: addr, Bucket: bucket})
 	p.snap.Stats.AllocSampleCount++
 	return nil
 }

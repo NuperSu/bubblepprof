@@ -16,14 +16,15 @@ import (
 // Snapshot owns a single resolved graph. Query and Close may be called concurrently.
 // Only the two invariant root sets are cached; selector results are never retained.
 type Snapshot struct {
-	mu       sync.Mutex
-	analysis *snapshotgraph.Analysis
-	labels   map[uint64]map[string]string
-	index    map[string]map[string][]uint64
-	diag     Diagnostics
-	opts     Options
-	cache    invariantReach
-	metadata SnapshotMetadata
+	mu          sync.Mutex
+	analysis    *snapshotgraph.Analysis
+	labels      map[uint64]map[string]string
+	index       map[string]map[string][]uint64
+	diag        Diagnostics
+	opts        Options
+	cache       invariantReach
+	metadata    SnapshotMetadata
+	allocations map[snapshotgraph.ObjectID][]AllocationEvidence
 }
 
 type SnapshotMetadata struct {
@@ -66,6 +67,7 @@ func loadSnapshot(ctx context.Context, r io.Reader, ra io.ReaderAt, recoverer La
 		return nil, err
 	}
 	s := newSnapshot(a, result.LabelsByGID, diag, opts)
+	s.retainAllocations(snap)
 	s.metadata.Parser = snap.Stats
 	s.metadata.LabelRecovery = result.Stats
 	s.metadata.Warnings = append(s.metadata.Warnings, snap.Warnings...)
@@ -173,6 +175,7 @@ func (s *Snapshot) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.analysis = nil
+	s.allocations = nil
 	s.labels = nil
 	s.index = nil
 	s.cache = invariantReach{}
