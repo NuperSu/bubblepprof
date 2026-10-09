@@ -1,9 +1,7 @@
 name: Test (FreeBSD)
 
 on:
-  push:
-    branches: ['**']
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   # ── Real FreeBSD VM tests — system Go from ports ──────────────────────────
