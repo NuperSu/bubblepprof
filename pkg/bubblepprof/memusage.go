@@ -2,6 +2,7 @@ package bubblepprof
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/NuperSu/bubblepprof/internal/memusage"
 )
@@ -21,6 +22,14 @@ const MemUsagePath = "/debug/memusage"
 // zero-value MemUsageOptions{} matches MemUsageHandler()'s defaults:
 // GC before the heap dump, exclude system goroutines.
 type MemUsageOptions struct {
+	// CaptureCooldown is measured from completion, including failed attempts.
+	CaptureCooldown time.Duration
+	// ScratchDir defaults to the system temporary directory.
+	ScratchDir string
+	// MinFreeBytes defaults to a 64 MiB advisory space preflight.
+	MinFreeBytes uint64
+	// MaxHeapDumpBytes is checked after capture; zero is unlimited.
+	MaxHeapDumpBytes int64
 	// DisableGCBeforeHeapDump turns off the runtime.GC() that
 	// MemUsageHandler runs immediately before debug.WriteHeapDump. The
 	// default (false) keeps the GC enabled.
@@ -113,6 +122,7 @@ func MemUsageHandlerWithOptions(opts MemUsageOptions) http.Handler {
 	computer := memusage.NewComputer(internal)
 	return memusage.Handler(computer.Compute, memusage.HandlerOptions{
 		Opts:                internal,
+		Cooldown:            opts.CaptureCooldown,
 		MaxRequestBodyBytes: opts.MaxRequestBodyBytes,
 	})
 }
@@ -121,7 +131,7 @@ func MemUsageHandlerWithOptions(opts MemUsageOptions) http.Handler {
 // memusage.Options. It exists so the bool-flip and zero-value defaults
 // can be unit-tested without spinning up an HTTP server.
 func (o MemUsageOptions) toInternal() memusage.Options {
-	return memusage.Options{
+	return memusage.Options{ScratchDir: o.ScratchDir, MinFreeBytes: o.MinFreeBytes, MaxHeapDumpBytes: o.MaxHeapDumpBytes,
 		GCBeforeHeapDump:           !o.DisableGCBeforeHeapDump,
 		IncludeSystemGoroutines:    o.IncludeSystemGoroutines,
 		DisableProcessMemoryReader: o.DisableProcessMemoryReader,

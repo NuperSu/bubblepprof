@@ -3,7 +3,9 @@ package bundle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	capturecontrol "github.com/NuperSu/bubblepprof/internal/capture"
 	"io"
 	"net/http"
 	"os"
@@ -19,7 +21,9 @@ type CaptureFunc func(context.Context, io.Writer, CaptureOptions) error
 
 // HandlerOptions configures Handler.
 type HandlerOptions struct {
-	Capture CaptureOptions
+	Gate     *capturecontrol.Gate
+	Cooldown time.Duration
+	Capture  CaptureOptions
 
 	CaptureFunc CaptureFunc
 
@@ -48,16 +52,16 @@ func Handler(hopts HandlerOptions) http.Handler {
 	if capture == nil {
 		capture = CaptureSelf
 	}
-	sem := hopts.Semaphore
-	if sem == nil {
-		sem = make(chan struct{}, 1)
+	gate := hopts.Gate
+	if gate == nil {
+		gate = capturecontrol.NewGate(hopts.Semaphore, hopts.Cooldown)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveBundle(w, r, capture, hopts.Capture, sem)
+		serveBundle(w, r, capture, hopts.Capture, gate)
 	})
 }
 
-func serveBundle(w http.ResponseWriter, r *http.Request, capture CaptureFunc, copts CaptureOptions, sem chan struct{}) {
+func serveBundle(w http.ResponseWriter, r *http.Request, capture CaptureFunc, copts CaptureOptions, gate *capturecontrol.Gate) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeJSONError(w, http.StatusMethodNotAllowed, &memusage.ErrorResponse{
@@ -83,16 +87,21 @@ func serveBundle(w http.ResponseWriter, r *http.Request, capture CaptureFunc, co
 
 	// Single-flight gate: WriteHeapDump is stop-the-world; concurrent
 	// callers get 429 instead of a queue.
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	default:
-		writeJSONError(w, http.StatusTooManyRequests, &memusage.ErrorResponse{
-			Error: "another memusage request is already running",
-			Code:  "busy",
-		})
+	release, err := gate.Acquire()
+	if err != nil {
+		var busy *capturecontrol.GateError
+		if errors.As(err, &busy) {
+			if busy.Cooldown {
+				w.Header().Set("Retry-After", busy.RetryAfterSeconds())
+			}
+			writeJSONError(w, http.StatusTooManyRequests, &memusage.ErrorResponse{Error: busy.Error(), Code: busy.Code()})
+		} else {
+			status, body := memusage.ErrorResponseFor(&memusage.CaptureFailedError{Cause: err})
+			writeJSONError(w, status, body)
+		}
 		return
 	}
+	defer release()
 
 	bw := &bundleResponseWriter{w: w}
 	if err := capture(r.Context(), bw, copts); err != nil {

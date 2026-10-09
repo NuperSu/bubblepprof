@@ -131,7 +131,12 @@ type ApplicationBuild struct {
 	Settings    map[string]string `json:"settings"`
 }
 type CaptureSettings struct {
-	GCBeforeHeapDump bool  `json:"gc_before_heap_dump"`
-	DisableRodata    bool  `json:"disable_rodata"`
-	MaxRodataBytes   int64 `json:"max_rodata_bytes"`
+	MinFreeBytes            uint64 `json:"min_free_bytes,omitempty"`
+	MaxHeapDumpBytes        int64  `json:"max_heap_dump_bytes,omitempty"`
+	MaxArtifactBytes        int64  `json:"max_artifact_bytes,omitempty"`
+	IncludeHeapProfile      bool   `json:"include_heap_profile,omitempty"`
+	IncludeGoroutineProfile bool   `json:"include_goroutine_profile,omitempty"`
+	GCBeforeHeapDump        bool   `json:"gc_before_heap_dump"`
+	DisableRodata           bool   `json:"disable_rodata"`
+	MaxRodataBytes          int64  `json:"max_rodata_bytes"`
 }

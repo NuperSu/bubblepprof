@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/NuperSu/bubblepprof/internal/capture"
 	"io"
 	"net/http"
+	"time"
 )
 
 // ComputeFunc is the request-side surface used by the handler. Production
@@ -14,6 +16,8 @@ type ComputeFunc func(ctx context.Context, req Request) (*Response, error)
 
 // HandlerOptions configures Handler.
 type HandlerOptions struct {
+	Gate                *capture.Gate
+	Cooldown            time.Duration
 	Opts                Options
 	MaxRequestBodyBytes int64
 
@@ -45,12 +49,12 @@ func Handler(compute ComputeFunc, hopts HandlerOptions) http.Handler {
 	if maxBody <= 0 {
 		maxBody = DefaultMaxRequestBodyBytes
 	}
-	sem := hopts.Semaphore
-	if sem == nil {
-		sem = make(chan struct{}, 1)
+	gate := hopts.Gate
+	if gate == nil {
+		gate = capture.NewGate(hopts.Semaphore, hopts.Cooldown)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serve(w, r, compute, hopts.Opts, maxBody, sem)
+		serve(w, r, compute, hopts.Opts, maxBody, gate)
 	})
 }
 
@@ -60,7 +64,7 @@ func serve(
 	compute ComputeFunc,
 	opts Options,
 	maxBody int64,
-	sem chan struct{},
+	gate *capture.Gate,
 ) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -109,16 +113,20 @@ func serve(
 
 	// Single-flight gate: WriteHeapDump is stop-the-world; concurrent
 	// callers get 429 instead of a queue.
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	default:
-		writeError(w, http.StatusTooManyRequests, &ErrorResponse{
-			Error: "another memusage request is already running",
-			Code:  "busy",
-		})
+	release, err := gate.Acquire()
+	if err != nil {
+		var busy *capture.GateError
+		if errors.As(err, &busy) {
+			if busy.Cooldown {
+				w.Header().Set("Retry-After", busy.RetryAfterSeconds())
+			}
+			writeError(w, http.StatusTooManyRequests, &ErrorResponse{Error: busy.Error(), Code: busy.Code()})
+		} else {
+			writeComputeError(w, &CaptureFailedError{Cause: err})
+		}
 		return
 	}
+	defer release()
 
 	resp, err := compute(r.Context(), req)
 	if err != nil {

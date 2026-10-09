@@ -28,6 +28,9 @@ type Request struct {
 
 // Options tune the behavior of Compute and ComputeFromAnalysis.
 type Options struct {
+	ScratchDir       string
+	MinFreeBytes     uint64
+	MaxHeapDumpBytes int64
 	// KeepReferenceProvenance retains object pointer slots and stack metadata.
 	// Enable for object/path inspection; ordinary queries do not require it.
 	KeepReferenceProvenance bool

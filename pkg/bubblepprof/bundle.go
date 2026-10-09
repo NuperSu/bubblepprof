@@ -1,9 +1,11 @@
 package bubblepprof
 
 import (
+	"github.com/NuperSu/bubblepprof/internal/capture"
 	"net/http"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/NuperSu/bubblepprof/internal/bundle"
 	"github.com/NuperSu/bubblepprof/internal/memusage"
@@ -43,6 +45,13 @@ var producer = sync.OnceValue(func() string {
 // matches BundleHandler()'s defaults: GC before the heap dump, rodata
 // snapshot enabled.
 type BundleOptions struct {
+	CaptureCooldown time.Duration
+	ScratchDir      string
+	MinFreeBytes    uint64
+	// MaxHeapDumpBytes is a post-capture limit; zero is unlimited.
+	MaxHeapDumpBytes int64
+	// MaxArtifactBytes caps the outgoing tar stream; zero is unlimited.
+	MaxArtifactBytes int64
 	// DisableGCBeforeHeapDump turns off the runtime.GC() that runs
 	// immediately before debug.WriteHeapDump. The default (false) keeps
 	// the GC enabled. A request may override per call with ?gc=0|1.
@@ -95,9 +104,9 @@ func BundleHandlerWithOptions(opts BundleOptions) http.Handler {
 	return bundleHandler(opts, nil)
 }
 
-func bundleHandler(opts BundleOptions, sem chan struct{}) http.Handler {
+func bundleHandler(opts BundleOptions, gate *capture.Gate) http.Handler {
 	return bundle.Handler(bundle.HandlerOptions{
-		Capture: bundle.CaptureOptions{
+		Capture: bundle.CaptureOptions{ScratchDir: opts.ScratchDir, MinFreeBytes: opts.MinFreeBytes, MaxHeapDumpBytes: opts.MaxHeapDumpBytes, MaxArtifactBytes: opts.MaxArtifactBytes,
 			GCBeforeHeapDump:        !opts.DisableGCBeforeHeapDump,
 			DisableRodata:           opts.DisableRodataCapture,
 			MaxRodataBytes:          opts.MaxRodataBytes,
@@ -105,7 +114,8 @@ func bundleHandler(opts BundleOptions, sem chan struct{}) http.Handler {
 			IncludeHeapProfile:      opts.IncludeHeapProfile,
 			IncludeGoroutineProfile: opts.IncludeGoroutineProfile,
 		},
-		Semaphore: sem,
+		Gate:     gate,
+		Cooldown: opts.CaptureCooldown,
 	})
 }
 
@@ -140,14 +150,18 @@ func Register(mux *http.ServeMux) {
 // RegisterWithOptions is Register with explicit options for each
 // endpoint.
 func RegisterWithOptions(mux *http.ServeMux, mo MemUsageOptions, bo BundleOptions) {
-	sem := make(chan struct{}, 1)
+	cooldown := max(mo.CaptureCooldown, bo.CaptureCooldown)
+	if mo.CaptureCooldown < 0 || bo.CaptureCooldown < 0 {
+		cooldown = -1
+	}
+	gate := capture.NewGate(nil, cooldown)
 
 	internal := mo.toInternal()
 	computer := memusage.NewComputer(internal)
 	mux.Handle(MemUsagePath, memusage.Handler(computer.Compute, memusage.HandlerOptions{
 		Opts:                internal,
 		MaxRequestBodyBytes: mo.MaxRequestBodyBytes,
-		Semaphore:           sem,
+		Gate:                gate,
 	}))
-	mux.Handle(MemUsageBundlePath, bundleHandler(bo, sem))
+	mux.Handle(MemUsageBundlePath, bundleHandler(bo, gate))
 }

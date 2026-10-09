@@ -23,6 +23,11 @@ const segmentChunkSize = 1 << 20
 
 // CaptureOptions configures CaptureSelf.
 type CaptureOptions struct {
+	ScratchDir       string
+	MinFreeBytes     uint64
+	MaxHeapDumpBytes int64
+	// MaxArtifactBytes bounds the complete outgoing tar stream (0 is unlimited).
+	MaxArtifactBytes int64
 	// GCBeforeHeapDump triggers runtime.GC() before the dump so the
 	// bundle reflects live memory rather than floating garbage.
 	GCBeforeHeapDump bool
@@ -50,8 +55,14 @@ type CaptureOptions struct {
 // are read-only program data, so the two views are consistent without
 // stopping the world twice.
 func CaptureSelf(ctx context.Context, w io.Writer, opts CaptureOptions) error {
+	if opts.MaxArtifactBytes < 0 {
+		return fmt.Errorf("maximum artifact bytes must be non-negative")
+	}
+	if opts.MaxArtifactBytes > 0 {
+		w = &artifactWriter{w: w, max: opts.MaxArtifactBytes}
+	}
 	dumpStart := time.Now().UTC().Format(time.RFC3339Nano)
-	path, cleanup, err := memusage.RuntimeHeapDumpCapturer{}.CaptureHeapDump(ctx, opts.GCBeforeHeapDump)
+	path, cleanup, err := (memusage.RuntimeHeapDumpCapturer{ScratchDir: opts.ScratchDir, MinFreeBytes: opts.MinFreeBytes, MaxHeapDumpBytes: opts.MaxHeapDumpBytes}).CaptureHeapDump(ctx, opts.GCBeforeHeapDump)
 	if err != nil {
 		return err
 	}
@@ -110,7 +121,7 @@ func CaptureSelf(ctx context.Context, w io.Writer, opts CaptureOptions) error {
 	if budget <= 0 {
 		budget = DefaultMaxRodataBytes
 	}
-	in.Meta.CaptureSettings = &CaptureSettings{opts.GCBeforeHeapDump, opts.DisableRodata, budget}
+	in.Meta.CaptureSettings = &CaptureSettings{GCBeforeHeapDump: opts.GCBeforeHeapDump, DisableRodata: opts.DisableRodata, MaxRodataBytes: budget, MinFreeBytes: opts.MinFreeBytes, MaxHeapDumpBytes: opts.MaxHeapDumpBytes, MaxArtifactBytes: opts.MaxArtifactBytes, IncludeHeapProfile: opts.IncludeHeapProfile, IncludeGoroutineProfile: opts.IncludeGoroutineProfile}
 	if info, ok := debug.ReadBuildInfo(); ok {
 		build := &ApplicationBuild{Path: info.Path, MainVersion: info.Main.Version, Settings: map[string]string{}}
 		for _, setting := range info.Settings {

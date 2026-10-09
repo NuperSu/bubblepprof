@@ -6,9 +6,11 @@ package capture
 import (
 	"context"
 	"fmt"
+	"github.com/NuperSu/bubblepprof/internal/diskspace"
 	"io"
 	"os"
 	"runtime"
+	"runtime/trace"
 )
 
 // HeapDumpWriter writes the calling process heap dump to the file
@@ -22,6 +24,14 @@ type HeapDumpWriter interface {
 type CaptureOptions struct {
 	// GCBeforeHeapDump runs runtime.GC() before WriteHeapDump.
 	GCBeforeHeapDump bool
+	// ScratchDir defaults to the system temporary directory.
+	ScratchDir string
+	// MinFreeBytes defaults to a modest 64 MiB preflight on supported systems.
+	MinFreeBytes uint64
+	// MaxHeapDumpBytes is checked after WriteHeapDump (0 is unlimited).
+	MaxHeapDumpBytes int64
+	// CheckSpace can replace the production preflight in internal tests.
+	CheckSpace func(string, uint64) error
 
 	// HeapDumpWriter writes the heap dump. Defaults to
 	// RuntimeHeapDumpWriter when nil.
@@ -57,9 +67,12 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 		return nil, err
 	}
 
+	if opts.MaxHeapDumpBytes < 0 {
+		return nil, fmt.Errorf("maximum heap dump bytes must be non-negative")
+	}
 	opts = withDefaults(opts)
 
-	tmpDir, err := os.MkdirTemp("", "bubblepprof-capture-*")
+	tmpDir, err := os.MkdirTemp(opts.ScratchDir, "bubblepprof-capture-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
@@ -70,8 +83,13 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 		}
 	}()
 
+	if err := opts.CheckSpace(tmpDir, opts.MinFreeBytes); err != nil {
+		return nil, err
+	}
 	if opts.GCBeforeHeapDump {
+		region := trace.StartRegion(ctx, "memusage/gc_pre")
 		opts.GC()
+		region.End()
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -83,7 +101,10 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 		return nil, fmt.Errorf("create heap dump temp file: %w", err)
 	}
 
-	if err := opts.HeapDumpWriter.WriteHeapDump(heapFile.Fd()); err != nil {
+	region := trace.StartRegion(ctx, "memusage/write_heap_dump")
+	writeErr := opts.HeapDumpWriter.WriteHeapDump(heapFile.Fd())
+	region.End()
+	if err := writeErr; err != nil {
 		_ = heapFile.Close()
 		return nil, fmt.Errorf("write heap dump: %w", err)
 	}
@@ -97,6 +118,14 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 		return nil, fmt.Errorf("stat heap dump: %w", err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		heapFile.Close()
+		return nil, err
+	}
+	if opts.MaxHeapDumpBytes > 0 && heapInfo.Size() > opts.MaxHeapDumpBytes {
+		heapFile.Close()
+		return nil, fmt.Errorf("heap dump size %d exceeds limit %d", heapInfo.Size(), opts.MaxHeapDumpBytes)
+	}
 	c := &Captured{
 		HeapDump:     heapFile,
 		HeapDumpSize: heapInfo.Size(),
@@ -113,6 +142,9 @@ func Capture(ctx context.Context, opts CaptureOptions) (*Captured, error) {
 func withDefaults(opts CaptureOptions) CaptureOptions {
 	if opts.HeapDumpWriter == nil {
 		opts.HeapDumpWriter = RuntimeHeapDumpWriter{}
+	}
+	if opts.CheckSpace == nil {
+		opts.CheckSpace = diskspace.Check
 	}
 	if opts.GC == nil {
 		opts.GC = runtime.GC

@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"runtime"
-	"runtime/debug"
 	"runtime/trace"
 
 	"github.com/NuperSu/bubblepprof/internal/addrspace"
+	"github.com/NuperSu/bubblepprof/internal/capture"
 	"github.com/NuperSu/bubblepprof/internal/heaplabels"
 	"github.com/NuperSu/bubblepprof/internal/heapsnapshot"
 	"github.com/NuperSu/bubblepprof/internal/runtimelayout"
@@ -26,42 +24,18 @@ type HeapDumpCapturer interface {
 // RuntimeHeapDumpCapturer is the production implementation. It writes
 // debug.WriteHeapDump output into a freshly created temp file and seeks
 // back to offset 0 so the caller can parse directly.
-type RuntimeHeapDumpCapturer struct{}
+type RuntimeHeapDumpCapturer struct {
+	ScratchDir       string
+	MinFreeBytes     uint64
+	MaxHeapDumpBytes int64
+}
 
-// CaptureHeapDump implements HeapDumpCapturer.
-func (RuntimeHeapDumpCapturer) CaptureHeapDump(ctx context.Context, gcBefore bool) (string, func(), error) {
-	if err := ctx.Err(); err != nil {
-		return "", nil, err
-	}
-	f, err := os.CreateTemp("", "bubblepprof-memusage-*.heap")
+func (c RuntimeHeapDumpCapturer) CaptureHeapDump(ctx context.Context, gcBefore bool) (string, func(), error) {
+	dump, err := capture.Capture(ctx, capture.CaptureOptions{GCBeforeHeapDump: gcBefore, ScratchDir: c.ScratchDir, MinFreeBytes: c.MinFreeBytes, MaxHeapDumpBytes: c.MaxHeapDumpBytes})
 	if err != nil {
-		return "", nil, fmt.Errorf("create heap dump temp file: %w", err)
-	}
-	cleanup := func() {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-	}
-
-	if gcBefore {
-		region := trace.StartRegion(ctx, "memusage/gc_pre")
-		runtime.GC()
-		region.End()
-	}
-	if err := ctx.Err(); err != nil {
-		cleanup()
 		return "", nil, err
 	}
-
-	region := trace.StartRegion(ctx, "memusage/write_heap_dump")
-	debug.WriteHeapDump(f.Fd())
-	region.End()
-
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("rewind heap dump: %w", err)
-	}
-	runtime.KeepAlive(f)
-	return f.Name(), cleanup, nil
+	return dump.HeapDump.Name(), dump.Cleanup, nil
 }
 
 // LabelRecoverer is the interface used by Compute to recover heap-native
@@ -130,7 +104,7 @@ type Computer struct {
 // NewComputer returns a Computer wired to the runtime implementations.
 func NewComputer(opts Options) *Computer {
 	return &Computer{
-		Capturer:  RuntimeHeapDumpCapturer{},
+		Capturer:  RuntimeHeapDumpCapturer{ScratchDir: opts.ScratchDir, MinFreeBytes: opts.MinFreeBytes, MaxHeapDumpBytes: opts.MaxHeapDumpBytes},
 		Recoverer: DefaultLabelRecoverer{},
 		Opts:      opts,
 	}
@@ -184,7 +158,7 @@ func (c *Computer) Compute(ctx context.Context, req Request) (*Response, error) 
 	}
 	capturer := c.Capturer
 	if capturer == nil {
-		capturer = RuntimeHeapDumpCapturer{}
+		capturer = RuntimeHeapDumpCapturer{ScratchDir: c.Opts.ScratchDir, MinFreeBytes: c.Opts.MinFreeBytes, MaxHeapDumpBytes: c.Opts.MaxHeapDumpBytes}
 	}
 	recoverer := c.Recoverer
 	if recoverer == nil {
