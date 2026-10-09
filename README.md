@@ -394,3 +394,39 @@ goroutines participate in matching via `-include-system`, preserving existing be
 These intersections can overlap each other. Separate selectors can reach the same
 objects, so their totals are not additive. Neither subtraction establishes ownership
 or exclusivity relative to all other goroutines.
+
+## Reuse one offline snapshot
+
+Prepare a batch of existing AND label selectors in `queries.json`:
+
+```json
+[
+  {"labels": {"tenant": "atlas-bikes"}},
+  {"labels": {"tenant": "globex"}},
+  {"labels": {"tenant": "atlas-bikes", "role": "ingester"}}
+]
+```
+
+```bash
+bubblepprof explore capture.tar -queries queries.json
+```
+
+The JSON response includes `results` in request order, capture metadata, parser and
+resolved graph counts, label recovery statistics, warnings, unresolved reference
+counts, and sorted label key/value groups with goroutine IDs. An empty array `[]`
+reports metadata and labels without querying. Decode failures produce explicit
+query errors and a nonzero exit status rather than a misleading zero match.
+
+One session parses and builds the graph once. It retains objects, references,
+goroutine roots, global roots and available root provenance, recovered labels,
+and diagnostics. It lazily caches only global and system reachability, keeping
+cache memory bounded independently of the number of selectors. Closing the session
+releases the graph and cached sets; extracted bundle files are needed only during
+loading. The internal session API is experimental.
+
+Capture identity uses the existing bundle timestamp and producer metadata. Go version
+and architecture come from the authoritative heap dump parameters. Application build
+information is unavailable in the current bundle format. Validation status `parsed`
+means the parser accepted the dump; `diagnostics_present` calls for inspection of the
+warnings, label recovery, and unresolved reference counters. Neither status guarantees
+that all process references were represented by the runtime dump.

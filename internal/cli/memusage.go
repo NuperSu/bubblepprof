@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NuperSu/bubblepprof/internal/addrspace"
 	"github.com/NuperSu/bubblepprof/internal/bundle"
 	"github.com/NuperSu/bubblepprof/internal/memusage"
+	"github.com/NuperSu/bubblepprof/internal/offline"
 )
 
 // labelsFlag accumulates -labels k=v[,k=v...] values.
@@ -128,17 +128,12 @@ func loadBundle(target string, gc bool, timeout time.Duration) (*bundle.Bundle, 
 // analyzeBundle feeds an opened bundle into the shared analysis
 // pipeline.
 func analyzeBundle(ctx context.Context, b *bundle.Bundle, req memusage.Request, opts memusage.Options) (*memusage.Response, error) {
-	f, err := os.Open(b.HeapDumpPath)
+	s, err := offline.LoadBundle(ctx, b, opts)
 	if err != nil {
-		return nil, fmt.Errorf("open heap dump: %w", err)
+		return nil, err
 	}
-	defer f.Close()
-
-	var extra addrspace.Reader
-	if b.Segments != nil {
-		extra = b.Segments
-	}
-	return memusage.AnalyzeDump(ctx, f, f, extra, b.Warnings, req, opts)
+	defer s.Close()
+	return s.Query(ctx, req)
 }
 
 // openBundleSource returns a reader over the bundle bytes: the file

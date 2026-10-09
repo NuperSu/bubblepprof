@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"reflect"
 	"runtime"
 	"runtime/pprof"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	"github.com/NuperSu/bubblepprof/internal/bundle"
 	"github.com/NuperSu/bubblepprof/internal/cli"
 	"github.com/NuperSu/bubblepprof/internal/memusage"
+	"github.com/NuperSu/bubblepprof/internal/offline"
 )
 
 // startLabeledGoroutine launches a goroutine carrying the given pprof
@@ -271,5 +274,90 @@ func TestRegister_MountsBothEndpoints(t *testing.T) {
 	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, MemUsageBundlePath, nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST %s = %d, want 405", MemUsageBundlePath, rr.Code)
+	}
+}
+
+func TestBundleReusableSessionParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live heap dump")
+	}
+	key, value := strings.Clone("session"), strings.Clone("parity")
+	stop := startLabeledGoroutine(t, pprof.Labels(key, value), 1<<20)
+	defer stop()
+	b := captureBundle(t)
+	labels := map[string]string{key: value}
+	want, err := analyzeOpenedBundle(t, b, labels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := offline.LoadBundle(context.Background(), b, memusage.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	// Loading consumes all lazy content reads. Queries need no bundle files.
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		got, err := s.Query(context.Background(), memusage.Request{Labels: labels})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	}
+	if s.Metadata().Graph.Objects == 0 || len(s.GoroutineIDs(key, value)) == 0 {
+		t.Fatal("missing metadata or labels")
+	}
+}
+
+func TestBundleExploreBatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live heap dump")
+	}
+	key, value := strings.Clone("batch"), strings.Clone("parity")
+	stop := startLabeledGoroutine(t, pprof.Labels(key, value), 1<<20)
+	defer stop()
+	rr := httptest.NewRecorder()
+	BundleHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, MemUsageBundlePath, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatal(rr.Body.String())
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "capture.tar")
+	queries := filepath.Join(dir, "queries.json")
+	if err := os.WriteFile(path, rr.Body.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queries, []byte(`[{"labels":{"batch":"parity"}},{"labels":{"batch":"absent"}},{"labels":{"batch":"parity"}}]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if code := cli.Main([]string{"explore", path, "-queries", queries}, &out, &stderr); code != 0 {
+		t.Fatalf("%d: %s %s", code, &out, &stderr)
+	}
+	var got struct {
+		Results  []memusage.Response
+		Metadata memusage.SnapshotMetadata
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Results) != 3 || !reflect.DeepEqual(got.Results[0], got.Results[2]) || got.Results[0].MatchedGoroutines == 0 || got.Results[1].MatchedGoroutines != 0 || got.Metadata.Graph.Objects == 0 {
+		t.Fatalf("incorrect batch: %+v", got)
+	}
+	s, err := offline.OpenSnapshot(context.Background(), path, memusage.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	want, err := s.Query(context.Background(), memusage.Request{Labels: map[string]string{key: value}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(*want, got.Results[0]) {
+		t.Fatal("batch differs from session")
 	}
 }

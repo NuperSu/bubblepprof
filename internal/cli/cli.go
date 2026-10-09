@@ -43,6 +43,10 @@ Usage:
         List exact pprof label sets and their goroutine counts without
         building the heap object graph or computing reachability.
 
+  bubblepprof explore <bundle-file-or-url> -queries queries.json
+        Evaluate a JSON array of label requests using one graph, and report
+        capture metadata, diagnostics, and indexed label groups.
+
 Run "bubblepprof <command> -h" for command flags.
 `
 
@@ -83,6 +87,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return runFetch(args[1:], stdout, stderr)
 	case "memusage":
 		return runMemUsage(args[1:], stdout, stderr)
+	case "explore":
+		return runExplore(args[1:], stdout, stderr)
 	case "bubbles":
 		return runBubbles(args[1:], stdout, stderr)
 	case "help", "-h", "--help":

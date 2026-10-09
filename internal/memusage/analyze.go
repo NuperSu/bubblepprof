@@ -14,7 +14,7 @@ import (
 
 // AnalyzeDump runs the analyse side of the /debug/memusage pipeline
 // against an already-captured heap dump: parse, heap-native label
-// recovery, graph build, and the single reachability pass from matched
+// recovery, graph build, and a reusable session query from matched
 // roots. It is the shared core behind both the in-process endpoint
 // ((*Computer).Compute) and the external analyser (bundle + CLI), so
 // error codes and diagnostics are identical in both modes.
