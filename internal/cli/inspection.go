@@ -139,10 +139,19 @@ func runInspection(command string, args []string, stdout, stderr io.Writer) int 
 
 func writeInspectionText(w io.Writer, result any) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	allocation := func(o memusage.ObjectInfo) {
+		for _, sample := range o.AllocationSamples {
+			fmt.Fprintf(tw, "Sampled allocation evidence for %s: sample=%s offset=%d bucket=%s allocation_size=%d bucket_allocs=%d bucket_frees=%d\n", o.Address, sample.SampleAddress, sample.Offset, sample.BucketAddress, sample.Profile.Size, sample.Profile.Allocs, sample.Profile.Frees)
+			for _, f := range sample.Profile.Frames {
+				fmt.Fprintf(tw, "  allocation frame: %s %s:%d\n", f.Function, f.File, f.Line)
+			}
+		}
+	}
 	list := func(objects []memusage.ObjectInfo, truncated bool) {
 		fmt.Fprintln(tw, "ID\tADDRESS\tSHALLOW BYTES\tOUTGOING\tCLASSIFICATION\tGLOBAL\tOTHER SYSTEM\tOTHER GOROUTINES\tGROUPS (COUNT)")
 		for _, o := range objects {
 			fmt.Fprintf(tw, "%d\t%s\t%d\t%d\t%s\t%t\t%t\t%t\t%q (%d; truncated=%t)\n", o.ID, o.Address, o.Size, o.OutgoingReferences, o.Classification, o.Global, o.OtherSystem, o.OtherGoroutines, o.Groups, o.GroupCount, o.GroupsTruncated)
+			allocation(o)
 		}
 		fmt.Fprintf(tw, "objects shown: %d; truncated: %t\n", len(objects), truncated)
 	}
@@ -164,6 +173,7 @@ func writeInspectionText(w io.Writer, result any) {
 	}
 	explanation := func(r memusage.ObjectExplanation) {
 		fmt.Fprintf(tw, "\nObject %s (ID %d); shallow bytes: %d; classification: %s\n", r.Object.Address, r.Object.ID, r.Object.Size, r.Object.Classification)
+		allocation(r.Object)
 		fmt.Fprintf(tw, "root relationships: global=%t other_system=%t other_goroutines=%t\n", r.Object.Global, r.Object.OtherSystem, r.Object.OtherGoroutines)
 		fmt.Fprintf(tw, "groups by %q: %q; total: %d; truncated: %t\n", r.By, r.Object.Groups, r.Object.GroupCount, r.Object.GroupsTruncated)
 		for _, selection := range r.Selections {

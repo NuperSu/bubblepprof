@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"runtime/pprof"
 	"strings"
 	"testing"
@@ -24,8 +25,12 @@ func TestBundleExportPprof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live capture and go tool pprof")
 	}
+	rate := runtime.MemProfileRate
+	runtime.MemProfileRate = 1
+	defer func() { runtime.MemProfileRate = rate }()
 	stop := startLabeledGoroutine(t, pprof.Labels("phase5", "export"), 64<<10)
 	defer stop()
+	runtime.MemProfileRate = rate
 	rr := httptest.NewRecorder()
 	BundleHandlerWithOptions(BundleOptions{IncludeHeapProfile: true, IncludeGoroutineProfile: true}).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, MemUsageBundlePath, nil))
 	if rr.Code != 200 {
@@ -44,6 +49,25 @@ func TestBundleExportPprof(t *testing.T) {
 	want, err := s.Export(context.Background(), memusage.Request{Labels: map[string]string{"phase5": "export"}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	objects, e := s.Objects(context.Background(), memusage.Request{Labels: map[string]string{"phase5": "export"}}, memusage.ObjectOptions{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	sampledPayload := false
+	for _, o := range objects.Objects {
+		if o.Size == 64<<10 {
+			for _, sample := range o.AllocationSamples {
+				for _, frame := range sample.Profile.Frames {
+					if strings.Contains(frame.Function, "startLabeledGoroutine") {
+						sampledPayload = true
+					}
+				}
+			}
+		}
+	}
+	if !sampledPayload {
+		t.Fatal("runtime sampled payload allocation origin was not retained")
 	}
 	output := filepath.Join(dir, "reachability.pb.gz")
 	var stdout, stderr bytes.Buffer
