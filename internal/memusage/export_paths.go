@@ -146,7 +146,7 @@ func (s *Snapshot) ExportPprof(ctx context.Context, req Request, opts PprofOptio
 					continue
 				}
 				o := objects[step]
-				name := fmt.Sprintf("object 0x%x (%d shallow bytes)", o.Addr, o.Size)
+				name := fmt.Sprintf("object 0x%x shallow=%d bytes", o.Addr, o.Size)
 				ref := forest[step].reference
 				if forest[step].depth > 1 && ref.OffsetKnown {
 					name += fmt.Sprintf(" via pointer +0x%x", ref.Offset)

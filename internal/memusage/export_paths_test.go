@@ -83,10 +83,10 @@ func TestPprofPathsCoverageAndParity(t *testing.T) {
 		if !strings.Contains(names, "representative goroutine 1") || !strings.Contains(names, "root stack in workerA") || !strings.Contains(names, `selection "tenant"="a"`) {
 			t.Fatal(names)
 		}
-		if id == 2 && (!strings.Contains(names, "object 0x1000") || !strings.Contains(names, "object 0x3000 (64 shallow bytes) via pointer +0x8")) {
+		if id == 2 && (!strings.Contains(names, "object 0x1000") || !strings.Contains(names, "object 0x3000 shallow=64 bytes via pointer +0x8")) {
 			t.Fatal("missing interior-pointer reference evidence", names)
 		}
-		if !strings.Contains(sample.Location[0].Line[0].Function.Name, fmt.Sprintf("object 0x%x (%d shallow bytes)", o.Addr, o.Size)) {
+		if !strings.Contains(sample.Location[0].Line[0].Function.Name, fmt.Sprintf("object 0x%x shallow=%d bytes", o.Addr, o.Size)) {
 			t.Fatal("leaf is not the sampled object", names)
 		}
 		for _, loc := range sample.Location {
