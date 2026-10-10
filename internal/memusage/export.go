@@ -34,7 +34,7 @@ func (s *Snapshot) Export(ctx context.Context, req Request) (*ExportReport, erro
 // synthetic frames. Each object contributes to exactly one partition sample.
 // No reference path is presented as an allocation stack.
 func (r *ExportReport) Pprof() (*profile.Profile, error) {
-	p := &profile.Profile{SampleType: []*profile.ValueType{{Type: "reachable_objects", Unit: "count"}, {Type: "reachable_space", Unit: "bytes"}, {Type: "exclusive_objects", Unit: "count"}, {Type: "exclusive_space", Unit: "bytes"}, {Type: "shared_objects", Unit: "count"}, {Type: "shared_space", Unit: "bytes"}}, DefaultSampleType: "reachable_space", PeriodType: &profile.ValueType{Type: "space", Unit: "bytes"}, Period: 1, Comments: []string{r.Semantics}}
+	p := newPprof(r.Semantics)
 	// pprof values and aggregations are signed int64. Fail explicitly rather than wrap.
 	for _, k := range []string{"reachable", "exclusive", "shared"} {
 		if r.Summary.Metrics[k].Bytes > math.MaxInt64 {
@@ -64,4 +64,8 @@ func (r *ExportReport) Pprof() (*profile.Profile, error) {
 		p.Sample = append(p.Sample, &profile.Sample{Location: []*profile.Location{loc, rootLoc}, Value: values, Label: labels})
 	}
 	return p, p.CheckValid()
+}
+
+func newPprof(semantics string) *profile.Profile {
+	return &profile.Profile{SampleType: []*profile.ValueType{{Type: "reachable_objects", Unit: "count"}, {Type: "reachable_space", Unit: "bytes"}, {Type: "exclusive_objects", Unit: "count"}, {Type: "exclusive_space", Unit: "bytes"}, {Type: "shared_objects", Unit: "count"}, {Type: "shared_space", Unit: "bytes"}}, DefaultSampleType: "reachable_space", PeriodType: &profile.ValueType{Type: "space", Unit: "bytes"}, Period: 1, Comments: []string{semantics}}
 }
