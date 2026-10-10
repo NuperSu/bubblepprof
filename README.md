@@ -11,8 +11,9 @@ See [capture controls](docs/capture-reliability.md) and
 
 The required features in roadmap phases 0–6 are complete, and the existing
 cross-platform CI matrix is confirmed passing, including the Linux ARM PIE
-pprof export fix. Portable packaging is ready; the first public release has
-not been published. See [completion status and future work](docs/project-status.md).
+pprof export fix. [v0.3.0](https://github.com/NuperSu/bubblepprof/releases/tag/v0.3.0)
+is the first release of the completed roadmap, with portable CLI archives and
+checksums. See [completion status and future work](docs/project-status.md).
 
 It works in two modes:
 

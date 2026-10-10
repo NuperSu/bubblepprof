@@ -5,7 +5,7 @@
 Build from a tagged module with Go:
 
 ```sh
-go install github.com/NuperSu/bubblepprof/cmd/bubblepprof@latest
+go install github.com/NuperSu/bubblepprof/cmd/bubblepprof@v0.3.0
 bubblepprof version
 ```
 
@@ -13,9 +13,9 @@ The `Portable release` GitHub Actions workflow also produces CLI archives,
 documentation, the license, and `SHA256SUMS`. A manual workflow run builds
 `dev` artifacts; a `v*` tag builds versioned artifacts and prepares a **draft**
 GitHub release after tests pass. Review the draft and notes before publishing.
-The first public release has not been published as part of this work. Packaging
-and the release workflow are ready; version selection, tagging, draft review,
-and publication remain release steps. See [project status](project-status.md).
+[v0.3.0](https://github.com/NuperSu/bubblepprof/releases/tag/v0.3.0) is the first
+release of the completed roadmap, following v0.2.2. Its assets provide the
+platform archives and checksums. See [project status](project-status.md).
 
 Download the archive for the analysis machine, verify its checksum, and extract
 it. The CLI's architecture need not match the captured application's architecture:

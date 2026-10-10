@@ -23,10 +23,10 @@ selectors are not additive.
 
 ## Release publication
 
-Portable archives and checksums have been built and verified for 11 targets.
-The release workflow can prepare a draft from a version tag. No first public
-release was published as part of this work; choosing a version, creating its tag,
-reviewing the draft, and publishing remain release steps. See [releases](releases.md).
+[v0.3.0](https://github.com/NuperSu/bubblepprof/releases/tag/v0.3.0) is the first
+release of the completed roadmap, following v0.2.2. It provides portable archives
+and checksums for 11 targets. The release workflow tests and packages a version
+tag, then prepares a draft for review before publication. See [releases](releases.md).
 
 ## Optional work within the roadmap
 
