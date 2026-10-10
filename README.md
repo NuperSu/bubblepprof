@@ -7,6 +7,13 @@ Start with the [getting-started guide](docs/getting-started.md), then follow the
 See [capture controls](docs/capture-reliability.md) and
 [portable releases and supported platforms](docs/releases.md).
 
+## Project status
+
+The required features in roadmap phases 0–6 are complete, and the existing
+cross-platform CI matrix is confirmed passing, including the Linux ARM PIE
+pprof export fix. Portable packaging is ready; the first public release has
+not been published. See [completion status and future work](docs/project-status.md).
+
 It works in two modes:
 
 - **In-process**: `POST /debug/memusage` captures and analyses a heap dump inside the profiled process and returns JSON.
@@ -32,7 +39,7 @@ It captures a heap dump, recovers pprof labels from goroutine runtime state, and
 | Question | where are allocations coming from? | how much heap is reachable from job/tenant X? |
 | Mechanism | sampling (allocs/heap) | stop-the-world heap dump + BFS |
 | Requires standard pprof labels? | no | yes (without labels the endpoint always returns 0 matches) |
-| Cost per query | low | high (stop-the-world) |
+| Capture/query cost | low-cost sampled profiles | stop-the-world capture; saved-snapshot queries reuse the graph within a session |
 
 ## Install
 
@@ -291,8 +298,9 @@ go run ./examples/log_ingest -tenants 8 -shards 4 -dict-mb 256
 One long-lived ingester goroutine per `(tenant, stream, shard)` keeps references to a ring of
 in-memory log chunks held **only on its own stack** — no chunk is shared between workloads.
 Every ingester also references a single process-wide interned-label dictionary, which is the
-**only** shared memory and the sole source of `global_overlap`. Labels form a six-dimension
-hierarchy you can drill through:
+main intentionally shared bulk allocation. Runtime and library structures can also
+contribute sharing and global overlap. Labels form a six-dimension hierarchy you
+can drill through:
 
 ```
 service = log-ingester
@@ -364,7 +372,7 @@ Latency is proportional to live heap size. Concurrent callers receive `429 Too M
 
 See [`docs/limitations.md`](docs/limitations.md) for a complete list. Key points:
 
-- Stable runtime layout families are **Go 1.24–1.27**, with little-endian 32-bit and 64-bit pointer widths. Go 1.27.2 passed local Linux amd64/386 integration suites. See [supported platforms and CI versions](docs/releases.md#supported-platforms) for native coverage and cross-compiled release targets. Gotip layouts are experimental and revision-sensitive; unknown layouts return `unsupported_runtime`.
+- Stable runtime layout families are **Go 1.24–1.27**, with little-endian 32-bit and 64-bit pointer widths. The cross-platform CI matrix is confirmed passing. See [supported platforms and CI versions](docs/releases.md#supported-platforms) for runtime coverage and cross-compiled release targets. Gotip layouts are experimental and revision-sensitive; unknown layouts return `unsupported_runtime`.
 - Ordinary string literal labels are recovered via the in-process reader on Linux, macOS, FreeBSD, and Windows. On FreeBSD specifically, recovery requires *either* procfs mounted at `/proc` (the reader uses `/proc/self/mem`) *or* a non-PIE binary (the reader falls back to the on-disk ELF; PIE would shift the runtime addresses and break that fallback). On other platforms — or on FreeBSD when neither condition holds — literal labels return `string_missing`.
 - Sizes are **shallow** (the object itself, not transitive) and counts are **BFS-reachable** from the matched goroutine roots, not total process heap.
 - Global and system overlap is reported separately; it is not subtracted automatically.

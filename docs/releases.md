@@ -13,7 +13,9 @@ The `Portable release` GitHub Actions workflow also produces CLI archives,
 documentation, the license, and `SHA256SUMS`. A manual workflow run builds
 `dev` artifacts; a `v*` tag builds versioned artifacts and prepares a **draft**
 GitHub release after tests pass. Review the draft and notes before publishing.
-This implementation does not create a version tag or publish a release.
+The first public release has not been published as part of this work. Packaging
+and the release workflow are ready; version selection, tagging, draft review,
+and publication remain release steps. See [project status](project-status.md).
 
 Download the archive for the analysis machine, verify its checksum, and extract
 it. The CLI's architecture need not match the captured application's architecture:
@@ -56,8 +58,9 @@ Version identifiers are restricted to letters, digits, dots, _, +, and -.
 Stable runtime layout families are Go 1.24, 1.25, 1.26, and 1.27,
 little-endian pointer widths of 4 or 8 bytes. The CI version matrix selects
 `1.24.13`, `1.25.14`, `1.26.9`, and `1.27.2`, plus experimental `gotip`.
-Go 1.27.2 has passed local Linux amd64/386 integration suites. Gotip is
-experimental; supported devel layouts are revision-sensitive and local gotip
+The existing cross-platform CI matrix is confirmed passing following the Linux
+ARM PIE pprof export fix. Go 1.27.2 also passed local Linux amd64/386 integration
+suites. Gotip is experimental; supported devel layouts are revision-sensitive and local gotip
 validation is skipped unless requested. Other runtime versions/layouts fail
 explicitly rather than silently returning a measurement.
 
@@ -71,6 +74,9 @@ analysis itself is platform independent. See [limitations](limitations.md).
 Existing per-OS workflows retain their complete selected Go-version and
 architecture matrices. Their full suites include parser/graph tests, runtime
 label recovery, real capture/CLI workflows, and platform-specific reader tests.
+Linux ARMv7 runtime tests execute under QEMU; other Linux targets use native
+execution. CI passing does not imply native validation of every packaged target:
+Windows arm64 remains cross-compiled and FreeBSD remains best effort.
 The release workflow adds native Linux 64/32-bit, macOS Intel/ARM, and Windows
 64-bit tests and CLI builds before packaging all targets. It does not replace
 or weaken existing CI. Local cross-compilation validates buildability; only

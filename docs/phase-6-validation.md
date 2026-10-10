@@ -1,5 +1,20 @@
 # Phase 6 validation
 
+## CI confirmation
+
+The existing cross-platform CI matrix was confirmed passing on 2026-10-10 after
+the Linux ARM PIE pprof export test fix. Go 1.25+ can build `pprof` on demand for
+the host while inheriting the target's cross compiler. The export integration
+test now disables cgo only for that subprocess, preserving the outer PIE tests.
+Regression coverage supplies an unusable C compiler and checks all three byte
+sample types.
+
+Local follow-up validation passed `go test -buildmode=pie ./...`,
+`GOARCH=386 go test ./...`, and the ARMv7 export integration test under QEMU.
+The local ARM run used a non-PIE binary because the cross C compiler was not
+installed; the ARM PIE configuration is covered by the confirmed CI run.
+See [project status](project-status.md) for completion and release steps.
+
 ## Implementation
 
 - `inspect` shows capture/build/settings and analysis diagnostics.
