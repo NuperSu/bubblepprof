@@ -499,8 +499,16 @@ structural summaries, compatibility checks, and exact JSON byte deltas.
 ```sh
 bubblepprof export capture.tar --labels tenant=atlas-bikes --format pprof -o reachable.pb.gz
 go tool pprof -top -sample_index=shared_space reachable.pb.gz
+
+# Object reference hierarchy for imported profiler views, including GoLand
+bubblepprof export capture.tar --labels tenant=atlas-bikes --pprof-mode paths -o paths.pb.gz
 ```
 
 See [pprof interoperability](docs/pprof-interop.md) for optional standard profile
 capture, sampled allocation evidence, JSON reports, and Pyroscope validation.
-The export uses explicitly synthetic summary frames, not allocation stacks.
+The default export uses synthetic summary frames. Opt-in `--pprof-mode paths`
+adds representative goroutines, stack-root functions, objects, and pointer
+offsets, with one sample per reachable object and the same exact totals.
+Both views are synthetic reference representations, not allocation stacks.
+Paths mode requires building the updated source; it is not in the published
+v0.3.0 binaries. See the [GoLand fixture and validation](docs/pprof-paths-validation.md).

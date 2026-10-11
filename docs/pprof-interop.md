@@ -62,12 +62,12 @@ The gzip-compressed profile has six custom sample types:
 | `shared_objects` | count | Objects also reachable from other modeled roots |
 | `shared_space` | bytes | Their shallow sizes |
 
-Two disjoint aggregate samples represent exclusive and shared objects. Each
+By default (`--pprof-mode summary`), two disjoint aggregate samples represent exclusive and shared objects. Each
 object contributes once to the reachable total and once to its partition.
 Zero-object partitions are omitted. A zero-sized object still contributes to
 object counts. Results for separate selectors are not additive.
 
-The hierarchy contains only explicitly named `[bubblepprof summary]` frames:
+The summary hierarchy contains only explicitly named `[bubblepprof summary]` frames:
 selected reachable set, then exclusive/shared reachability. These are synthetic
 summary categories, **not allocation stacks or execution stacks**. No object
 address is turned into a code location, no reference path is disguised as a
@@ -80,6 +80,80 @@ Original selector labels are attached to samples. The profile timestamp uses
 the dump capture start when available, otherwise the bundle creation timestamp.
 Byte totals beyond signed int64 are rejected explicitly because pprof uses
 signed sample values; native JSON supports uint64 bytes.
+
+## Export reference paths for GoLand
+
+Use the opt-in paths mode for an object-level hierarchy in imported pprof views:
+
+Paths mode is a source feature added after v0.3.0; the published v0.3.0 binaries
+provide summary export only. Build the updated checkout with
+`go build -o ./bubblepprof ./cmd/bubblepprof` and invoke `./bubblepprof`, or use
+the locally generated `dist/goland/bubblepprof` for the fixture below.
+
+```sh
+bubblepprof export capture.tar --labels role=heap-scan \
+  --format pprof --pprof-mode paths -o heap-scan-paths.pb.gz
+go tool pprof -top -cum -sample_index=reachable_space heap-scan-paths.pb.gz
+```
+
+Open `heap-scan-paths.pb.gz` as a profiler snapshot in GoLand, select
+`reachable_space`, `exclusive_space`, or `shared_space`, and expand the flame
+graph or tree. The profile contains this hierarchy:
+
+```text
+[bubblepprof reference] selection "role"="heap-scan"
+  [bubblepprof reference] shared reachability
+    [bubblepprof reference] representative goroutine 55
+      [bubblepprof reference] root stack in main.main.func6
+        [bubblepprof reference] object 0x… shallow=4096 bytes
+          [bubblepprof reference] object 0x… shallow=1048576 bytes via pointer +0x8
+```
+
+These names use genuine snapshot evidence: goroutine IDs, available stack-root
+function names or other root kinds, allocation addresses, recorded shallow
+sizes, and pointer-slot offsets when retained. The numeric pointer offset is in
+the preceding allocation. Unknown offsets are omitted. Heap addresses are never
+encoded as code addresses, and no source files, concrete types, or field names
+are invented. Source navigation and disassembly are not supplied by this view.
+
+Every distinct selected reachable object contributes **one sample**, including
+zero-sized objects. All six metric totals match summary export and native
+analysis. Shared objects are counted once, using one shortest representative path
+from the selected roots. Goroutines are ordered by ID, then roots and children
+use dump record order to break ties. The same capture and options produce the
+same profile. A representative goroutine is not an owner; a large shared cache
+can appear beneath one goroutine even though many others reach it.
+
+The terminal object's shallow bytes/count contribute the sample value. Its
+ancestor frames accumulate values from descendant samples. Cumulative widths
+are not dominator retained sizes. Reference paths are synthetic profiler stacks,
+not observed execution or allocation stacks. Use the native `explain` command
+to investigate alternative paths and sharing relationships.
+
+`--max-path-depth 64` is the default and limits object frames per sample; the
+selection, partition, goroutine, and root frames are additional. Longer paths
+keep the first half and last half of the object frames, with a named omission
+marker between them. The marker never means that a direct pointer joins those
+segments. Every terminal object and its values remain present.
+Use `--max-path-depth 0` for complete paths. Negative limits and `1` are rejected;
+explicit depth options require pprof paths mode, and pprof options cannot be
+combined with JSON export.
+
+Paths export uses one predecessor forest rather than searching separately for
+every object. Extra traversal storage is O(V); bounded profile construction is
+O(V+E+R+G log G+N×D), where R is modeled root references, G is goroutines, N is
+reachable objects, and D is displayed path depth. Unlimited paths can require quadratic output on a long
+chain. All objects are exported by default, so large captures can still produce
+large profiles and expensive IDE imports. Ctrl+C cancels loading and analysis
+where their cancellation checks run.
+
+Samples retain original selector labels and include `bubblepprof.object_address`
+and `bubblepprof.object_id`. If a selector uses either metadata key, its value is
+preserved and the metadata value is appended. Addresses/IDs are snapshot-local.
+Function names carry the useful hierarchy even when an importer hides labels or
+profile comments. See [GoLand fixture validation](pprof-paths-validation.md) for
+the generated real-capture fixture and import checklist. GoLand UI behavior
+awaits that manual import; pprof format, paths, and totals are tested automatically.
 
 ## Inspect genuine allocation evidence
 
@@ -101,7 +175,7 @@ Objects without an associated sample receive no invented allocation origin.
 Missing buckets, ambiguous duplicate buckets, and samples outside known objects
 produce diagnostics. These associations are confined to one snapshot.
 
-The synthetic reachability export intentionally excludes allocation frames.
+Both synthetic reachability modes intentionally exclude allocation frames.
 Use an ordinary heap profile to study sampled allocations, and native object
 inspection to relate available sampled origins to current reference evidence.
 
